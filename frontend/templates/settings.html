@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}设置 - 自动套磁系统{% endblock %}
+
+{% block extra_scripts %}
+    <script src="{{ url_for('static', filename='js/settings.js') }}"></script>
+{% endblock %}
+
+{% block content %}
+    <div class="container mt-4">
+        <div class="row">
+            <!-- LLM配置功能已移除 -->
+            
+            <!-- 文件上传设置 -->
+            <div class="col-lg-6 col-md-12 mb-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="bi bi-cloud-upload"></i> 文件上传设置</h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="upload-settings-form">
+                            <div class="mb-3">
+                                <label for="max-file-size" class="form-label">最大文件大小 (MB)</label>
+                                <input type="number" class="form-control" id="max-file-size" value="16" min="1" max="100">
+                                <div class="form-text">单个文件的最大上传大小</div>
+                            </div>
+                            <div class="mb-3">
+                                <label for="allowed-file-types" class="form-label">允许的文件类型</label>
+                                <input type="text" class="form-control" id="allowed-file-types" 
+                                       value=".docx,.pdf,.doc,.txt,.jpg,.jpeg,.png" readonly>
+                                <div class="form-text">系统支持的文件格式</div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">上传目录</label>
+                                <input type="text" class="form-control" value="uploads/" readonly>
+                            </div>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-save"></i> 保存设置
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 日志设置 -->
+            <div class="col-lg-6 col-md-12 mb-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="bi bi-journal-text"></i> 日志设置</h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="log-settings-form">
+                            <div class="mb-3">
+                                <label for="log-level" class="form-label">日志级别</label>
+                                <select class="form-select" id="log-level">
+                                    <option value="DEBUG">DEBUG</option>
+                                    <option value="INFO" selected>INFO</option>
+                                    <option value="WARNING">WARNING</option>
+                                    <option value="ERROR">ERROR</option>
+                                    <option value="CRITICAL">CRITICAL</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label for="log-file" class="form-label">日志文件</label>
+                                <input type="text" class="form-control" id="log-file" value="app.log">
+                            </div>
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="console-log" checked>
+                                    <label class="form-check-label" for="console-log">
+                                        启用控制台日志输出
+                                    </label>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-save"></i> 保存设置
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 数据库信息 -->
+            <div class="col-lg-6 col-md-12 mb-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="bi bi-database"></i> 数据库信息</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">数据库类型</label>
+                            <input type="text" class="form-control" value="SQLite" readonly>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">数据库文件</label>
+                            <input type="text" class="form-control" id="database-path" value="auto_email.db" readonly>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">连接状态</label>
+                            <div class="d-flex align-items-center">
+                                <span class="badge bg-success me-3" id="db-status">已连接</span>
+                                <button type="button" class="btn btn-sm btn-outline-primary" id="test-db-connection">
+                                    <i class="bi bi-arrow-clockwise"></i> 测试连接
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- LLM配置测试模态框已移除 -->
+
+
+{% endblock %}
