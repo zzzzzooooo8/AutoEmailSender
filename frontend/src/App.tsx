@@ -1,33 +1,30 @@
-import { useState, useEffect } from "react";
+import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { TopNavBar } from '@/components/organisms/TopNavBar';
+import { HomePage } from '@/pages/HomePage';
+import { TasksPage } from '@/pages/TasksPage';
+import { WorkspacePage } from '@/pages/WorkspacePage';
+import { ProfilePage } from '@/pages/ProfilePage';
+import { NotFoundPage } from '@/pages/NotFoundPage';
+import { CreateTaskPage } from '@/pages/CreateTaskPage';
 
 function App() {
-  const [backendMessage, setBackendMessage] = useState("正在呼叫后端引擎...");
-
-  useEffect(() => {
-    fetch("/api/ping")
-      .then((res) => res.json())
-      .then((data) => setBackendMessage(data.message))
-      .catch((err) =>
-        setBackendMessage(
-          "连接失败，请检查 FastAPI 是否已启动：" + err.toString(),
-        ),
-      );
-  }, []);
-
   return (
-    <div style={{ padding: "40px", fontFamily: "sans-serif" }}>
-      <h1>🚀 Auto Email Sender v2 控制台</h1>
-      <div
-        style={{
-          padding: "20px",
-          backgroundColor: "#f3f4f6",
-          borderRadius: "8px",
-        }}
-      >
-        <h3>后端状态诊断：</h3>
-        <p style={{ color: "#2563eb", fontWeight: "bold" }}>{backendMessage}</p>
+    <BrowserRouter>
+      <div className="min-h-screen bg-background flex flex-col">
+        <TopNavBar />
+        <div className="flex-1 flex flex-col">
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/tasks" element={<TasksPage />} />
+            <Route path="/create-task" element={<CreateTaskPage />} />
+            <Route path="/workspace/:id" element={<WorkspacePage />} />
+            <Route path="/profile" element={<ProfilePage />} />
+            <Route path="/404" element={<NotFoundPage />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+        </div>
       </div>
-    </div>
+    </BrowserRouter>
   );
 }
 
