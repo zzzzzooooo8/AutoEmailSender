@@ -1,5 +1,9 @@
 .venv/
 __pycache__/
 node_modules/
-
-teacher_agent_mvp/
+.env
+.obsidian
+.claude
+.playwright-mcp
+backend/test/Plan_A
+backend/test/Plan_B

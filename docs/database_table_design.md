@@ -11,6 +11,7 @@
 | `smtp_server`   | VARCHAR(100)    | NOT NULL                   | SMTP 服务器地址（如 `smtp.qq.com`） |
 | `smtp_port`     | INTEGER         | NOT NULL, DEFAULT 465      | SMTP 端口号（通常为 465 或 587）     |
 | `resume_path`   | VARCHAR(255)    | NULLABLE                   | 默认简历本地路径或 URL               |
+| `default_llm_config_id` | INTEGER  | FOREIGN KEY, NULLABLE      | 默认使用的 LLM 配置，关联 `LLM_Config.config_id` |
 | `created_at`    | DATETIME        | DEFAULT CURRENT_TIMESTAMP  | 配置创建时间（用于排序或审计）             |
 
 ---
@@ -23,6 +24,7 @@
 | --------------- | --------------- | -------------------------- | -------------------------------------------- |
 | `tutor_id`      | INTEGER         | PRIMARY KEY, AUTOINCREMENT | 导师唯一标识，主键                                    |
 | `name`          | VARCHAR(50)     | NOT NULL                   | 导师姓名                                         |
+| `title`         | VARCHAR(50)     | NULLABLE                   | 导师职称（如教授、副教授、研究员等）                           |
 | `avatar_url`    | VARCHAR(255)    | NULLABLE                   | 导师照片 URL（用于丰富聊天 UI）                          |
 | `emails`        | TEXT            | NOT NULL                   | 导师邮箱（存 JSON 数组，如 `["a@edu.cn", "b@edu.cn"]`） |
 | `university`    | VARCHAR(100)    | NOT NULL                   | 所属高校                                         |
@@ -33,7 +35,32 @@
 
 ---
 
-### 3. 批量发送任务表 (Task)
+### 3. LLM 配置表 (LLM_Config)
+
+存储系统内可切换的多套大模型配置，供身份或任务按需绑定。
+
+| **字段名 (Field)** | **数据类型 (Type)** | **约束 / 键 (Constraint)**    | **说明 (Description)** |
+| --------------- | --------------- | -------------------------- | -------------------- |
+| `config_id`     | INTEGER         | PRIMARY KEY, AUTOINCREMENT | 配置唯一标识，主键 |
+| `config_name`   | VARCHAR(100)    | NOT NULL, UNIQUE           | 配置名称（如 `OpenAI-主账号`、`DeepSeek-备用`） |
+| `provider`      | VARCHAR(50)     | NOT NULL                   | 模型服务提供方（如 `openai`、`deepseek`） |
+| `api_key`       | VARCHAR(255)    | NOT NULL                   | 对应 API Key |
+| `base_url`      | VARCHAR(255)    | NULLABLE                   | 接口基地址（兼容 OpenAI 格式时常用） |
+| `model_name`    | VARCHAR(100)    | NOT NULL                   | 默认使用的模型名称 |
+| `temperature`   | DECIMAL(3,2)    | NULLABLE                   | 采样温度参数 |
+| `max_tokens`    | INTEGER         | NULLABLE                   | 单次生成最大 token 数 |
+| `is_enabled`    | INTEGER         | DEFAULT 1                  | 是否启用：`0`禁用, `1`启用 |
+| `remark`        | VARCHAR(255)    | NULLABLE                   | 备注信息 |
+| `created_at`    | DATETIME        | DEFAULT CURRENT_TIMESTAMP  | 配置创建时间 |
+| `updated_at`    | DATETIME        | DEFAULT CURRENT_TIMESTAMP  | 最近更新时间 |
+
+说明：
+- `Identity.default_llm_config_id` 用于保存某个发件身份默认绑定的 LLM 配置。
+- `Task.llm_config_id` 用于任务级覆盖；为空时，继承对应 `Identity` 的默认配置。
+
+---
+
+### 4. 批量发送任务表 (Task)
 
 管理每次群发任务的规则、模板和状态。
 
@@ -41,6 +68,7 @@
 | ------------------ | --------------- | -------------------------- | --------------------------------- |
 | `task_id`          | INTEGER         | PRIMARY KEY, AUTOINCREMENT | 任务唯一标识，主键                         |
 | `identity_id`      | INTEGER         | FOREIGN KEY                | 关联 `Identity.identity_id`（发件身份）   |
+| `llm_config_id`    | INTEGER         | FOREIGN KEY, NULLABLE      | 任务指定的 LLM 配置，关联 `LLM_Config.config_id`；为空时继承身份默认配置 |
 | `task_name`        | VARCHAR(100)    | NOT NULL                   | 任务名称（如：复旦AI组直发）                   |
 | `subject_tmpl`     | VARCHAR(255)    | NOT NULL                   | 邮件主题模板                            |
 | `body_tmpl`        | TEXT            | NOT NULL                   | 邮件正文模板（支持变量占位符）                   |
@@ -55,7 +83,7 @@
 
 ---
 
-### 4. 任务目标明细表 (Task_Target)
+### 5. 任务目标明细表 (Task_Target)
 
 记录某个任务下，针对特定导师的发送进度。
 
@@ -70,7 +98,7 @@
 
 ---
 
-### 5. 邮件往来记录表 (Email_Log)
+### 6. 邮件往来记录表 (Email_Log)
 
 独立于任务之外，客观记录双向邮件流水。
 
