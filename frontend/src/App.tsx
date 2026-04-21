@@ -1,29 +1,34 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { TopNavBar } from '@/components/organisms/TopNavBar';
+import { SelectionProvider } from '@/context/SelectionContext';
+import { CreateTaskPage } from '@/pages/CreateTaskPage';
 import { HomePage } from '@/pages/HomePage';
+import { NotFoundPage } from '@/pages/NotFoundPage';
+import { ProfessorsPage } from '@/pages/ProfessorsPage';
+import { ProfilePage } from '@/pages/ProfilePage';
 import { TasksPage } from '@/pages/TasksPage';
 import { WorkspacePage } from '@/pages/WorkspacePage';
-import { ProfilePage } from '@/pages/ProfilePage';
-import { NotFoundPage } from '@/pages/NotFoundPage';
-import { CreateTaskPage } from '@/pages/CreateTaskPage';
 
 function App() {
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-background flex flex-col">
-        <TopNavBar />
-        <div className="flex-1 flex flex-col">
-          <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/tasks" element={<TasksPage />} />
-            <Route path="/create-task" element={<CreateTaskPage />} />
-            <Route path="/workspace/:id" element={<WorkspacePage />} />
-            <Route path="/profile" element={<ProfilePage />} />
-            <Route path="/404" element={<NotFoundPage />} />
-            <Route path="*" element={<NotFoundPage />} />
-          </Routes>
+      <SelectionProvider>
+        <div className="flex min-h-screen flex-col bg-background">
+          <TopNavBar />
+          <div className="min-h-0 flex-1">
+            <Routes>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/professors" element={<ProfessorsPage />} />
+              <Route path="/tasks" element={<TasksPage />} />
+              <Route path="/create-task" element={<CreateTaskPage />} />
+              <Route path="/workspace/:id" element={<WorkspacePage />} />
+              <Route path="/profile" element={<ProfilePage />} />
+              <Route path="/404" element={<NotFoundPage />} />
+              <Route path="*" element={<NotFoundPage />} />
+            </Routes>
+          </div>
         </div>
-      </div>
+      </SelectionProvider>
     </BrowserRouter>
   );
 }

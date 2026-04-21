@@ -1,45 +1,188 @@
-import { GraduationCap } from 'lucide-react';
-import clsx from 'clsx';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, NavLink } from "react-router-dom";
+import clsx from "clsx";
+import {
+  AlertTriangle,
+  BrainCircuit,
+  Mail,
+  Shield,
+  UserCircle2,
+} from "lucide-react";
+import { TopBarSelectMenu } from "@/components/atoms/TopBarSelectMenu";
+import { useSelectionContext } from "@/context/SelectionContext";
+import { MAIL_DELIVERY_MODE_LABELS, type MailDeliveryMode } from "@/types";
 
 export const TopNavBar = () => {
-  const { pathname } = useLocation();
+  const {
+    identities,
+    llmProfiles,
+    systemSettings,
+    selectedIdentityId,
+    selectedLlmProfileId,
+    setSelectedIdentityId,
+    setSelectedLlmProfileId,
+    setMailDeliveryMode,
+    loading,
+    updatingMode,
+  } = useSelectionContext();
 
   const navItems = [
-    { label: '首页', href: '/' },
-    { label: '发件页', href: '/tasks' },
-    { label: '个人页', href: '/profile' },
+    { label: "首页", href: "/" },
+    { label: "导师管理", href: "/professors" },
+    { label: "任务页", href: "/tasks" },
+    { label: "个人页", href: "/profile" },
   ];
 
-  return (
-    <nav className="h-16 bg-[#fefaf3] border-b border-primary/20 sticky top-0 z-50 shrink-0">
-      <div className="max-w-6xl mx-auto h-full px-8 flex items-center justify-between">
-        <Link to="/" className="flex items-center gap-2 group">
-          <div className="bg-primary text-white p-1.5 rounded-md group-hover:bg-primary-dark transition-colors">
-            <GraduationCap className="w-5 h-5" />
-          </div>
-          <span className="text-xl font-bold text-primary group-hover:text-primary-dark transition-colors tracking-wide">
-            保研陶瓷助手
-          </span>
-        </Link>
+  const identityOptions = identities.map((identity) => ({
+    value: identity.id,
+    label: `${identity.name}${identity.is_default ? "（默认）" : ""}`,
+  }));
+  const llmOptions = llmProfiles.map((profile) => ({
+    value: profile.id,
+    label: `${profile.name}${profile.is_default ? "（默认）" : ""}`,
+  }));
 
-        <div className="flex items-center gap-8 h-full">
-          {navItems.map((item) => {
-            const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
-            return (
-              <Link
-                key={item.href}
-                to={item.href}
+  const mailDeliveryMode = systemSettings?.mail_delivery_mode ?? "dry_run";
+
+  const handleModeChange = async (mode: MailDeliveryMode) => {
+    if (mode === mailDeliveryMode) {
+      return;
+    }
+    await setMailDeliveryMode(mode);
+  };
+
+  return (
+    <nav className="sticky top-0 z-50 border-b border-stone-200/80 bg-[linear-gradient(180deg,rgba(255,250,241,0.98),rgba(255,247,237,0.94))] shadow-[0_10px_30px_-24px_rgba(41,37,36,0.4)] backdrop-blur-xl">
+      <div className="mx-auto max-w-7xl px-6 py-3">
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <Link to="/" className="flex items-center gap-3">
+              <div className="rounded-2xl bg-primary p-2.5 text-white shadow-sm shadow-primary/20">
+                <Mail className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="text-base font-semibold tracking-[0.01em] text-stone-900">
+                  Auto Email Sender
+                </div>
+                <div className="text-xs text-stone-500">自动套磁系统</div>
+              </div>
+            </Link>
+
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              <div
                 className={clsx(
-                  'relative h-full flex items-center text-sm font-medium transition-colors duration-200',
-                  isActive ? 'text-primary' : 'text-stone-500 hover:text-stone-800',
+                  "inline-flex items-center gap-3 rounded-2xl border px-3 py-2 shadow-sm",
+                  mailDeliveryMode === "live"
+                    ? "border-amber-200 bg-amber-50/90 shadow-amber-100/70"
+                    : "border-emerald-200 bg-emerald-50/90 shadow-emerald-100/70",
                 )}
               >
+                <div className="flex items-center gap-2">
+                  <div
+                    className={clsx(
+                      "flex h-9 w-9 items-center justify-center rounded-xl",
+                      mailDeliveryMode === "live"
+                        ? "bg-amber-100 text-amber-700"
+                        : "bg-emerald-100 text-emerald-700",
+                    )}
+                  >
+                    {mailDeliveryMode === "live" ? (
+                      <AlertTriangle className="h-4 w-4" />
+                    ) : (
+                      <Shield className="h-4 w-4" />
+                    )}
+                  </div>
+
+                  <div>
+                    <div className="text-[11px] font-medium text-stone-500">
+                      发送模式
+                    </div>
+                    <div
+                      className={clsx(
+                        "text-sm font-semibold",
+                        mailDeliveryMode === "live"
+                          ? "text-amber-900"
+                          : "text-emerald-900",
+                      )}
+                    >
+                      {MAIL_DELIVERY_MODE_LABELS[mailDeliveryMode]}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="inline-flex gap-1 rounded-xl bg-white/90 p-1 ring-1 ring-black/5">
+                  {(["dry_run", "live"] as MailDeliveryMode[]).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      disabled={updatingMode}
+                      onClick={() => void handleModeChange(mode)}
+                      className={clsx(
+                        "rounded-lg px-3 py-1.5 text-xs font-semibold transition",
+                        mailDeliveryMode === mode
+                          ? mode === "live"
+                            ? "bg-amber-500 text-white shadow-sm"
+                            : "bg-emerald-600 text-white shadow-sm"
+                          : "text-stone-600 hover:bg-stone-100 hover:text-stone-900",
+                      )}
+                    >
+                      {MAIL_DELIVERY_MODE_LABELS[mode]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <TopBarSelectMenu
+                placeholder="身份"
+                icon={<UserCircle2 className="h-4 w-4" />}
+                value={selectedIdentityId ?? ""}
+                disabled={loading || identities.length === 0}
+                options={
+                  identityOptions.length > 0
+                    ? identityOptions
+                    : [{ value: "", label: "请选择身份" }]
+                }
+                onChange={(nextValue) => {
+                  const value = nextValue ? Number(nextValue) : null;
+                  setSelectedIdentityId(value);
+                }}
+              />
+
+              <TopBarSelectMenu
+                placeholder="模型"
+                icon={<BrainCircuit className="h-4 w-4" />}
+                value={selectedLlmProfileId ?? ""}
+                disabled={loading || llmProfiles.length === 0}
+                options={
+                  llmOptions.length > 0
+                    ? llmOptions
+                    : [{ value: "", label: "请选择模型" }]
+                }
+                onChange={(nextValue) => {
+                  const value = nextValue ? Number(nextValue) : null;
+                  setSelectedLlmProfileId(value);
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-nowrap items-center gap-3 overflow-x-auto rounded-2xl border border-stone-200/80 bg-white/92 p-1.5 shadow-sm shadow-stone-200/50">
+            {navItems.map((item) => (
+              <NavLink
+                key={item.href}
+                to={item.href}
+                className={({ isActive }) =>
+                  clsx(
+                    "inline-flex min-w-20 shrink-0 items-center justify-center rounded-xl border px-4 py-1 text-sm font-medium whitespace-nowrap transition-all",
+                    isActive
+                      ? "border-primary/15 bg-primary text-white shadow-sm shadow-primary/25"
+                      : "border-transparent bg-transparent text-stone-600 hover:border-stone-200 hover:bg-stone-50 hover:text-stone-900",
+                  )
+                }
+              >
                 {item.label}
-                {isActive && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-t-full" />}
-              </Link>
-            );
-          })}
+              </NavLink>
+            ))}
+          </div>
         </div>
       </div>
     </nav>

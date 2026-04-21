@@ -34,9 +34,144 @@ body {
     sans-serif;
 }
 
+button,
+select,
+summary,
+input[type="checkbox"],
+input[type="radio"],
+input[type="file"] {
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    box-shadow 160ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    opacity 160ms ease;
+}
+
+button,
+[data-interactive="button"] {
+  will-change: box-shadow;
+}
+
+button:not(:disabled),
+select:not(:disabled),
+summary,
+input[type="checkbox"]:not(:disabled),
+input[type="radio"]:not(:disabled),
+input[type="file"]:not(:disabled) {
+  cursor: pointer;
+}
+
+button:disabled,
+select:disabled,
+input[type="checkbox"]:disabled,
+input[type="radio"]:disabled,
+input[type="file"]:disabled {
+  cursor: not-allowed;
+}
+
+button:not(:disabled):active,
+summary:active,
+[data-interactive="button"]:active {
+  transform: translateY(1px) scale(0.985);
+}
+
+button:not(:disabled):hover,
+[data-interactive="button"]:hover {
+  box-shadow: 0 10px 20px -22px rgb(41 37 36 / 0.28);
+}
+
+select {
+  appearance: auto;
+  -webkit-appearance: menulist;
+}
+
+select:not(:disabled):focus-visible,
+button:not(:disabled):focus-visible,
+summary:focus-visible,
+input[type="checkbox"]:not(:disabled):focus-visible,
+input[type="radio"]:not(:disabled):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-primary, #991b1b) 40%, transparent);
+  outline-offset: 2px;
+}
+
 /* Global form input style */
 .form-input {
   @apply h-10 w-full rounded-xl border border-stone-200 bg-white px-4 text-sm text-stone-700 outline-none transition-all placeholder:text-stone-400;
   @apply hover:border-stone-300;
   @apply focus:border-primary focus:ring-2 focus:ring-primary/20;
+}
+
+select.form-input,
+.form-input:where(select) {
+  cursor: pointer;
+  appearance: auto;
+  -webkit-appearance: menulist;
+}
+
+.ui-btn-primary {
+  @apply inline-flex items-center justify-center gap-2 rounded-xl border border-primary bg-primary px-4 py-2 text-sm font-medium text-white shadow-sm;
+}
+
+.ui-btn-primary:hover:not(:disabled) {
+  @apply border-primary-dark bg-primary-dark;
+}
+
+.ui-btn-secondary {
+  @apply inline-flex items-center justify-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-2 text-sm text-stone-700 shadow-sm;
+}
+
+.ui-btn-secondary:hover:not(:disabled) {
+  @apply border-stone-300 bg-stone-50;
+}
+
+.ui-btn-danger {
+  @apply inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2 text-sm text-red-600 shadow-sm;
+}
+
+.ui-btn-danger:hover:not(:disabled) {
+  @apply border-red-300 bg-red-50;
+}
+
+.ui-select-shell {
+  @apply relative flex min-h-10 items-center gap-2 rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700 shadow-sm;
+  transition:
+    box-shadow 160ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    opacity 160ms ease;
+}
+
+.ui-select-shell:hover {
+  box-shadow: 0 10px 20px -22px rgb(41 37 36 / 0.28);
+  @apply border-stone-300;
+}
+
+.ui-select-shell:focus-within {
+  box-shadow: 0 0 0 3px rgb(153 27 27 / 0.1);
+  @apply border-primary bg-white;
+}
+
+.ui-select-field {
+  @apply min-w-0 flex-1 appearance-none bg-transparent pr-7 text-sm text-stone-800 outline-none;
+}
+
+.ui-select-field:disabled {
+  @apply cursor-not-allowed text-stone-400;
+}
+
+.ui-select-field:focus,
+.ui-select-field:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.ui-select-chevron {
+  @apply pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400 transition-colors;
+}
+
+.ui-select-shell:focus-within .ui-select-chevron {
+  @apply text-primary;
 }

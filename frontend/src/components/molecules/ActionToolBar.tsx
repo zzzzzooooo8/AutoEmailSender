@@ -1,9 +1,8 @@
+import { UserPlus, Bot, Plus } from 'lucide-react';
 import { SearchInput } from '../atoms/SearchInput';
 import { PrimaryFillButton } from '../atoms/PrimaryFillButton';
-import { UserPlus, Bot, Plus } from 'lucide-react';
 import { SchoolAndCollegeFilter } from './SchoolAndCollegeFilter';
-import { ALL_FILTER_VALUE, type MentorStatusFilter, type UniversitySchoolPair } from '@/features/mentor-filter/types';
-import type { MentorStatus } from '@/types';
+import { type MentorStatusFilter, type UniversitySchoolPair } from '@/features/mentor-filter/types';
 
 interface ActionToolBarProps {
   toolbarTitle: string;
@@ -50,26 +49,24 @@ export const ActionToolBar: React.FC<ActionToolBarProps> = ({
 }) => {
   return (
     <div className="flex flex-wrap items-center justify-between gap-4 py-6">
-      <div className="flex flex-wrap items-center gap-4 md:gap-6">
+      <div className="flex flex-wrap items-center gap-4">
         <h1 className="text-2xl font-bold text-stone-800">{toolbarTitle}</h1>
-        <div className="flex flex-wrap items-center gap-3">
-          <SearchInput value={searchQuery} onChange={onSearchChange} />
-          <SchoolAndCollegeFilter
-            selectedPairs={selectedPairs}
-            allPairs={allPairs}
-            activeFilterCount={activeFilterCount}
-            title={title}
-            titleOptions={titleOptions}
-            matchScoreRange={matchScoreRange}
-            status={status}
-            statusOptions={statusOptions}
-            onTogglePair={onTogglePair}
-            onTitleChange={onTitleChange}
-            onMatchScoreRangeChange={onMatchScoreRangeChange}
-            onStatusChange={onStatusChange}
-            onReset={onResetSchoolAndCollege}
-          />
-        </div>
+        <SearchInput value={searchQuery} onChange={onSearchChange} />
+        <SchoolAndCollegeFilter
+          selectedPairs={selectedPairs}
+          allPairs={allPairs}
+          activeFilterCount={activeFilterCount}
+          title={title}
+          titleOptions={titleOptions}
+          matchScoreRange={matchScoreRange}
+          status={status}
+          statusOptions={statusOptions}
+          onTogglePair={onTogglePair}
+          onTitleChange={onTitleChange}
+          onMatchScoreRangeChange={onMatchScoreRangeChange}
+          onStatusChange={onStatusChange}
+          onReset={onResetSchoolAndCollege}
+        />
       </div>
 
       <div className="flex items-center gap-4">

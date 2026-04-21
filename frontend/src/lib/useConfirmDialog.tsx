@@ -1,0 +1,56 @@
+import { useCallback, useRef, useState } from "react";
+import {
+  ConfirmDialog,
+  type ConfirmDialogTone,
+} from "@/components/atoms/ConfirmDialog";
+
+type ConfirmOptions = {
+  title: string;
+  description?: string;
+  confirmLabel?: string;
+  cancelLabel?: string | null;
+  tone?: ConfirmDialogTone;
+};
+
+type ConfirmState = ConfirmOptions & {
+  open: boolean;
+};
+
+export const useConfirmDialog = () => {
+  const [state, setState] = useState<ConfirmState | null>(null);
+  const resolverRef = useRef<((value: boolean) => void) | null>(null);
+
+  const closeDialog = useCallback((value: boolean) => {
+    resolverRef.current?.(value);
+    resolverRef.current = null;
+    setState(null);
+  }, []);
+
+  const confirm = useCallback((options: ConfirmOptions) => {
+    return new Promise<boolean>((resolve) => {
+      resolverRef.current = resolve;
+      setState({
+        ...options,
+        open: true,
+      });
+    });
+  }, []);
+
+  const dialog = state ? (
+    <ConfirmDialog
+      open={state.open}
+      title={state.title}
+      description={state.description}
+      confirmLabel={state.confirmLabel}
+      cancelLabel={state.cancelLabel}
+      tone={state.tone}
+      onCancel={() => closeDialog(false)}
+      onConfirm={() => closeDialog(true)}
+    />
+  ) : null;
+
+  return {
+    confirm,
+    dialog,
+  };
+};

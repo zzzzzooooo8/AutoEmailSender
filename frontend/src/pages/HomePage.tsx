@@ -1,10 +1,424 @@
-import { MentorDashboardClient } from '@/components/organisms/MentorDashboardClient';
-import { MOCK_MENTORS } from '@/data/mockData';
+import { useCallback, useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { FolderOpen, Loader2, MailPlus, RefreshCcw, Search, Sparkles } from 'lucide-react';
+import { NativeSelectField } from '@/components/atoms/NativeSelectField';
+import { useSelectionContext } from '@/context/SelectionContext';
+import { calculateMatch } from '@/lib/api/emailTasksApi';
+import { useConfirmDialog } from '@/lib/useConfirmDialog';
+import { listProfessors } from '@/lib/api/professorsApi';
+import { ensureWorkspaceTask } from '@/lib/api/workspacesApi';
+import { MAIL_DELIVERY_MODE_LABELS, PROFESSOR_STATUS_LABELS, type ProfessorDashboardItemDTO } from '@/types';
+
+const SESSION_KEY = 'selected_professor_ids';
 
 export const HomePage = () => {
+  const navigate = useNavigate();
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
+  const { selectedIdentityId, selectedLlmProfileId, selectedIdentity, selectedLlmProfile, systemSettings } =
+    useSelectionContext();
+  const [professors, setProfessors] = useState<ProfessorDashboardItemDTO[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [keyword, setKeyword] = useState('');
+  const [university, setUniversity] = useState('all');
+  const [status, setStatus] = useState<'all' | ProfessorDashboardItemDTO['status']>('all');
+  const [loading, setLoading] = useState(false);
+  const [bulkScoring, setBulkScoring] = useState(false);
+  const [scoringProfessorIds, setScoringProfessorIds] = useState<Set<number>>(new Set());
+  const [error, setError] = useState<string | null>(null);
+
+  const loadProfessors = useCallback(async () => {
+    if (!selectedIdentityId || !selectedLlmProfileId) {
+      setProfessors([]);
+      return;
+    }
+    setLoading(true);
+    try {
+      const data = await listProfessors({
+        identityId: selectedIdentityId,
+        llmProfileId: selectedLlmProfileId,
+      });
+      setProfessors(data);
+      setSelectedIds((previous) => {
+        const next = new Set<number>();
+        data.forEach((item) => {
+          if (previous.has(item.id)) {
+            next.add(item.id);
+          }
+        });
+        return next;
+      });
+      setError(null);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : '加载导师列表失败');
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedIdentityId, selectedLlmProfileId]);
+
+  useEffect(() => {
+    void loadProfessors();
+  }, [loadProfessors]);
+
+  const filteredProfessors = professors.filter((item) => {
+    const query = keyword.trim().toLowerCase();
+    const keywordMatched =
+      !query ||
+      [item.name, item.university, item.school, item.research_direction]
+        .filter(Boolean)
+        .some((value) => value?.toLowerCase().includes(query));
+    const universityMatched = university === 'all' || item.university === university;
+    const statusMatched = status === 'all' || item.status === status;
+    return keywordMatched && universityMatched && statusMatched;
+  });
+
+  const universityOptions = Array.from(
+    new Set(professors.map((item) => item.university).filter(Boolean)),
+  ) as string[];
+
+  const toggleSelection = (professorId: number) => {
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(professorId)) {
+        next.delete(professorId);
+      } else {
+        next.add(professorId);
+      }
+      return next;
+    });
+  };
+
+  const handleCreateTask = async () => {
+    if (selectedIds.size === 0) {
+      await confirm({
+        title: '还没有选择导师',
+        description: '请先勾选本次要触达的导师，再进入批量任务创建页。',
+        confirmLabel: '知道了',
+        cancelLabel: null,
+      });
+      return;
+    }
+    window.sessionStorage.setItem(SESSION_KEY, JSON.stringify([...selectedIds]));
+    navigate('/create-task');
+  };
+
+  const hasPrimaryMaterial = Boolean(selectedIdentity?.current_primary_material_id);
+
+  const toggleScoringProfessor = (professorId: number, active: boolean) => {
+    setScoringProfessorIds((previous) => {
+      const next = new Set(previous);
+      if (active) {
+        next.add(professorId);
+      } else {
+        next.delete(professorId);
+      }
+      return next;
+    });
+  };
+
+  const runCalculateMatchForProfessor = useCallback(
+    async (professorId: number) => {
+      if (!selectedIdentityId || !selectedLlmProfileId) {
+        throw new Error('请先选择身份和模型');
+      }
+
+      const workspace = await ensureWorkspaceTask(professorId, selectedIdentityId, selectedLlmProfileId);
+      if (!workspace.current_task.id) {
+        throw new Error('未能为该导师准备工作区任务');
+      }
+      await calculateMatch(workspace.current_task.id);
+    },
+    [selectedIdentityId, selectedLlmProfileId],
+  );
+
+  const handleGenerateOne = async (professorId: number) => {
+    if (!hasPrimaryMaterial) {
+      setError('当前身份还没有默认材料，暂时无法计算匹配。请先到个人页设置默认材料。');
+      return;
+    }
+
+    toggleScoringProfessor(professorId, true);
+    try {
+      await runCalculateMatchForProfessor(professorId);
+      await loadProfessors();
+      setError(null);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : '计算匹配失败');
+    } finally {
+      toggleScoringProfessor(professorId, false);
+    }
+  };
+
+  const handleGenerateSelected = async () => {
+    if (selectedIds.size === 0) {
+      await confirm({
+        title: '还没有选择导师',
+        description: '请先勾选要批量计算匹配的导师。',
+        confirmLabel: '知道了',
+        cancelLabel: null,
+      });
+      return;
+    }
+
+    if (!hasPrimaryMaterial) {
+      setError('当前身份还没有默认材料，暂时无法批量计算匹配。请先到个人页设置默认材料。');
+      return;
+    }
+
+    setBulkScoring(true);
+    setError(null);
+    const failedNames: string[] = [];
+    const selectedProfessors = professors.filter((item) => selectedIds.has(item.id));
+
+    try {
+      for (const professor of selectedProfessors) {
+        toggleScoringProfessor(professor.id, true);
+        try {
+          await runCalculateMatchForProfessor(professor.id);
+        } catch (actionError) {
+          failedNames.push(
+            actionError instanceof Error
+              ? `${professor.name}：${actionError.message}`
+              : `${professor.name}：计算匹配失败`,
+          );
+        } finally {
+          toggleScoringProfessor(professor.id, false);
+        }
+      }
+      await loadProfessors();
+      if (failedNames.length > 0) {
+        setError(`部分导师计算失败：${failedNames.slice(0, 2).join('；')}`);
+      }
+    } finally {
+      setBulkScoring(false);
+    }
+  };
+
+  if (!selectedIdentityId || !selectedLlmProfileId || !selectedIdentity || !selectedLlmProfile) {
+    return (
+      <>
+        <main className="mx-auto max-w-5xl px-6 py-10">
+          <div className="rounded-3xl border border-dashed border-stone-300 bg-[#fcfbf8] p-10 text-center shadow-sm">
+            <h1 className="text-2xl font-semibold text-stone-900">先选择身份和模型</h1>
+            <p className="mt-3 text-sm leading-6 text-stone-600">先到个人页配置，再在顶部切换到要使用的上下文。</p>
+            <Link to="/profile" data-interactive="button" className="ui-btn-primary mt-6">
+              去个人页配置
+            </Link>
+          </div>
+        </main>
+        {confirmDialog}
+      </>
+    );
+  }
+
   return (
-    <main className="max-w-6xl mx-auto px-6 mt-8 pb-10 w-full">
-      <MentorDashboardClient initialMentors={MOCK_MENTORS} />
-    </main>
+    <>
+      <main className="mx-auto max-w-7xl px-6 py-8">
+        <section className="rounded-3xl border border-stone-200 bg-[#fcfbf8] p-6 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-semibold text-stone-900">导师看板</h1>
+              <div className="mt-3 flex flex-wrap gap-2 text-xs text-stone-600">
+                <span className="rounded-full border border-stone-200 bg-white px-3 py-1.5">
+                  身份：{selectedIdentity.name}
+                </span>
+                <span className="rounded-full border border-stone-200 bg-white px-3 py-1.5">
+                  模型：{selectedLlmProfile.name}
+                </span>
+                <span className="rounded-full border border-stone-200 bg-white px-3 py-1.5">
+                  模式：{MAIL_DELIVERY_MODE_LABELS[systemSettings?.mail_delivery_mode ?? 'dry_run']}
+                </span>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <button type="button" onClick={() => void loadProfessors()} className="ui-btn-secondary">
+                <RefreshCcw className="h-4 w-4" />
+                刷新列表
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleGenerateSelected()}
+                disabled={bulkScoring || selectedIds.size === 0 || !hasPrimaryMaterial}
+                className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {bulkScoring ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                批量只算匹配
+              </button>
+              <Link to="/professors" data-interactive="button" className="ui-btn-secondary">
+                <FolderOpen className="h-4 w-4" />
+                管理导师
+              </Link>
+              <button type="button" onClick={() => void handleCreateTask()} className="ui-btn-primary">
+                <MailPlus className="h-4 w-4" />
+                创建批量任务
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-6 grid gap-3 md:grid-cols-3">
+            <label className="rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-600 shadow-sm">
+              <div className="mb-2 font-medium text-stone-800">关键词</div>
+              <div className="flex items-center gap-2">
+                <Search className="h-4 w-4 text-stone-400" />
+                <input
+                  value={keyword}
+                  onChange={(event) => setKeyword(event.target.value)}
+                  placeholder="导师、学校、研究方向"
+                  className="w-full bg-transparent outline-none"
+                />
+              </div>
+            </label>
+
+            <NativeSelectField
+              label="学校"
+              value={university}
+              onChange={(event) => setUniversity(event.target.value)}
+              wrapperClassName="rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-600 shadow-sm"
+              shellClassName="border-0 bg-transparent px-0 py-0 shadow-none"
+            >
+              <option value="all">全部学校</option>
+              {universityOptions.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </NativeSelectField>
+
+            <NativeSelectField
+              label="状态"
+              value={status}
+              onChange={(event) => setStatus(event.target.value as typeof status)}
+              wrapperClassName="rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-600 shadow-sm"
+              shellClassName="border-0 bg-transparent px-0 py-0 shadow-none"
+            >
+              <option value="all">全部状态</option>
+              {Object.entries(PROFESSOR_STATUS_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </NativeSelectField>
+          </div>
+
+          <div className="mt-4 space-y-2">
+            {!hasPrimaryMaterial ? (
+              <p className="text-sm text-amber-700">
+                当前身份还没有默认材料，所以暂时不能计算匹配；你仍然可以直接进入工作区手动写信。
+              </p>
+            ) : (
+              <p className="text-sm text-stone-500">
+                当前首页只做匹配分析，不会顺带生成草稿；草稿生成请到工作区单独执行。
+              </p>
+            )}
+            {error ? <p className="text-sm text-red-600">{error}</p> : null}
+          </div>
+        </section>
+
+        <section className="mt-6 rounded-3xl border border-stone-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between border-b border-stone-100 px-6 py-4">
+            <div className="text-sm text-stone-600">
+              共 {filteredProfessors.length} 位导师，已选择 {selectedIds.size} 位
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedIds(new Set(filteredProfessors.map((item) => item.id)))}
+                className="ui-btn-secondary px-3 py-1.5 text-sm"
+              >
+                全选当前结果
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedIds(new Set())}
+                className="ui-btn-secondary px-3 py-1.5 text-sm"
+              >
+                清空选择
+              </button>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 px-6 py-14 text-sm text-stone-500">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              正在加载导师列表...
+            </div>
+          ) : filteredProfessors.length === 0 ? (
+            <div className="px-6 py-14 text-center text-sm text-stone-500">
+              <div>当前还没有可用导师，可以先去导师管理页导入或手动新增。</div>
+              <Link to="/professors" data-interactive="button" className="ui-btn-primary mt-5">
+                去导师管理
+              </Link>
+            </div>
+          ) : (
+            <div className="divide-y divide-stone-100">
+              {filteredProfessors.map((professor) => (
+                <div key={professor.id} className="flex flex-col gap-4 px-6 py-5 md:flex-row md:items-start">
+                  <div className="flex items-start gap-4 md:w-[52%]">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(professor.id)}
+                      onChange={() => toggleSelection(professor.id)}
+                      className="mt-1 h-4 w-4 rounded border-stone-300 text-primary focus:ring-primary"
+                    />
+                    <div>
+                      <div className="text-lg font-medium text-stone-900">{professor.name}</div>
+                      <div className="mt-1 text-sm text-stone-500">
+                        {[professor.title, professor.university, professor.school].filter(Boolean).join(' / ')}
+                      </div>
+                      <p className="mt-2 text-sm leading-6 text-stone-600">
+                        {professor.research_direction || '暂无研究方向描述'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid flex-1 gap-3 md:grid-cols-3">
+                    <div className="rounded-2xl bg-stone-50 px-4 py-3 text-sm">
+                      <div className="text-stone-500">匹配分数</div>
+                      <div className="mt-2 text-lg font-semibold text-stone-900">
+                        {professor.match_score === null ? '未计算' : `${professor.match_score}%`}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl bg-stone-50 px-4 py-3 text-sm">
+                      <div className="text-stone-500">发送次数</div>
+                      <div className="mt-2 text-lg font-semibold text-stone-900">{professor.sent_count}</div>
+                    </div>
+                    <div className="rounded-2xl bg-stone-50 px-4 py-3 text-sm">
+                      <div className="text-stone-500">当前状态</div>
+                      <div className="mt-2 text-lg font-semibold text-stone-900">
+                        {PROFESSOR_STATUS_LABELS[professor.status]}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 md:justify-end">
+                    <button
+                      type="button"
+                      onClick={() => void handleGenerateOne(professor.id)}
+                      disabled={bulkScoring || scoringProfessorIds.has(professor.id) || !hasPrimaryMaterial}
+                      className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {scoringProfessorIds.has(professor.id) ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-4 w-4" />
+                      )}
+                      只算匹配
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/workspace/${professor.id}`)}
+                      disabled={bulkScoring}
+                      className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      打开工作区
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </main>
+      {confirmDialog}
+    </>
   );
 };

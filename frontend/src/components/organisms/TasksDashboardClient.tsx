@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Plus } from 'lucide-react';
 import { BatchTaskCard, type BatchTask } from '../molecules/BatchTaskCard';
 import { PrimaryFillButton } from '../atoms/PrimaryFillButton';
+import { useConfirmDialog } from '@/lib/useConfirmDialog';
 
 interface TasksDashboardClientProps {
   initialTasks: BatchTask[];
@@ -9,13 +10,22 @@ interface TasksDashboardClientProps {
 
 export const TasksDashboardClient: React.FC<TasksDashboardClientProps> = ({ initialTasks }) => {
   const [tasks, setTasks] = useState<BatchTask[]>(initialTasks);
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
 
   const handlePause = (id: string) => setTasks(tasks.map((t) => (t.id === id ? { ...t, status: '已暂停' } : t)));
   const handleResume = (id: string) => setTasks(tasks.map((t) => (t.id === id ? { ...t, status: '运行中' } : t)));
-  const handleStop = (id: string) => {
-    if (window.confirm('确定要中止该任务吗？中止后不可恢复。')) {
-      setTasks(tasks.map((t) => (t.id === id ? { ...t, status: '已完成' } : t)));
+  const handleStop = async (id: string) => {
+    const shouldStop = await confirm({
+      title: '确认中止这个任务？',
+      description: '中止后当前批次不会继续推进生成、排程和发送。',
+      confirmLabel: '确认中止',
+      cancelLabel: '继续保留',
+      tone: 'danger',
+    });
+    if (!shouldStop) {
+      return;
     }
+    setTasks(tasks.map((t) => (t.id === id ? { ...t, status: '已完成' } : t)));
   };
 
   const handleView = (id: string) => window.alert(`查看任务 ${id} 详情（待开发）`);
@@ -23,6 +33,7 @@ export const TasksDashboardClient: React.FC<TasksDashboardClientProps> = ({ init
 
   return (
     <div className="min-h-[calc(100vh-64px)] bg-background p-8">
+      {confirmDialog}
       <div className="max-w-6xl mx-auto">
         <div className="flex items-center justify-between mb-8">
           <div>
