@@ -24,6 +24,7 @@ import {
   Upload,
   Users,
 } from "lucide-react";
+import { useNotification } from "@/context/NotificationContext";
 import { useConfirmDialog } from "@/lib/useConfirmDialog";
 import { formatApiDateTime } from "@/lib/dateTime";
 import {
@@ -137,6 +138,9 @@ const triggerDownload = (url: string) => {
   link.click();
   link.remove();
 };
+
+const getActionErrorMessage = (error: unknown, fallback: string) =>
+  error instanceof Error ? error.message : fallback;
 
 const ToolbarMenu = ({
   disabled,
@@ -280,6 +284,7 @@ const ModalShell = ({
 
 export const ProfessorsPage = () => {
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
+  const { notifyError, notifySuccess, notifyWarning } = useNotification();
   const [archiveFilter, setArchiveFilter] = useState<ArchiveFilter>("active");
   const [professors, setProfessors] = useState<ProfessorManagementItemDTO[]>(
     [],
@@ -288,8 +293,6 @@ export const ProfessorsPage = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
   const [upsertModalOpen, setUpsertModalOpen] = useState(false);
   const [editingProfessor, setEditingProfessor] =
     useState<ProfessorManagementItemDTO | null>(null);
@@ -320,16 +323,14 @@ export const ProfessorsPage = () => {
           });
           return next;
         });
-        setError(null);
       } catch (loadError) {
-        setError(
-          loadError instanceof Error ? loadError.message : "加载导师列表失败",
-        );
+        const message = getActionErrorMessage(loadError, "加载导师列表失败");
+        notifyError("加载导师列表失败", message);
       } finally {
         setLoading(false);
       }
     },
-    [archiveFilter],
+    [archiveFilter, notifyError],
   );
 
   useEffect(() => {
@@ -377,8 +378,6 @@ export const ProfessorsPage = () => {
   const openCreateModal = () => {
     setEditingProfessor(null);
     setFormState(emptyProfessorForm());
-    setError(null);
-    setMessage(null);
     setUpsertModalOpen(true);
   };
 
@@ -396,8 +395,6 @@ export const ProfessorsPage = () => {
   const openEditModal = (professor: ProfessorManagementItemDTO) => {
     setEditingProfessor(professor);
     setFormState(toProfessorForm(professor));
-    setError(null);
-    setMessage(null);
     setUpsertModalOpen(true);
   };
 
@@ -414,16 +411,15 @@ export const ProfessorsPage = () => {
       const payload = toProfessorPayload(formState);
       if (editingProfessor) {
         await updateProfessor(editingProfessor.id, payload);
-        setMessage(`已更新导师“${payload.name}”。`);
+        notifySuccess("保存成功", `已更新导师“${payload.name}”。`);
       } else {
         await createProfessor(payload);
-        setMessage(`已新增导师“${payload.name}”。`);
+        notifySuccess("保存成功", `已新增导师“${payload.name}”。`);
       }
       setUpsertModalOpen(false);
       await loadProfessors();
-      setError(null);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "保存导师失败");
+      notifyError("保存导师失败", getActionErrorMessage(saveError, "保存导师失败"));
     } finally {
       setSavingProfessor(false);
     }
@@ -445,11 +441,12 @@ export const ProfessorsPage = () => {
     }
     try {
       const result = await archiveProfessor(professor.id);
-      setMessage(result.message);
+      notifySuccess("操作成功", result.message);
       await loadProfessors();
     } catch (archiveError) {
-      setError(
-        archiveError instanceof Error ? archiveError.message : "移入回收站失败",
+      notifyError(
+        "移入回收站失败",
+        getActionErrorMessage(archiveError, "移入回收站失败"),
       );
     }
   };
@@ -471,13 +468,12 @@ export const ProfessorsPage = () => {
     try {
       const result = await bulkArchiveProfessors({ ids: [...selectedIds] });
       setSelectedIds(new Set());
-      setMessage(result.message);
+      notifySuccess("操作成功", result.message);
       await loadProfessors();
     } catch (archiveError) {
-      setError(
-        archiveError instanceof Error
-          ? archiveError.message
-          : "批量移入回收站失败",
+      notifyError(
+        "批量移入回收站失败",
+        getActionErrorMessage(archiveError, "批量移入回收站失败"),
       );
     }
   };
@@ -487,11 +483,12 @@ export const ProfessorsPage = () => {
   ) => {
     try {
       const result = await restoreProfessor(professor.id);
-      setMessage(result.message);
+      notifySuccess("操作成功", result.message);
       await loadProfessors();
     } catch (restoreError) {
-      setError(
-        restoreError instanceof Error ? restoreError.message : "恢复导师失败",
+      notifyError(
+        "恢复导师失败",
+        getActionErrorMessage(restoreError, "恢复导师失败"),
       );
     }
   };
@@ -518,19 +515,19 @@ export const ProfessorsPage = () => {
 
   const handleImportSubmit = async () => {
     if (!importFile) {
-      setError("请先选择要导入的 csv 或 xlsx 文件");
+      notifyWarning("请先选择文件", "请先选择要导入的 csv 或 xlsx 文件");
       return;
     }
     setImportingFile(true);
     try {
       const result = await importProfessorsFromFile(importFile);
       setImportResult(result);
-      setMessage(result.message);
+      notifySuccess("导入完成", result.message);
       await loadProfessors();
-      setError(null);
     } catch (importError) {
-      setError(
-        importError instanceof Error ? importError.message : "导入导师失败",
+      notifyError(
+        "导入导师失败",
+        getActionErrorMessage(importError, "导入导师失败"),
       );
     } finally {
       setImportingFile(false);
@@ -541,12 +538,12 @@ export const ProfessorsPage = () => {
     setDevBusy("sample");
     try {
       const result = await importSampleProfessors();
-      setMessage(result.message);
+      notifySuccess("导入完成", result.message);
       await loadProfessors();
-      setError(null);
     } catch (sampleError) {
-      setError(
-        sampleError instanceof Error ? sampleError.message : "导入样例导师失败",
+      notifyError(
+        "导入样例导师失败",
+        getActionErrorMessage(sampleError, "导入样例导师失败"),
       );
     } finally {
       setDevBusy(null);
@@ -557,13 +554,11 @@ export const ProfessorsPage = () => {
     setDevBusy("crawler");
     try {
       const result = await triggerCrawler();
-      setMessage(result.message);
-      setError(null);
+      notifySuccess("请求已提交", result.message);
     } catch (crawlerError) {
-      setError(
-        crawlerError instanceof Error
-          ? crawlerError.message
-          : "智能抓取请求失败",
+      notifyError(
+        "智能抓取请求失败",
+        getActionErrorMessage(crawlerError, "智能抓取请求失败"),
       );
     } finally {
       setDevBusy(null);
@@ -678,10 +673,6 @@ export const ProfessorsPage = () => {
             </div>
           </div>
 
-          {message ? (
-            <p className="text-sm text-emerald-700">{message}</p>
-          ) : null}
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
         </div>
       </section>
 
@@ -753,7 +744,7 @@ export const ProfessorsPage = () => {
                 className="ui-btn-secondary"
               >
                 <Upload className="h-4 w-4" />
-                导入文件
+                立即导入
               </button>
               <button
                 type="button"
