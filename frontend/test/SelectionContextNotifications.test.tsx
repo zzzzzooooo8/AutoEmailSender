@@ -43,8 +43,10 @@ describe("SelectionContext notifications", () => {
     );
 
     await waitFor(() => {
-      const message = screen.getByText("加载全局上下文失败");
-      expect(message.closest('[data-testid="notification-card"]')).not.toBeNull();
+      const cards = screen.getAllByTestId("notification-card");
+      expect(
+        cards.some((card) => card.textContent?.includes("加载全局上下文失败")),
+      ).toBe(true);
     });
   });
 });
