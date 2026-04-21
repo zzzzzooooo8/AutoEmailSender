@@ -48,11 +48,11 @@ export const createFormErrorNotification = (
 
 export const createNotificationRecord = (
   draft: NotificationDraft,
-  overrides?: Pick<NotificationRecord, "id" | "createdAt">,
+  options: { id: string; createdAt?: number },
 ): NotificationRecord => ({
   ...draft,
-  id: overrides?.id ?? crypto.randomUUID(),
-  createdAt: overrides?.createdAt ?? Date.now(),
+  id: options.id,
+  createdAt: options.createdAt ?? 0,
   durationMs: calculateNotificationDuration(draft),
   interactiveLocked: false,
   closing: false,
