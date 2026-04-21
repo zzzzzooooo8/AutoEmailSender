@@ -28,6 +28,7 @@ export const HomePage = () => {
   const [scoringProfessorIds, setScoringProfessorIds] = useState<Set<number>>(new Set());
   const loadedProfessorsKeyRef = useRef<string | null>(null);
   const activeProfessorsRequestKeyRef = useRef<string | null>(null);
+  const latestProfessorsRequestIdRef = useRef(0);
   const professorsRequestKey =
     selectedIdentityId && selectedLlmProfileId
       ? `${selectedIdentityId}:${selectedLlmProfileId}`
@@ -35,12 +36,16 @@ export const HomePage = () => {
 
   const loadProfessors = useCallback(async () => {
     if (!professorsRequestKey || !selectedIdentityId || !selectedLlmProfileId) {
+      latestProfessorsRequestIdRef.current += 1;
       activeProfessorsRequestKeyRef.current = null;
       loadedProfessorsKeyRef.current = null;
       setProfessors([]);
       setSelectedIds(new Set());
+      setLoading(false);
       return;
     }
+    const requestId = latestProfessorsRequestIdRef.current + 1;
+    latestProfessorsRequestIdRef.current = requestId;
     activeProfessorsRequestKeyRef.current = professorsRequestKey;
     setLoading(true);
     try {
@@ -48,7 +53,10 @@ export const HomePage = () => {
         identityId: selectedIdentityId,
         llmProfileId: selectedLlmProfileId,
       });
-      if (activeProfessorsRequestKeyRef.current !== professorsRequestKey) {
+      if (
+        latestProfessorsRequestIdRef.current !== requestId ||
+        activeProfessorsRequestKeyRef.current !== professorsRequestKey
+      ) {
         return;
       }
       const previousLoadedKey = loadedProfessorsKeyRef.current;
@@ -67,7 +75,10 @@ export const HomePage = () => {
       });
       loadedProfessorsKeyRef.current = professorsRequestKey;
     } catch (loadError) {
-      if (activeProfessorsRequestKeyRef.current !== professorsRequestKey) {
+      if (
+        latestProfessorsRequestIdRef.current !== requestId ||
+        activeProfessorsRequestKeyRef.current !== professorsRequestKey
+      ) {
         return;
       }
       if (loadedProfessorsKeyRef.current !== professorsRequestKey) {
@@ -77,7 +88,10 @@ export const HomePage = () => {
       const message = loadError instanceof Error ? loadError.message : '加载导师列表失败';
       notifyError('加载导师列表失败', message);
     } finally {
-      if (activeProfessorsRequestKeyRef.current === professorsRequestKey) {
+      if (
+        latestProfessorsRequestIdRef.current === requestId &&
+        activeProfessorsRequestKeyRef.current === professorsRequestKey
+      ) {
         setLoading(false);
       }
     }

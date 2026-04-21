@@ -71,6 +71,7 @@ export const CreateTaskPage = () => {
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<number[]>([]);
   const loadedProfessorsKeyRef = useRef<string | null>(null);
   const activeProfessorsRequestKeyRef = useRef<string | null>(null);
+  const latestProfessorsRequestIdRef = useRef(0);
   const professorsRequestKey =
     selectedIdentityId && selectedLlmProfileId && selectedProfessorIds.length > 0
       ? `${selectedIdentityId}:${selectedLlmProfileId}:${selectedProfessorIds.join(',')}`
@@ -79,11 +80,15 @@ export const CreateTaskPage = () => {
   useEffect(() => {
     const loadProfessors = async () => {
       if (!professorsRequestKey || !selectedIdentityId || !selectedLlmProfileId || selectedProfessorIds.length === 0) {
+        latestProfessorsRequestIdRef.current += 1;
         activeProfessorsRequestKeyRef.current = null;
         loadedProfessorsKeyRef.current = null;
         setProfessors([]);
+        setLoading(false);
         return;
       }
+      const requestId = latestProfessorsRequestIdRef.current + 1;
+      latestProfessorsRequestIdRef.current = requestId;
       activeProfessorsRequestKeyRef.current = professorsRequestKey;
       setLoading(true);
       try {
@@ -92,13 +97,19 @@ export const CreateTaskPage = () => {
           llmProfileId: selectedLlmProfileId,
           ids: selectedProfessorIds,
         });
-        if (activeProfessorsRequestKeyRef.current !== professorsRequestKey) {
+        if (
+          latestProfessorsRequestIdRef.current !== requestId ||
+          activeProfessorsRequestKeyRef.current !== professorsRequestKey
+        ) {
           return;
         }
         setProfessors(data);
         loadedProfessorsKeyRef.current = professorsRequestKey;
       } catch (loadError) {
-        if (activeProfessorsRequestKeyRef.current !== professorsRequestKey) {
+        if (
+          latestProfessorsRequestIdRef.current !== requestId ||
+          activeProfessorsRequestKeyRef.current !== professorsRequestKey
+        ) {
           return;
         }
         if (loadedProfessorsKeyRef.current !== professorsRequestKey) {
@@ -107,7 +118,10 @@ export const CreateTaskPage = () => {
         const message = loadError instanceof Error ? loadError.message : '加载已选导师失败';
         notifyError('加载已选导师失败', message);
       } finally {
-        if (activeProfessorsRequestKeyRef.current === professorsRequestKey) {
+        if (
+          latestProfessorsRequestIdRef.current === requestId &&
+          activeProfessorsRequestKeyRef.current === professorsRequestKey
+        ) {
           setLoading(false);
         }
       }

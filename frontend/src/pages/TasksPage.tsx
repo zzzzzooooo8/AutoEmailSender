@@ -32,6 +32,7 @@ export const TasksPage = () => {
   const lastLoadErrorRef = useRef<string | null>(null);
   const loadedTasksKeyRef = useRef<string | null>(null);
   const activeTasksRequestKeyRef = useRef<string | null>(null);
+  const latestTasksRequestIdRef = useRef(0);
   const tasksRequestKey =
     selectedIdentityId && selectedLlmProfileId
       ? `${selectedIdentityId}:${selectedLlmProfileId}`
@@ -39,12 +40,16 @@ export const TasksPage = () => {
 
   const loadTasks = useCallback(async () => {
     if (!tasksRequestKey || !selectedIdentityId || !selectedLlmProfileId) {
+      latestTasksRequestIdRef.current += 1;
       activeTasksRequestKeyRef.current = null;
       loadedTasksKeyRef.current = null;
       setTasks([]);
       lastLoadErrorRef.current = null;
+      setLoading(false);
       return;
     }
+    const requestId = latestTasksRequestIdRef.current + 1;
+    latestTasksRequestIdRef.current = requestId;
     activeTasksRequestKeyRef.current = tasksRequestKey;
     setLoading(true);
     try {
@@ -52,14 +57,20 @@ export const TasksPage = () => {
         identityId: selectedIdentityId,
         llmProfileId: selectedLlmProfileId,
       });
-      if (activeTasksRequestKeyRef.current !== tasksRequestKey) {
+      if (
+        latestTasksRequestIdRef.current !== requestId ||
+        activeTasksRequestKeyRef.current !== tasksRequestKey
+      ) {
         return;
       }
       setTasks(data);
       loadedTasksKeyRef.current = tasksRequestKey;
       lastLoadErrorRef.current = null;
     } catch (loadError) {
-      if (activeTasksRequestKeyRef.current !== tasksRequestKey) {
+      if (
+        latestTasksRequestIdRef.current !== requestId ||
+        activeTasksRequestKeyRef.current !== tasksRequestKey
+      ) {
         return;
       }
       if (loadedTasksKeyRef.current !== tasksRequestKey) {
@@ -71,7 +82,10 @@ export const TasksPage = () => {
         lastLoadErrorRef.current = message;
       }
     } finally {
-      if (activeTasksRequestKeyRef.current === tasksRequestKey) {
+      if (
+        latestTasksRequestIdRef.current === requestId &&
+        activeTasksRequestKeyRef.current === tasksRequestKey
+      ) {
         setLoading(false);
       }
     }

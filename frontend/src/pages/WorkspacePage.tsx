@@ -91,6 +91,7 @@ export const WorkspacePage = () => {
   const [composerExpanded, setComposerExpanded] = useState(false);
   const loadedThreadKeyRef = useRef<string | null>(null);
   const activeThreadRequestKeyRef = useRef<string | null>(null);
+  const latestThreadRequestIdRef = useRef(0);
   const workspaceRequestKey =
     Number.isFinite(professorId) && selectedIdentityId && selectedLlmProfileId
       ? `${professorId}:${selectedIdentityId}:${selectedLlmProfileId}`
@@ -138,13 +139,17 @@ export const WorkspacePage = () => {
 
   const loadThread = useCallback(async () => {
     if (!workspaceRequestKey || !selectedIdentityId || !selectedLlmProfileId || !Number.isFinite(professorId)) {
+      latestThreadRequestIdRef.current += 1;
       activeThreadRequestKeyRef.current = null;
       loadedThreadKeyRef.current = null;
       setThread(null);
       setLoadFailed(false);
+      setLoading(false);
       return;
     }
 
+    const requestId = latestThreadRequestIdRef.current + 1;
+    latestThreadRequestIdRef.current = requestId;
     activeThreadRequestKeyRef.current = workspaceRequestKey;
     setLoading(true);
     try {
@@ -161,7 +166,10 @@ export const WorkspacePage = () => {
               selectedLlmProfileId,
             )
           : data;
-      if (activeThreadRequestKeyRef.current !== workspaceRequestKey) {
+      if (
+        latestThreadRequestIdRef.current !== requestId ||
+        activeThreadRequestKeyRef.current !== workspaceRequestKey
+      ) {
         return;
       }
       setThread(workspaceData);
@@ -169,7 +177,10 @@ export const WorkspacePage = () => {
       syncComposer(workspaceData);
       loadedThreadKeyRef.current = workspaceRequestKey;
     } catch (loadError) {
-      if (activeThreadRequestKeyRef.current !== workspaceRequestKey) {
+      if (
+        latestThreadRequestIdRef.current !== requestId ||
+        activeThreadRequestKeyRef.current !== workspaceRequestKey
+      ) {
         return;
       }
       const message = loadError instanceof Error ? loadError.message : '加载工作区失败';
@@ -181,7 +192,10 @@ export const WorkspacePage = () => {
       }
       notifyError('加载工作区失败', message);
     } finally {
-      if (activeThreadRequestKeyRef.current === workspaceRequestKey) {
+      if (
+        latestThreadRequestIdRef.current === requestId &&
+        activeThreadRequestKeyRef.current === workspaceRequestKey
+      ) {
         setLoading(false);
       }
     }
