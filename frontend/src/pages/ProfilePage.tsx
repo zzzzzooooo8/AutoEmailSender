@@ -86,6 +86,11 @@ type LLMFormState = {
 
 type EditorId = number | "new" | null;
 type ActionResultState = "idle" | "success" | "error";
+type IdentityConnectionTestSummary = {
+  kind: "smtp" | "imap";
+  status: "success" | "error";
+  message: string;
+};
 
 type MaterialFilterValue = IdentityMaterialType | "all";
 
@@ -774,10 +779,12 @@ const MaterialSummaryCard = ({
 
 const IdentityConnectionCard = ({
   testingIdentityConnection,
+  lastResult,
   onTestSmtp,
   onTestImap,
 }: {
   testingIdentityConnection: "smtp" | "imap" | null;
+  lastResult: IdentityConnectionTestSummary | null;
   onTestSmtp: () => void;
   onTestImap: () => void;
 }) => (
@@ -811,6 +818,17 @@ const IdentityConnectionCard = ({
         </button>
       </div>
     </div>
+    {lastResult ? (
+      <div className="mt-4 rounded-2xl border border-stone-200/80 bg-white/80 px-4 py-3 text-sm text-stone-700">
+        <div className="font-medium text-stone-900">
+          上次测试：{lastResult.kind.toUpperCase()}
+          {lastResult.status === "success" ? " 成功" : " 失败"}
+        </div>
+        <div className="mt-1 whitespace-pre-wrap break-words text-stone-600">
+          {lastResult.message}
+        </div>
+      </div>
+    ) : null}
   </div>
 );
 
@@ -1358,6 +1376,8 @@ export const ProfilePage = () => {
   const [testingIdentityConnection, setTestingIdentityConnection] = useState<
     "smtp" | "imap" | null
   >(null);
+  const [lastIdentityConnectionResult, setLastIdentityConnectionResult] =
+    useState<IdentityConnectionTestSummary | null>(null);
   const [testingLLMConnection, setTestingLLMConnection] = useState(false);
   const [fetchingLLMModels, setFetchingLLMModels] = useState(false);
   const [llmProbeResult, setLlmProbeResult] =
@@ -1572,6 +1592,7 @@ export const ProfilePage = () => {
     setIdentityForm(createEmptyIdentityForm());
     setTemplateModalOpen(false);
     setTestingIdentityConnection(null);
+    setLastIdentityConnectionResult(null);
     setHighlightedMaterialId(null);
     setOptimisticMaterial(null);
     window.requestAnimationFrame(() =>
@@ -1598,6 +1619,7 @@ export const ProfilePage = () => {
     setIdentityForm(toIdentityForm(identity));
     setTemplateModalOpen(false);
     setTestingIdentityConnection(null);
+    setLastIdentityConnectionResult(null);
     setHighlightedMaterialId(null);
     setOptimisticMaterial(null);
   };
@@ -1636,11 +1658,25 @@ export const ProfilePage = () => {
         kind === "smtp"
           ? await testIdentitySmtp(editingIdentity.id)
           : await testIdentityImap(editingIdentity.id);
+      setLastIdentityConnectionResult({
+        kind,
+        status: "success",
+        message: result.message,
+      });
       notifySuccess(`${kind.toUpperCase()} 连接测试成功`, result.message);
     } catch (testError) {
+      const message = getActionErrorMessage(
+        testError,
+        `${kind.toUpperCase()} 测试失败`,
+      );
+      setLastIdentityConnectionResult({
+        kind,
+        status: "error",
+        message,
+      });
       notifyError(
         `${kind.toUpperCase()} 连接测试失败`,
-        getActionErrorMessage(testError, `${kind.toUpperCase()} 测试失败`),
+        message,
       );
     } finally {
       setTestingIdentityConnection(null);
@@ -2095,6 +2131,7 @@ export const ProfilePage = () => {
               <div className="mt-6">
                 <IdentityConnectionCard
                   testingIdentityConnection={testingIdentityConnection}
+                  lastResult={lastIdentityConnectionResult}
                   onTestSmtp={() => void runIdentityConnectionTest("smtp")}
                   onTestImap={() => void runIdentityConnectionTest("imap")}
                 />
