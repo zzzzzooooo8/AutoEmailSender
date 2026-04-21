@@ -4,6 +4,7 @@ import { ArrowLeft, Loader2 } from 'lucide-react';
 import { WorkspaceComposerDock } from '@/components/organisms/WorkspaceComposerDock';
 import { WorkspaceMessageThread } from '@/components/organisms/WorkspaceMessageThread';
 import { WorkspaceSidebar } from '@/components/organisms/WorkspaceSidebar';
+import { useNotification } from '@/context/NotificationContext';
 import { useSelectionContext } from '@/context/SelectionContext';
 import {
   approveAndSchedule,
@@ -76,11 +77,12 @@ const getStatusLabel = (currentTask: WorkspaceTaskSummaryDTO | null) => {
 export const WorkspacePage = () => {
   const { id } = useParams<{ id: string }>();
   const professorId = Number(id);
+  const { notifyError, notifyFormErrors } = useNotification();
   const { selectedIdentityId, selectedLlmProfileId } = useSelectionContext();
   const [thread, setThread] = useState<WorkspaceThreadDTO | null>(null);
   const [loading, setLoading] = useState(false);
   const [acting, setActing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [subject, setSubject] = useState('');
   const [content, setContent] = useState('');
   const [contentHtml, setContentHtml] = useState<string | null>(null);
@@ -131,6 +133,7 @@ export const WorkspacePage = () => {
   const loadThread = useCallback(async () => {
     if (!selectedIdentityId || !selectedLlmProfileId || !Number.isFinite(professorId)) {
       setThread(null);
+      setLoadFailed(false);
       return;
     }
 
@@ -150,14 +153,17 @@ export const WorkspacePage = () => {
             )
           : data;
       setThread(workspaceData);
+      setLoadFailed(false);
       syncComposer(workspaceData);
-      setError(null);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : '加载工作区失败');
+      const message = loadError instanceof Error ? loadError.message : '加载工作区失败';
+      setThread(null);
+      setLoadFailed(true);
+      notifyError('加载工作区失败', message);
     } finally {
       setLoading(false);
     }
-  }, [professorId, selectedIdentityId, selectedLlmProfileId, syncComposer]);
+  }, [notifyError, professorId, selectedIdentityId, selectedLlmProfileId, syncComposer]);
 
   useEffect(() => {
     void loadThread();
@@ -197,6 +203,7 @@ export const WorkspacePage = () => {
   const runAction = useCallback(
     async (
       action: () => Promise<WorkspaceThreadDTO>,
+      fallbackTitle: string,
       fallbackMessage: string,
       onSuccess?: (data: WorkspaceThreadDTO) => void,
     ) => {
@@ -204,16 +211,17 @@ export const WorkspacePage = () => {
       try {
         const data = await action();
         setThread(data);
+        setLoadFailed(false);
         syncComposer(data);
-        setError(null);
         onSuccess?.(data);
       } catch (actionError) {
-        setError(actionError instanceof Error ? actionError.message : fallbackMessage);
+        const message = actionError instanceof Error ? actionError.message : fallbackMessage;
+        notifyError(fallbackTitle, message);
       } finally {
         setActing(false);
       }
     },
-    [syncComposer],
+    [notifyError, syncComposer],
   );
 
   const handleContentChange = useCallback((value: string) => {
@@ -235,6 +243,7 @@ export const WorkspacePage = () => {
           selected_material_ids: selectedMaterialIds,
         }),
       '发送失败',
+      '发送失败',
       () => setComposerExpanded(false),
     );
   }, [
@@ -253,7 +262,7 @@ export const WorkspacePage = () => {
 
     const scheduleDate = new Date(scheduledAt);
     if (Number.isNaN(scheduleDate.getTime())) {
-      setError('请先选一个有效的发送时间');
+      notifyFormErrors('请检查表单', ['请先选一个有效的发送时间']);
       return;
     }
 
@@ -267,12 +276,14 @@ export const WorkspacePage = () => {
           scheduled_at: scheduleDate.toISOString(),
         }),
       '定时发送失败',
+      '定时发送失败',
       () => setComposerExpanded(false),
     );
   }, [
     content,
     contentHtml,
     currentTaskId,
+    notifyFormErrors,
     runAction,
     scheduledAt,
     selectedMaterialIds,
@@ -284,7 +295,7 @@ export const WorkspacePage = () => {
       return;
     }
 
-    void runAction(() => cancelScheduledTask(currentTaskId), '取消定时失败');
+    void runAction(() => cancelScheduledTask(currentTaskId), '取消定时失败', '取消定时失败');
   }, [currentTaskId, runAction]);
 
   const handleSelectPrimaryMaterial = useCallback(
@@ -296,6 +307,7 @@ export const WorkspacePage = () => {
       void runAction(
         () => updateTaskPrimaryMaterial(currentTaskId, materialId),
         '切换默认材料失败',
+        '切换默认材料失败',
       );
     },
     [currentTaskId, runAction],
@@ -306,7 +318,7 @@ export const WorkspacePage = () => {
       return;
     }
 
-    void runAction(() => calculateMatch(currentTaskId), '计算匹配失败');
+    void runAction(() => calculateMatch(currentTaskId), '计算匹配失败', '计算匹配失败');
   }, [currentTaskId, runAction]);
 
   const handleGenerateDraft = useCallback(() => {
@@ -316,6 +328,7 @@ export const WorkspacePage = () => {
 
     void runAction(
       () => generateDraft(currentTaskId),
+      '生成草稿失败',
       '生成草稿失败',
       () => setComposerExpanded(true),
     );
@@ -332,6 +345,7 @@ export const WorkspacePage = () => {
           updateTaskOutreachConfig(currentTaskId, {
             outreach_generation_mode: nextMode,
           }),
+        '切换模式失败',
         '切换模式失败',
       );
     },
@@ -368,7 +382,7 @@ export const WorkspacePage = () => {
     return (
       <main className="mx-auto max-w-7xl px-6 py-8">
         <div className="rounded-[32px] border border-dashed border-stone-300 bg-white px-6 py-16 text-center text-sm text-stone-500 shadow-sm">
-          {error ?? '未找到工作区数据'}
+          {loadFailed ? '工作区数据暂时不可用，请返回上一页后重试。' : '未找到工作区数据'}
         </div>
       </main>
     );
@@ -437,7 +451,6 @@ export const WorkspacePage = () => {
                   selectedMaterialIds={selectedMaterialIds}
                   scheduledAt={scheduledAt}
                   acting={acting}
-                  error={error}
                   primaryMaterialOptions={primaryMaterialOptions}
                   canChangePrimaryMaterial={canChangePrimaryMaterial}
                   canChangeMode={canChangeMode}

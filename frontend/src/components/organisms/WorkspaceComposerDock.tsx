@@ -28,7 +28,6 @@ type WorkspaceComposerDockProps = {
   selectedMaterialIds: number[];
   scheduledAt: string;
   acting: boolean;
-  error: string | null;
   primaryMaterialOptions: IdentityMaterialDTO[];
   canChangePrimaryMaterial: boolean;
   canChangeMode: boolean;
@@ -103,7 +102,6 @@ export const WorkspaceComposerDock = ({
   selectedMaterialIds,
   scheduledAt,
   acting,
-  error,
   primaryMaterialOptions,
   canChangePrimaryMaterial,
   canChangeMode,
@@ -393,8 +391,6 @@ export const WorkspaceComposerDock = ({
                 </button>
               </div>
             </div>
-
-            {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
           </div>
         ) : null}
 
@@ -463,7 +459,6 @@ export const WorkspaceComposerDock = ({
           {limitationHint ? (
             <div className="mt-3 text-xs leading-5 text-stone-500">{limitationHint}</div>
           ) : null}
-          {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
         </div>
       </div>
     </div>

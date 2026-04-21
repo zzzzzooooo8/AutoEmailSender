@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { FolderOpen, Loader2, MailPlus, RefreshCcw, Search, Sparkles } from 'lucide-react';
 import { NativeSelectField } from '@/components/atoms/NativeSelectField';
+import { useNotification } from '@/context/NotificationContext';
 import { useSelectionContext } from '@/context/SelectionContext';
 import { calculateMatch } from '@/lib/api/emailTasksApi';
 import { useConfirmDialog } from '@/lib/useConfirmDialog';
@@ -14,6 +15,7 @@ const SESSION_KEY = 'selected_professor_ids';
 export const HomePage = () => {
   const navigate = useNavigate();
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
+  const { notifyError, notifyWarning } = useNotification();
   const { selectedIdentityId, selectedLlmProfileId, selectedIdentity, selectedLlmProfile, systemSettings } =
     useSelectionContext();
   const [professors, setProfessors] = useState<ProfessorDashboardItemDTO[]>([]);
@@ -24,7 +26,6 @@ export const HomePage = () => {
   const [loading, setLoading] = useState(false);
   const [bulkScoring, setBulkScoring] = useState(false);
   const [scoringProfessorIds, setScoringProfessorIds] = useState<Set<number>>(new Set());
-  const [error, setError] = useState<string | null>(null);
 
   const loadProfessors = useCallback(async () => {
     if (!selectedIdentityId || !selectedLlmProfileId) {
@@ -47,13 +48,13 @@ export const HomePage = () => {
         });
         return next;
       });
-      setError(null);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : '加载导师列表失败');
+      const message = loadError instanceof Error ? loadError.message : '加载导师列表失败';
+      notifyError('加载导师列表失败', message);
     } finally {
       setLoading(false);
     }
-  }, [selectedIdentityId, selectedLlmProfileId]);
+  }, [notifyError, selectedIdentityId, selectedLlmProfileId]);
 
   useEffect(() => {
     void loadProfessors();
@@ -132,7 +133,10 @@ export const HomePage = () => {
 
   const handleGenerateOne = async (professorId: number) => {
     if (!hasPrimaryMaterial) {
-      setError('当前身份还没有默认材料，暂时无法计算匹配。请先到个人页设置默认材料。');
+      notifyWarning(
+        '缺少默认材料',
+        '当前身份还没有默认材料，暂时无法计算匹配。请先到个人页设置默认材料。',
+      );
       return;
     }
 
@@ -140,9 +144,9 @@ export const HomePage = () => {
     try {
       await runCalculateMatchForProfessor(professorId);
       await loadProfessors();
-      setError(null);
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : '计算匹配失败');
+      const message = actionError instanceof Error ? actionError.message : '计算匹配失败';
+      notifyError('计算匹配失败', message);
     } finally {
       toggleScoringProfessor(professorId, false);
     }
@@ -160,12 +164,14 @@ export const HomePage = () => {
     }
 
     if (!hasPrimaryMaterial) {
-      setError('当前身份还没有默认材料，暂时无法批量计算匹配。请先到个人页设置默认材料。');
+      notifyWarning(
+        '缺少默认材料',
+        '当前身份还没有默认材料，暂时无法批量计算匹配。请先到个人页设置默认材料。',
+      );
       return;
     }
 
     setBulkScoring(true);
-    setError(null);
     const failedNames: string[] = [];
     const selectedProfessors = professors.filter((item) => selectedIds.has(item.id));
 
@@ -186,7 +192,7 @@ export const HomePage = () => {
       }
       await loadProfessors();
       if (failedNames.length > 0) {
-        setError(`部分导师计算失败：${failedNames.slice(0, 2).join('；')}`);
+        notifyError('部分导师计算失败', failedNames.slice(0, 2).join('；'));
       }
     } finally {
       setBulkScoring(false);
@@ -309,7 +315,6 @@ export const HomePage = () => {
                 当前首页只做匹配分析，不会顺带生成草稿；草稿生成请到工作区单独执行。
               </p>
             )}
-            {error ? <p className="text-sm text-red-600">{error}</p> : null}
           </div>
         </section>
 

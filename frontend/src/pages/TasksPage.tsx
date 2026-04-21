@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Loader2, Pause, Play, Square } from "lucide-react";
+import { useNotification } from "@/context/NotificationContext";
 import { useSelectionContext } from "@/context/SelectionContext";
 import { useConfirmDialog } from "@/lib/useConfirmDialog";
 import {
@@ -24,14 +25,16 @@ const buildScheduleLabel = (task: BatchTaskCardDTO) => {
 
 export const TasksPage = () => {
   const { selectedIdentityId, selectedLlmProfileId } = useSelectionContext();
+  const { notifyError } = useNotification();
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const [tasks, setTasks] = useState<BatchTaskCardDTO[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const lastLoadErrorRef = useRef<string | null>(null);
 
   const loadTasks = useCallback(async () => {
     if (!selectedIdentityId || !selectedLlmProfileId) {
       setTasks([]);
+      lastLoadErrorRef.current = null;
       return;
     }
     setLoading(true);
@@ -41,13 +44,17 @@ export const TasksPage = () => {
         llmProfileId: selectedLlmProfileId,
       });
       setTasks(data);
-      setError(null);
+      lastLoadErrorRef.current = null;
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "加载任务失败");
+      const message = loadError instanceof Error ? loadError.message : "加载任务失败";
+      if (lastLoadErrorRef.current !== message) {
+        notifyError("加载任务失败", message);
+        lastLoadErrorRef.current = message;
+      }
     } finally {
       setLoading(false);
     }
-  }, [selectedIdentityId, selectedLlmProfileId]);
+  }, [notifyError, selectedIdentityId, selectedLlmProfileId]);
 
   useEffect(() => {
     void loadTasks();
@@ -81,7 +88,8 @@ export const TasksPage = () => {
       }
       await loadTasks();
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : "任务操作失败");
+      const message = actionError instanceof Error ? actionError.message : "任务操作失败";
+      notifyError("任务操作失败", message);
     }
   };
 
@@ -109,7 +117,6 @@ export const TasksPage = () => {
             返回首页继续选导师
           </Link>
         </div>
-        {error ? <p className="mt-4 text-sm text-red-600">{error}</p> : null}
       </div>
 
       {loading ? (

@@ -5,9 +5,11 @@ import {
   createContext,
   useContext,
   useEffect,
+  useRef,
   useState,
   type PropsWithChildren,
 } from 'react';
+import { useNotification } from '@/context/NotificationContext';
 import { listIdentities } from '@/lib/api/identities';
 import { listLLMProfiles } from '@/lib/api/llmProfiles';
 import { getSystemSettings, updateSystemSettings } from '@/lib/api/systemSettings';
@@ -40,6 +42,9 @@ const LLM_STORAGE_KEY = 'selected_llm_profile_id';
 
 const SelectionContext = createContext<SelectionContextValue | null>(null);
 
+const getNotificationDescription = (title: string, message: string) =>
+  message === title ? undefined : message;
+
 const parseStoredId = (key: string) => {
   const value = window.localStorage.getItem(key);
   if (!value) {
@@ -50,18 +55,19 @@ const parseStoredId = (key: string) => {
 };
 
 export const SelectionProvider = ({ children }: PropsWithChildren) => {
+  const { notifyError } = useNotification();
   const [identities, setIdentities] = useState<IdentityDTO[]>([]);
   const [llmProfiles, setLlmProfiles] = useState<LLMProfileDTO[]>([]);
   const [systemSettings, setSystemSettings] = useState<SystemSettingsDTO | null>(null);
   const [selectedIdentityId, setSelectedIdentityId] = useState<number | null>(null);
   const [selectedLlmProfileId, setSelectedLlmProfileId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
-  const [bootstrapped, setBootstrapped] = useState(false);
+  const bootstrappedRef = useRef(false);
   const [updatingMode, setUpdatingMode] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refreshSelections = useCallback(async () => {
-    if (!bootstrapped) {
+    if (!bootstrappedRef.current) {
       setLoading(true);
     }
     try {
@@ -75,12 +81,14 @@ export const SelectionProvider = ({ children }: PropsWithChildren) => {
       setSystemSettings(settingsData);
       setError(null);
     } catch (refreshError) {
-      setError(refreshError instanceof Error ? refreshError.message : '加载全局上下文失败');
+      const message = refreshError instanceof Error ? refreshError.message : '加载全局上下文失败';
+      setError(message);
+      notifyError('加载全局上下文失败', getNotificationDescription('加载全局上下文失败', message));
     } finally {
       setLoading(false);
-      setBootstrapped(true);
+      bootstrappedRef.current = true;
     }
-  }, [bootstrapped]);
+  }, [notifyError]);
 
   useEffect(() => {
     void refreshSelections();
@@ -139,7 +147,9 @@ export const SelectionProvider = ({ children }: PropsWithChildren) => {
       setSystemSettings(nextSettings);
       setError(null);
     } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : '切换发送模式失败');
+      const message = updateError instanceof Error ? updateError.message : '切换发送模式失败';
+      setError(message);
+      notifyError('切换发送模式失败', getNotificationDescription('切换发送模式失败', message));
       throw updateError;
     } finally {
       setUpdatingMode(false);

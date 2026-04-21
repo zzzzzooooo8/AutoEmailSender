@@ -2,6 +2,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { NativeSelectField } from '@/components/atoms/NativeSelectField';
+import { useNotification } from '@/context/NotificationContext';
 import { createBatchTask } from '@/lib/api/batchTasksApi';
 import { listProfessors } from '@/lib/api/professorsApi';
 import { useSelectionContext } from '@/context/SelectionContext';
@@ -48,12 +49,12 @@ const MODE_OPTIONS: Array<{
 
 export const CreateTaskPage = () => {
   const navigate = useNavigate();
+  const { notifyError, notifyFormErrors } = useNotification();
   const { selectedIdentityId, selectedLlmProfileId, selectedIdentity } = useSelectionContext();
   const [selectedProfessorIds] = useState<number[]>(readSelectedProfessorIds());
   const [professors, setProfessors] = useState<ProfessorDashboardItemDTO[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [taskName, setTaskName] = useState(`批量任务 ${new Date().toLocaleDateString('zh-CN')}`);
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
@@ -82,16 +83,16 @@ export const CreateTaskPage = () => {
           ids: selectedProfessorIds,
         });
         setProfessors(data);
-        setError(null);
       } catch (loadError) {
-        setError(loadError instanceof Error ? loadError.message : '加载已选导师失败');
+        const message = loadError instanceof Error ? loadError.message : '加载已选导师失败';
+        notifyError('加载已选导师失败', message);
       } finally {
         setLoading(false);
       }
     };
 
     void loadProfessors();
-  }, [selectedIdentityId, selectedLlmProfileId, selectedProfessorIds]);
+  }, [notifyError, selectedIdentityId, selectedLlmProfileId, selectedProfessorIds]);
 
   useEffect(() => {
     if (!selectedIdentity) {
@@ -128,28 +129,36 @@ export const CreateTaskPage = () => {
   const templateReady = Boolean(templateBodyText.trim() || templateBodyHtml.trim());
 
   const handleSubmit = async () => {
+    const validationErrors: string[] = [];
+
     if (!selectedIdentityId || !selectedLlmProfileId) {
-      setError('请先选择身份和模型');
-      return;
+      validationErrors.push('请先选择身份和模型');
     }
     if (!taskName.trim()) {
-      setError('任务名称不能为空');
-      return;
+      validationErrors.push('任务名称不能为空');
     }
     if (professors.length === 0) {
-      setError('当前没有可执行的导师');
-      return;
+      validationErrors.push('当前没有可执行的导师');
     }
     if (scheduleType === 'scheduled' && (!startTime || !endTime || !emailsPerWindow)) {
-      setError('定时发送需要填写发送时间窗口和窗口内发送数量');
-      return;
+      validationErrors.push('定时发送需要填写发送时间窗口和窗口内发送数量');
     }
     if (taskMode === 'template' && !templateReady) {
-      setError('固定模板模式至少需要填写纯文本正文或 HTML 正文');
-      return;
+      validationErrors.push('固定模板模式至少需要填写纯文本正文或 HTML 正文');
     }
     if (taskMode === 'llm' && !body.trim()) {
-      setError('模板润色模式至少需要填写一份套磁信模板正文');
+      validationErrors.push('模板润色模式至少需要填写一份套磁信模板正文');
+    }
+
+    if (validationErrors.length > 0) {
+      notifyFormErrors('请检查表单', validationErrors);
+      return;
+    }
+
+    const identityId = selectedIdentityId;
+    const llmProfileId = selectedLlmProfileId;
+
+    if (!identityId || !llmProfileId) {
       return;
     }
 
@@ -164,8 +173,8 @@ export const CreateTaskPage = () => {
       const taskTemplateBodyHtml = taskMode === 'template' ? templateBodyHtml.trim() || null : null;
 
       await createBatchTask({
-        identity_id: selectedIdentityId,
-        llm_profile_id: selectedLlmProfileId,
+        identity_id: identityId,
+        llm_profile_id: llmProfileId,
         name: taskName.trim(),
         professor_ids: professors.map((item) => item.id),
         schedule_type: scheduleType,
@@ -185,7 +194,8 @@ export const CreateTaskPage = () => {
       window.sessionStorage.removeItem(SESSION_KEY);
       navigate('/tasks');
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : '创建批量任务失败');
+      const message = submitError instanceof Error ? submitError.message : '创建任务失败';
+      notifyError('创建任务失败', message);
     } finally {
       setSubmitting(false);
     }
@@ -487,8 +497,6 @@ export const CreateTaskPage = () => {
                   </div>
                 )}
               </div>
-
-              {error && <p className="text-sm text-red-600">{error}</p>}
 
               <div className="flex flex-wrap gap-3">
                 <button type="button" onClick={() => navigate('/')} className="ui-btn-secondary">
