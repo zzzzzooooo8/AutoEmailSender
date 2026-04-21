@@ -12,4 +12,5 @@ data/uploads/
 frontend/dist/
 .superpowers
 .omx
+.worktrees/
 docs/superpowers/plans/
