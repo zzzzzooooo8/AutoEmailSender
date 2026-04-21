@@ -744,7 +744,7 @@ export const ProfessorsPage = () => {
                 className="ui-btn-secondary"
               >
                 <Upload className="h-4 w-4" />
-                立即导入
+                导入文件
               </button>
               <button
                 type="button"

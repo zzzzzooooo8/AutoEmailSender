@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NotificationProvider } from "@/context/NotificationContext";
 import { ProfessorsPage } from "@/pages/ProfessorsPage";
@@ -35,7 +35,17 @@ describe("ProfessorsPage notifications", () => {
       expect(listProfessorsForManagement).toHaveBeenCalled();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "导入文件" }));
+    const headerSection = screen
+      .getByRole("heading", { name: "导师档案工作台" })
+      .closest("section");
+
+    expect(headerSection).not.toBeNull();
+
+    fireEvent.click(
+      within(headerSection as HTMLElement).getByRole("button", {
+        name: "导入文件",
+      }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "开始导入" }));
 
     const message = screen.getByText("请先选择要导入的 csv 或 xlsx 文件");
