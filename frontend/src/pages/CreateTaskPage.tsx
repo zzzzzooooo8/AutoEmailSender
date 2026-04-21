@@ -84,6 +84,7 @@ export const CreateTaskPage = () => {
         });
         setProfessors(data);
       } catch (loadError) {
+        setProfessors([]);
         const message = loadError instanceof Error ? loadError.message : '加载已选导师失败';
         notifyError('加载已选导师失败', message);
       } finally {

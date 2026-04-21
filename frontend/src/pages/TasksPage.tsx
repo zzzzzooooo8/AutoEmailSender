@@ -46,6 +46,7 @@ export const TasksPage = () => {
       setTasks(data);
       lastLoadErrorRef.current = null;
     } catch (loadError) {
+      setTasks([]);
       const message = loadError instanceof Error ? loadError.message : "加载任务失败";
       if (lastLoadErrorRef.current !== message) {
         notifyError("加载任务失败", message);

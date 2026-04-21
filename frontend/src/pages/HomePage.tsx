@@ -49,6 +49,8 @@ export const HomePage = () => {
         return next;
       });
     } catch (loadError) {
+      setProfessors([]);
+      setSelectedIds(new Set());
       const message = loadError instanceof Error ? loadError.message : '加载导师列表失败';
       notifyError('加载导师列表失败', message);
     } finally {
@@ -243,7 +245,7 @@ export const HomePage = () => {
               <button
                 type="button"
                 onClick={() => void handleGenerateSelected()}
-                disabled={bulkScoring || selectedIds.size === 0 || !hasPrimaryMaterial}
+                disabled={bulkScoring || selectedIds.size === 0}
                 className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {bulkScoring ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
@@ -398,7 +400,7 @@ export const HomePage = () => {
                     <button
                       type="button"
                       onClick={() => void handleGenerateOne(professor.id)}
-                      disabled={bulkScoring || scoringProfessorIds.has(professor.id) || !hasPrimaryMaterial}
+                      disabled={bulkScoring || scoringProfessorIds.has(professor.id)}
                       className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {scoringProfessorIds.has(professor.id) ? (

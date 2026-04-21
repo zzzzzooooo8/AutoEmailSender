@@ -1,7 +1,10 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NotificationProvider } from "@/context/NotificationContext";
-import { SelectionProvider } from "@/context/SelectionContext";
+import {
+  SelectionProvider,
+  useSelectionContext,
+} from "@/context/SelectionContext";
 
 const listIdentities = vi.hoisted(() => vi.fn());
 const listLLMProfiles = vi.hoisted(() => vi.fn());
@@ -21,6 +24,24 @@ vi.mock("@/lib/api/systemSettings", () => ({
   updateSystemSettings,
 }));
 
+const SelectionHarness = () => {
+  const { error, setMailDeliveryMode } = useSelectionContext();
+
+  return (
+    <div>
+      <div data-testid="selection-error">{error ?? "EMPTY"}</div>
+      <button
+        type="button"
+        onClick={() => {
+          void setMailDeliveryMode("live").catch(() => undefined);
+        }}
+      >
+        switch mode
+      </button>
+    </div>
+  );
+};
+
 describe("SelectionContext notifications", () => {
   beforeEach(() => {
     listIdentities.mockReset();
@@ -37,7 +58,7 @@ describe("SelectionContext notifications", () => {
     render(
       <NotificationProvider>
         <SelectionProvider>
-          <div>selection harness</div>
+          <SelectionHarness />
         </SelectionProvider>
       </NotificationProvider>,
     );
@@ -47,6 +68,45 @@ describe("SelectionContext notifications", () => {
       expect(
         cards.some((card) => card.textContent?.includes("加载全局上下文失败")),
       ).toBe(true);
+    });
+
+    expect(screen.getByTestId("selection-error")).toHaveTextContent(
+      "加载全局上下文失败",
+    );
+  });
+
+  it("shows a global notification card and keeps context error when switching mail mode fails", async () => {
+    listIdentities.mockResolvedValue([]);
+    listLLMProfiles.mockResolvedValue([]);
+    getSystemSettings.mockResolvedValue({ mail_delivery_mode: "dry_run" });
+    updateSystemSettings.mockRejectedValue(new Error("写入发送模式失败"));
+
+    render(
+      <NotificationProvider>
+        <SelectionProvider>
+          <SelectionHarness />
+        </SelectionProvider>
+      </NotificationProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("selection-error")).toHaveTextContent("EMPTY");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "switch mode" }));
+
+    await waitFor(() => {
+      const cards = screen.getAllByTestId("notification-card");
+      expect(
+        cards.some(
+          (card) =>
+            card.textContent?.includes("切换发送模式失败") &&
+            card.textContent?.includes("写入发送模式失败"),
+        ),
+      ).toBe(true);
+      expect(screen.getByTestId("selection-error")).toHaveTextContent(
+        "写入发送模式失败",
+      );
     });
   });
 });
