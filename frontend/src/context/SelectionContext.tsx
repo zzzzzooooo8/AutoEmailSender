@@ -42,9 +42,6 @@ const LLM_STORAGE_KEY = 'selected_llm_profile_id';
 
 const SelectionContext = createContext<SelectionContextValue | null>(null);
 
-const getNotificationDescription = (title: string, message: string) =>
-  message === title ? undefined : message;
-
 const parseStoredId = (key: string) => {
   const value = window.localStorage.getItem(key);
   if (!value) {
@@ -83,7 +80,7 @@ export const SelectionProvider = ({ children }: PropsWithChildren) => {
     } catch (refreshError) {
       const message = refreshError instanceof Error ? refreshError.message : '加载全局上下文失败';
       setError(message);
-      notifyError('加载全局上下文失败', getNotificationDescription('加载全局上下文失败', message));
+      notifyError('加载全局上下文失败', message);
     } finally {
       setLoading(false);
       bootstrappedRef.current = true;
@@ -149,7 +146,7 @@ export const SelectionProvider = ({ children }: PropsWithChildren) => {
     } catch (updateError) {
       const message = updateError instanceof Error ? updateError.message : '切换发送模式失败';
       setError(message);
-      notifyError('切换发送模式失败', getNotificationDescription('切换发送模式失败', message));
+      notifyError('切换发送模式失败', message);
       throw updateError;
     } finally {
       setUpdatingMode(false);
