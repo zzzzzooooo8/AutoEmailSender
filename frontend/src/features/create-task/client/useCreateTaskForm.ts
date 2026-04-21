@@ -17,7 +17,12 @@ export const useCreateTaskForm = (initialMentors: Mentor[]) => {
     setSchedule((prev) => ({
       ...prev,
       type,
-      ...(type === 'immediate' ? {} : { startTime: undefined, endTime: undefined, emailsToSend: undefined }),
+      ...(type === 'immediate'
+        ? {}
+        : {
+            startTime: prev.startTime ?? '09:00',
+            endTime: prev.endTime ?? '18:00',
+          }),
     }));
   }, []);
 
@@ -53,9 +58,6 @@ export const useCreateTaskForm = (initialMentors: Mentor[]) => {
     attachments,
   });
 
-  const isScheduleComplete = schedule.type === 'immediate' ||
-    (!!schedule.startTime && !!schedule.endTime && !!schedule.emailsToSend);
-
   return {
     name,
     setName,
@@ -72,7 +74,5 @@ export const useCreateTaskForm = (initialMentors: Mentor[]) => {
     isSubmitting,
     setIsSubmitting,
     buildFormData,
-    isScheduleComplete,
-    initialMentors,
   };
 };

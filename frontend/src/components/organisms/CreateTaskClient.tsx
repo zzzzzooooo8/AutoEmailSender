@@ -35,7 +35,6 @@ export const CreateTaskClient: React.FC<CreateTaskClientProps> = ({ mentors }) =
     isSubmitting,
     setIsSubmitting,
     buildFormData,
-    isScheduleComplete,
   } = useCreateTaskForm(mentors);
 
   const handleSubmit = async () => {
@@ -44,11 +43,6 @@ export const CreateTaskClient: React.FC<CreateTaskClientProps> = ({ mentors }) =
 
     if (!validation.valid) {
       notifyFormErrors('请检查表单', Object.values(validation.errors));
-      return;
-    }
-
-    if (!isScheduleComplete) {
-      notifyFormErrors('请检查表单', ['请完善发送策略配置']);
       return;
     }
 
