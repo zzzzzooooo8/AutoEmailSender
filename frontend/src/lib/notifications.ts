@@ -52,6 +52,7 @@ export const createNotificationRecord = (
 ): NotificationRecord => ({
   ...draft,
   id: options.id,
+  // Use a deterministic sentinel when the caller does not provide createdAt.
   createdAt: options.createdAt ?? 0,
   durationMs: calculateNotificationDuration(draft),
   interactiveLocked: false,

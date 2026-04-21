@@ -17,39 +17,95 @@ const buildDraft = (overrides: Partial<NotificationDraft> = {}): NotificationDra
 });
 
 describe("calculateNotificationDuration", () => {
-  it("keeps success notifications in the 2-3 second band", () => {
-    const duration = calculateNotificationDuration(
-      buildDraft({ level: "success", title: "保存成功", description: "已更新导师配置" }),
-    );
-
-    expect(duration).toBeGreaterThanOrEqual(2000);
-    expect(duration).toBeLessThanOrEqual(3000);
+  it("uses the exact success formula for the base value", () => {
+    expect(
+      calculateNotificationDuration(
+        buildDraft({
+          level: "success",
+          title: "abcd",
+          description: "",
+          details: [],
+        }),
+      ),
+    ).toBe(2380);
   });
 
-  it("keeps warning notifications in the 3-6 second band", () => {
-    const duration = calculateNotificationDuration(
-      buildDraft({
-        level: "warning",
-        title: "请注意配置",
-        description: "当前身份还没有默认材料，暂时无法计算匹配。",
-      }),
-    );
-
-    expect(duration).toBeGreaterThanOrEqual(3000);
-    expect(duration).toBeLessThanOrEqual(6000);
+  it("counts title, description, and details when measuring text length", () => {
+    expect(
+      calculateNotificationDuration(
+        buildDraft({
+          level: "success",
+          title: "ab",
+          description: "cde",
+          details: ["fg", "h"],
+        }),
+      ),
+    ).toBe(2560);
   });
 
-  it("keeps error notifications in the 5-8 second band", () => {
-    const duration = calculateNotificationDuration(
-      buildDraft({
-        level: "error",
-        title: "请检查表单",
-        details: ["请输入任务名称", "请选择开始时间", "请选择结束时间"],
-      }),
-    );
+  it("clamps success notifications to the upper bound", () => {
+    expect(
+      calculateNotificationDuration(
+        buildDraft({
+          level: "success",
+          title: "a".repeat(100),
+          description: "",
+          details: [],
+        }),
+      ),
+    ).toBe(3000);
+  });
 
-    expect(duration).toBeGreaterThanOrEqual(5000);
-    expect(duration).toBeLessThanOrEqual(8000);
+  it("uses the exact warning formula for the base value", () => {
+    expect(
+      calculateNotificationDuration(
+        buildDraft({
+          level: "warning",
+          title: "abcd",
+          description: "",
+          details: [],
+        }),
+      ),
+    ).toBe(3420);
+  });
+
+  it("clamps warning notifications to the upper bound", () => {
+    expect(
+      calculateNotificationDuration(
+        buildDraft({
+          level: "warning",
+          title: "a".repeat(100),
+          description: "",
+          details: [],
+        }),
+      ),
+    ).toBe(6000);
+  });
+
+  it("uses the exact error formula for the base value", () => {
+    expect(
+      calculateNotificationDuration(
+        buildDraft({
+          level: "error",
+          title: "abcd",
+          description: "",
+          details: [],
+        }),
+      ),
+    ).toBe(5460);
+  });
+
+  it("clamps error notifications to the upper bound", () => {
+    expect(
+      calculateNotificationDuration(
+        buildDraft({
+          level: "error",
+          title: "a".repeat(100),
+          description: "",
+          details: [],
+        }),
+      ),
+    ).toBe(8000);
   });
 });
 
@@ -68,6 +124,51 @@ describe("createFormErrorNotification", () => {
       description: "",
       details: ["请输入任务名称", "请选择开始时间", "请选择结束时间"],
     });
+  });
+});
+
+describe("createNotificationRecord", () => {
+  it("builds the full notification record contract", () => {
+    expect(
+      createNotificationRecord(
+        buildDraft({
+          level: "warning",
+          title: "abcd",
+          description: "",
+          details: [],
+        }),
+        {
+          id: "notice-1",
+          createdAt: 1234,
+        },
+      ),
+    ).toEqual({
+      level: "warning",
+      title: "abcd",
+      description: "",
+      details: [],
+      id: "notice-1",
+      createdAt: 1234,
+      durationMs: 3420,
+      interactiveLocked: false,
+      closing: false,
+    });
+  });
+
+  it("uses 0 as the deterministic createdAt sentinel when omitted", () => {
+    expect(
+      createNotificationRecord(
+        buildDraft({
+          level: "success",
+          title: "abcd",
+          description: "",
+          details: [],
+        }),
+        {
+          id: "notice-2",
+        },
+      ).createdAt,
+    ).toBe(0);
   });
 });
 
