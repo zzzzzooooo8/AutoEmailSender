@@ -65,7 +65,7 @@ auto-email-agent/
    - `writer.py`: Generates email drafts
 
 2. **Models**:
-   - `IdentityProfile`: Sender identity (email, SMTP/IMAP, resume, signature, send policies)
+   - `IdentityProfile`: Sender identity (email, SMTP/IMAP, resume, send policies)
    - `LLMProfile`: LLM configuration (API key, model, prompt templates) - independent from identity
    - `Professor`: Crawled professor data (deduplicated by email)
    - `EmailTask`: Email task with status workflow

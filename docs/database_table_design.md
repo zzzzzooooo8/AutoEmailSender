@@ -1,115 +1,176 @@
-### 1. 学生身份表 (Identity)
+# 数据库表设计（当前实现）
 
-记录本地使用者的邮箱配置及发件人信息。
+本文档描述的是当前已经落地在 SQLite + SQLAlchemy + Alembic 中的 schema。
 
-| **字段名 (Field)** | **数据类型 (Type)** | **约束 / 键 (Constraint)**    | **说明 (Description)**        |
-| --------------- | --------------- | -------------------------- | --------------------------- |
-| `identity_id`   | INTEGER         | PRIMARY KEY, AUTOINCREMENT | 唯一标识，主键                     |
-| `student_name`  | VARCHAR(50)     | NOT NULL                   | 学生姓名（用于邮件落款）                |
-| `email_address` | VARCHAR(100)    | UNIQUE, NOT NULL           | 发件邮箱（账号唯一标识）                |
-| `smtp_password` | VARCHAR(255)    | NOT NULL                   | 邮箱 SMTP 授权码                 |
-| `smtp_server`   | VARCHAR(100)    | NOT NULL                   | SMTP 服务器地址（如 `smtp.qq.com`） |
-| `smtp_port`     | INTEGER         | NOT NULL, DEFAULT 465      | SMTP 端口号（通常为 465 或 587）     |
-| `resume_path`   | VARCHAR(255)    | NULLABLE                   | 默认简历本地路径或 URL               |
-| `default_llm_config_id` | INTEGER  | FOREIGN KEY, NULLABLE      | 默认使用的 LLM 配置，关联 `LLM_Config.config_id` |
-| `created_at`    | DATETIME        | DEFAULT CURRENT_TIMESTAMP  | 配置创建时间（用于排序或审计）             |
+## 1. `app_settings`
+系统级配置表。
 
----
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | INTEGER PK | 固定使用 `1` |
+| `mail_delivery_mode` | TEXT | `dry_run` / `live` |
+| `created_at` | DATETIME | 创建时间 |
+| `updated_at` | DATETIME | 最近更新时间 |
 
-### 2. 导师表 (Tutor)
+## 2. `identity_profiles`
+发送身份表。
 
-存储爬取到的导师信息，作为发送目标池。
-
-| **字段名 (Field)** | **数据类型 (Type)** | **约束 / 键 (Constraint)**    | **说明 (Description)**                         |
-| --------------- | --------------- | -------------------------- | -------------------------------------------- |
-| `tutor_id`      | INTEGER         | PRIMARY KEY, AUTOINCREMENT | 导师唯一标识，主键                                    |
-| `name`          | VARCHAR(50)     | NOT NULL                   | 导师姓名                                         |
-| `title`         | VARCHAR(50)     | NULLABLE                   | 导师职称（如教授、副教授、研究员等）                           |
-| `avatar_url`    | VARCHAR(255)    | NULLABLE                   | 导师照片 URL（用于丰富聊天 UI）                          |
-| `emails`        | TEXT            | NOT NULL                   | 导师邮箱（存 JSON 数组，如 `["a@edu.cn", "b@edu.cn"]`） |
-| `university`    | VARCHAR(100)    | NOT NULL                   | 所属高校                                         |
-| `departments`   | TEXT            | NULLABLE                   | 所属院系（存 JSON 数组，应对多院系挂职情况）                    |
-| `research_area` | VARCHAR(255)    | NULLABLE                   | 研究方向/标签                                      |
-| `bio`           | TEXT            | NULLABLE                   | 个人介绍/履历背景                                    |
-| `source_url`    | VARCHAR(500)    | NULLABLE                   | 爬虫抓取来源页面链接                                   |
-
----
-
-### 3. LLM 配置表 (LLM_Config)
-
-存储系统内可切换的多套大模型配置，供身份或任务按需绑定。
-
-| **字段名 (Field)** | **数据类型 (Type)** | **约束 / 键 (Constraint)**    | **说明 (Description)** |
-| --------------- | --------------- | -------------------------- | -------------------- |
-| `config_id`     | INTEGER         | PRIMARY KEY, AUTOINCREMENT | 配置唯一标识，主键 |
-| `config_name`   | VARCHAR(100)    | NOT NULL, UNIQUE           | 配置名称（如 `OpenAI-主账号`、`DeepSeek-备用`） |
-| `provider`      | VARCHAR(50)     | NOT NULL                   | 模型服务提供方（如 `openai`、`deepseek`） |
-| `api_key`       | VARCHAR(255)    | NOT NULL                   | 对应 API Key |
-| `base_url`      | VARCHAR(255)    | NULLABLE                   | 接口基地址（兼容 OpenAI 格式时常用） |
-| `model_name`    | VARCHAR(100)    | NOT NULL                   | 默认使用的模型名称 |
-| `temperature`   | DECIMAL(3,2)    | NULLABLE                   | 采样温度参数 |
-| `max_tokens`    | INTEGER         | NULLABLE                   | 单次生成最大 token 数 |
-| `is_enabled`    | INTEGER         | DEFAULT 1                  | 是否启用：`0`禁用, `1`启用 |
-| `remark`        | VARCHAR(255)    | NULLABLE                   | 备注信息 |
-| `created_at`    | DATETIME        | DEFAULT CURRENT_TIMESTAMP  | 配置创建时间 |
-| `updated_at`    | DATETIME        | DEFAULT CURRENT_TIMESTAMP  | 最近更新时间 |
+关键字段：
+- SMTP / IMAP 配置
+- `current_primary_material_id`：身份当前默认材料
+- 发送节流与频率相关配置
+- `is_default`
 
 说明：
-- `Identity.default_llm_config_id` 用于保存某个发件身份默认绑定的 LLM 配置。
-- `Task.llm_config_id` 用于任务级覆盖；为空时，继承对应 `Identity` 的默认配置。
+- 身份默认材料只决定“默认用于匹配和草稿生成的材料”
+- 具体任务使用哪份材料，以 `email_tasks.primary_material_id` 为准
 
----
+## 3. `identity_materials`
+身份下的统一材料库。
 
-### 4. 批量发送任务表 (Task)
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | INTEGER PK | 主键 |
+| `identity_id` | INTEGER FK | 所属身份 |
+| `display_name` | TEXT | 用户可见名称 |
+| `original_filename` | TEXT | 上传时原文件名 |
+| `file_path` | TEXT | 本地存储路径 |
+| `mime_type` | TEXT NULL | MIME |
+| `size_bytes` | INTEGER | 文件大小 |
+| `sha256` | TEXT | 摘要 |
+| `extracted_text` | TEXT NULL | 按需提取并缓存的 Markdown 文本 |
+| `material_type` | TEXT | `resume` / `transcript` / `publication` / `portfolio` / `other` |
+| `created_at` | DATETIME | 上传时间 |
 
-管理每次群发任务的规则、模板和状态。
+说明：
+- 上传阶段只保存文件和元数据，不同步解析文本
+- 只有在工作区手动执行匹配 / 生成草稿时，系统才会通过 MarkItDown 按需补齐 `extracted_text`
+- 同一份材料既可以是默认材料，也可以同时被选为随信材料
 
-| **字段名 (Field)**    | **数据类型 (Type)** | **约束 / 键 (Constraint)**    | **说明 (Description)**              |
-| ------------------ | --------------- | -------------------------- | --------------------------------- |
-| `task_id`          | INTEGER         | PRIMARY KEY, AUTOINCREMENT | 任务唯一标识，主键                         |
-| `identity_id`      | INTEGER         | FOREIGN KEY                | 关联 `Identity.identity_id`（发件身份）   |
-| `llm_config_id`    | INTEGER         | FOREIGN KEY, NULLABLE      | 任务指定的 LLM 配置，关联 `LLM_Config.config_id`；为空时继承身份默认配置 |
-| `task_name`        | VARCHAR(100)    | NOT NULL                   | 任务名称（如：复旦AI组直发）                   |
-| `subject_tmpl`     | VARCHAR(255)    | NOT NULL                   | 邮件主题模板                            |
-| `body_tmpl`        | TEXT            | NOT NULL                   | 邮件正文模板（支持变量占位符）                   |
-| `attachment_paths` | TEXT            | NULLABLE                   | 附件路径列表（存 JSON 数组，支持多附件）           |
-| `daily_start_time` | VARCHAR(10)     | NULLABLE                   | 每日允许发送的起始时间（如 `"09:00"`）          |
-| `daily_end_time`   | VARCHAR(10)     | NULLABLE                   | 每日允许发送的截止时间（如 `"18:00"`）          |
-| `daily_limit`      | INTEGER         | NULLABLE                   | 每日发送数量上限（防反垃圾邮件风控）                |
-| `scheduled_time`   | DATETIME        | NULLABLE                   | 首次计划触发时间（为空表示立即启动）                |
-| `status`           | INTEGER         | DEFAULT 0                  | 状态：`0`未开始, `1`执行中, `2`已完成, `3`已暂停 |
-| `created_at`       | DATETIME        | DEFAULT CURRENT_TIMESTAMP  | 任务创建时间                            |
-| `completed_at`     | DATETIME        | NULLABLE                   | 任务最终完成时间                          |
+## 4. `llm_profiles`
+LLM 配置表。
 
----
+关键字段：
+- `name`
+- `provider`
+- `api_base_url`
+- `api_key`
+- `model_name`
+- `temperature`
+- `max_tokens`
+- `is_default`
 
-### 5. 任务目标明细表 (Task_Target)
+## 5. `professors`
+导师主表。
 
-记录某个任务下，针对特定导师的发送进度。
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | INTEGER PK | 主键 |
+| `name` | TEXT | 姓名 |
+| `email` | TEXT UNIQUE NULL | 导师邮箱，系统去重键 |
+| `title` | TEXT NULL | 职称 |
+| `university` / `school` / `department` | TEXT NULL | 学校、学院、院系 |
+| `research_direction` | TEXT NULL | 研究方向 |
+| `recent_papers` | JSON NULL | 近期论文标题数组 |
+| `profile_url` / `source_url` | TEXT NULL | 主页与来源链接 |
+| `crawl_status` | TEXT | 当前抓取状态 |
+| `skip_reason` | TEXT NULL | 跳过原因 |
+| `archived_at` | DATETIME NULL | 回收站时间；为空表示正常状态 |
+| `created_at` / `updated_at` | DATETIME | 时间戳 |
 
-|**字段名 (Field)**|**数据类型 (Type)**|**约束 / 键 (Constraint)**|**说明 (Description)**|
-|---|---|---|---|
-|`target_id`|INTEGER|PRIMARY KEY, AUTOINCREMENT|明细唯一标识，主键|
-|`task_id`|INTEGER|FOREIGN KEY, NOT NULL|关联 `Task.task_id`|
-|`tutor_id`|INTEGER|FOREIGN KEY, NOT NULL|关联 `Tutor.tutor_id`|
-|`send_status`|INTEGER|DEFAULT 0|发送状态：`0`排队中, `1`成功, `2`失败|
-|`error_msg`|TEXT|NULLABLE|发送失败时的具体报错信息（如退信原因）|
-|`sent_at`|DATETIME|NULLABLE|实际成功发送的具体时间|
+说明：
+- 归档隐藏使用 `archived_at`，不做硬删
+- 首页、创建任务、工作区只使用 `archived_at IS NULL` 的导师
+- 导入 `csv/xlsx` 时按邮箱覆盖已有导师；如果旧记录已归档，会自动清空 `archived_at` 恢复为正常状态
 
----
+## 6. `batch_tasks`
+批量任务聚合表。
 
-### 6. 邮件往来记录表 (Email_Log)
+关键字段：
+- `identity_id`
+- `llm_profile_id`
+- `name`
+- `schedule_type`
+- `window_start_time` / `window_end_time`
+- `emails_per_window`
+- `status`
+- `primary_material_id`
+- `email_subject` / `email_body`
+- `selected_material_ids`
+- `target_count`
 
-独立于任务之外，客观记录双向邮件流水。
+说明：
+- `batch_tasks` 只负责聚合与调度，不代表单封邮件
+- 创建子任务时会把 `primary_material_id` 和 `selected_material_ids` 快照到 `email_tasks`
 
-|**字段名 (Field)**|**数据类型 (Type)**|**约束 / 键 (Constraint)**|**说明 (Description)**|
-|---|---|---|---|
-|`message_id`|INTEGER|PRIMARY KEY, AUTOINCREMENT|消息唯一标识，主键|
-|`identity_id`|INTEGER|FOREIGN KEY, NOT NULL|关联 `Identity.identity_id`（你的身份）|
-|`tutor_id`|INTEGER|FOREIGN KEY, NOT NULL|关联 `Tutor.tutor_id`（对话的导师）|
-|`task_id`|INTEGER|FOREIGN KEY, NULLABLE|关联 `Task.task_id`（导师主动回复或散发邮件时可为空）|
-|`direction`|INTEGER|NOT NULL|**邮件方向：`0` = 学生发出(右侧气泡), `1` = 导师回复(左侧气泡)**|
-|`subject`|VARCHAR(255)|NULLABLE|单封邮件的主题|
-|`content`|TEXT|NOT NULL|邮件内容（用于提取纯文本展示在聊天气泡中）|
-|`message_time`|DATETIME|NOT NULL|邮件实际发出或收到的时间|
-|`is_read`|INTEGER|DEFAULT 0|是否已读：`0`=未读, `1`=已读（用于侧边栏红点提示）|
+## 7. `email_tasks`
+单导师执行单元。
+
+关键字段：
+- `batch_task_id`
+- `identity_id`
+- `llm_profile_id`
+- `professor_id`
+- `primary_material_id`
+- `status`
+- `match_score` / `match_reason`
+- `generated_subject` / `generated_content_text` / `generated_content_html`
+- `selected_material_ids`
+- `delivery_mode`
+- `approved_subject` / `approved_body_text` / `approved_body_html`
+- `scheduled_at`
+- `last_send_attempt_at`
+- `sent_at`
+- `last_rfc_message_id`
+- `retry_count`
+- `is_read` / `is_replied`
+- `last_error`
+
+说明：
+- 同一 `identity_id + professor_id` 允许存在多条 `email_tasks`
+- `primary_material_id` 是任务级快照；之后即使身份默认材料变了，旧任务也不会被动跟随
+- 如果 `primary_material_id` 为空，任务仍可手动写信并发送，只是不能执行匹配和草稿生成
+
+## 8. `email_logs`
+工作区双向消息流水。
+
+关键字段：
+- `email_task_id`
+- `identity_id`
+- `llm_profile_id`
+- `professor_id`
+- `direction`
+- `delivery_mode`
+- `subject`
+- `content`
+- `content_html`
+- `rfc_message_id`
+- `provider_payload`
+- `failure_summary`
+- `reply_headers`
+- `created_at`
+
+说明：
+- `draft` 日志记录模型生成草稿
+- `sent` 日志记录 `dry_run` 或 `live` 发信动作
+- `received` 日志仅来自 IMAP 回复检测
+- 草稿日志的 `provider_payload.usage` 会记录 `prompt_tokens / completion_tokens / total_tokens`
+
+## 9. 导师导入与归档规则
+- 模板字段固定为：
+  - `name`
+  - `email`
+  - `title`
+  - `university`
+  - `school`
+  - `department`
+  - `research_direction`
+  - `recent_papers`
+  - `profile_url`
+  - `source_url`
+- `recent_papers` 在模板中使用 `|` 分隔多篇论文标题
+- 导入时：
+  - `name` 和 `email` 必填
+  - 邮箱格式错误或必填缺失记为失败，但不影响整批导入
+  - 数据库已有同邮箱导师时执行覆盖更新，不跳过
+  - 如果旧导师处于归档状态，会在导入后自动恢复
