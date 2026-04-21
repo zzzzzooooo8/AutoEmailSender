@@ -30,7 +30,6 @@ interface SelectionContextValue {
   selectedLlmProfile: LLMProfileDTO | null;
   loading: boolean;
   updatingMode: boolean;
-  error: string | null;
   setSelectedIdentityId: (value: number | null) => void;
   setSelectedLlmProfileId: (value: number | null) => void;
   refreshSelections: () => Promise<void>;
@@ -61,7 +60,6 @@ export const SelectionProvider = ({ children }: PropsWithChildren) => {
   const [loading, setLoading] = useState(true);
   const bootstrappedRef = useRef(false);
   const [updatingMode, setUpdatingMode] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const refreshSelections = useCallback(async () => {
     if (!bootstrappedRef.current) {
@@ -76,10 +74,8 @@ export const SelectionProvider = ({ children }: PropsWithChildren) => {
       setIdentities(identityData);
       setLlmProfiles(llmData);
       setSystemSettings(settingsData);
-      setError(null);
     } catch (refreshError) {
       const message = refreshError instanceof Error ? refreshError.message : '加载全局上下文失败';
-      setError(message);
       notifyError('加载全局上下文失败', message);
     } finally {
       setLoading(false);
@@ -142,10 +138,8 @@ export const SelectionProvider = ({ children }: PropsWithChildren) => {
     try {
       const nextSettings = await updateSystemSettings(value);
       setSystemSettings(nextSettings);
-      setError(null);
     } catch (updateError) {
       const message = updateError instanceof Error ? updateError.message : '切换发送模式失败';
-      setError(message);
       notifyError('切换发送模式失败', message);
       throw updateError;
     } finally {
@@ -163,7 +157,6 @@ export const SelectionProvider = ({ children }: PropsWithChildren) => {
     selectedLlmProfile: llmProfiles.find((item) => item.id === selectedLlmProfileId) ?? null,
     loading,
     updatingMode,
-    error,
     setSelectedIdentityId,
     setSelectedLlmProfileId,
     refreshSelections,

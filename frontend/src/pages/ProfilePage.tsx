@@ -11,6 +11,7 @@ import {
   X,
   XCircle,
 } from "lucide-react";
+import { useNotification } from "@/context/NotificationContext";
 import { useSelectionContext } from "@/context/SelectionContext";
 import { NativeSelectField } from "@/components/atoms/NativeSelectField";
 import { HtmlTemplateEditorField } from "@/components/molecules/HtmlTemplateEditorField";
@@ -84,11 +85,6 @@ type LLMFormState = {
 };
 
 type EditorId = number | "new" | null;
-type InlineFeedback = {
-  tone: "success" | "error";
-  message: string;
-};
-
 type ActionResultState = "idle" | "success" | "error";
 
 type MaterialFilterValue = IdentityMaterialType | "all";
@@ -302,29 +298,6 @@ const triggerDownload = (url: string) => {
   document.body.appendChild(link);
   link.click();
   link.remove();
-};
-
-const InlineFeedbackBanner = ({
-  feedback,
-}: {
-  feedback: InlineFeedback | null;
-}) => {
-  if (!feedback) {
-    return null;
-  }
-
-  return (
-    <div
-      className={clsx(
-        "rounded-2xl border px-4 py-3 text-sm whitespace-pre-wrap shadow-sm",
-        feedback.tone === "success"
-          ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-          : "border-red-200 bg-red-50 text-red-700",
-      )}
-    >
-      {feedback.message}
-    </div>
-  );
 };
 
 const formatDuration = (durationMs: number | null) =>
@@ -801,12 +774,10 @@ const MaterialSummaryCard = ({
 
 const IdentityConnectionCard = ({
   testingIdentityConnection,
-  feedback,
   onTestSmtp,
   onTestImap,
 }: {
   testingIdentityConnection: "smtp" | "imap" | null;
-  feedback: InlineFeedback | null;
   onTestSmtp: () => void;
   onTestImap: () => void;
 }) => (
@@ -840,11 +811,6 @@ const IdentityConnectionCard = ({
         </button>
       </div>
     </div>
-    {feedback ? (
-      <div className="mt-4">
-        <InlineFeedbackBanner feedback={feedback} />
-      </div>
-    ) : null}
   </div>
 );
 
@@ -1132,7 +1098,6 @@ const MaterialLibraryModal = ({
   uploading,
   selectedMaterialType,
   materialFilter,
-  uploadFeedback,
   highlightedMaterialId,
   onChangeMaterialType,
   onChangeMaterialFilter,
@@ -1148,7 +1113,6 @@ const MaterialLibraryModal = ({
   uploading: boolean;
   selectedMaterialType: IdentityMaterialType;
   materialFilter: MaterialFilterValue;
-  uploadFeedback: InlineFeedback | null;
   highlightedMaterialId: number | null;
   onChangeMaterialType: (value: IdentityMaterialType) => void;
   onChangeMaterialFilter: (value: MaterialFilterValue) => void;
@@ -1245,11 +1209,6 @@ const MaterialLibraryModal = ({
               />
             </label>
           </div>
-          {uploadFeedback ? (
-            <div className="mt-3">
-              <InlineFeedbackBanner feedback={uploadFeedback} />
-            </div>
-          ) : null}
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-6">
@@ -1385,24 +1344,20 @@ export const ProfilePage = () => {
     setSelectedLlmProfileId,
     refreshSelections,
     loading,
-    error: selectionError,
   } = useSelectionContext();
+  const { notifyError, notifyFormErrors, notifySuccess } = useNotification();
   const [identityEditorId, setIdentityEditorId] = useState<EditorId>(null);
   const [llmEditorId, setLlmEditorId] = useState<EditorId>(null);
   const [identityForm, setIdentityForm] = useState<IdentityFormState>(
     createEmptyIdentityForm(),
   );
   const [llmForm, setLlmForm] = useState<LLMFormState>(createEmptyLLMForm());
-  const [identityMessage, setIdentityMessage] = useState<string | null>(null);
-  const [llmMessage, setLlmMessage] = useState<string | null>(null);
   const [submittingIdentity, setSubmittingIdentity] = useState(false);
   const [submittingLLM, setSubmittingLLM] = useState(false);
   const [importingTemplateFile, setImportingTemplateFile] = useState(false);
   const [testingIdentityConnection, setTestingIdentityConnection] = useState<
     "smtp" | "imap" | null
   >(null);
-  const [identityConnectionFeedback, setIdentityConnectionFeedback] =
-    useState<InlineFeedback | null>(null);
   const [testingLLMConnection, setTestingLLMConnection] = useState(false);
   const [fetchingLLMModels, setFetchingLLMModels] = useState(false);
   const [llmProbeResult, setLlmProbeResult] =
@@ -1417,8 +1372,6 @@ export const ProfilePage = () => {
     useState<MaterialFilterValue>("all");
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [materialModalOpen, setMaterialModalOpen] = useState(false);
-  const [materialFeedback, setMaterialFeedback] =
-    useState<InlineFeedback | null>(null);
   const [highlightedMaterialId, setHighlightedMaterialId] = useState<
     number | null
   >(null);
@@ -1440,6 +1393,9 @@ export const ProfilePage = () => {
     element.focus();
     element.scrollIntoView({ behavior: "smooth", block: "center" });
   };
+
+  const getActionErrorMessage = (error: unknown, fallbackMessage: string) =>
+    error instanceof Error ? error.message : fallbackMessage;
 
   const confirmDeleteTwice = async (targetName: string) => {
     const confirmedOnce = await confirm({
@@ -1615,10 +1571,7 @@ export const ProfilePage = () => {
     setIdentityEditorId("new");
     setIdentityForm(createEmptyIdentityForm());
     setTemplateModalOpen(false);
-    setIdentityMessage(null);
-    setIdentityConnectionFeedback(null);
     setTestingIdentityConnection(null);
-    setMaterialFeedback(null);
     setHighlightedMaterialId(null);
     setOptimisticMaterial(null);
     window.requestAnimationFrame(() =>
@@ -1629,7 +1582,6 @@ export const ProfilePage = () => {
   const beginLLMCreation = () => {
     setLlmEditorId("new");
     setLlmForm(createEmptyLLMForm());
-    setLlmMessage(null);
     setLlmProbeResult(null);
     setLlmModelsResult(null);
     setTestingLLMConnection(false);
@@ -1645,10 +1597,7 @@ export const ProfilePage = () => {
     setIdentityEditorId(identity.id);
     setIdentityForm(toIdentityForm(identity));
     setTemplateModalOpen(false);
-    setIdentityMessage(null);
-    setIdentityConnectionFeedback(null);
     setTestingIdentityConnection(null);
-    setMaterialFeedback(null);
     setHighlightedMaterialId(null);
     setOptimisticMaterial(null);
   };
@@ -1660,7 +1609,6 @@ export const ProfilePage = () => {
     }
     setLlmEditorId(profile.id);
     setLlmForm(toLLMForm(profile));
-    setLlmMessage(null);
     setLlmProbeResult(null);
     setLlmModelsResult(null);
     setTestingLLMConnection(false);
@@ -1683,24 +1631,17 @@ export const ProfilePage = () => {
     }
 
     setTestingIdentityConnection(kind);
-    setIdentityConnectionFeedback(null);
     try {
       const result =
         kind === "smtp"
           ? await testIdentitySmtp(editingIdentity.id)
           : await testIdentityImap(editingIdentity.id);
-      setIdentityConnectionFeedback({
-        tone: "success",
-        message: result.message,
-      });
+      notifySuccess(`${kind.toUpperCase()} 连接测试成功`, result.message);
     } catch (testError) {
-      setIdentityConnectionFeedback({
-        tone: "error",
-        message:
-          testError instanceof Error
-            ? testError.message
-            : `${kind.toUpperCase()} 测试失败`,
-      });
+      notifyError(
+        `${kind.toUpperCase()} 连接测试失败`,
+        getActionErrorMessage(testError, `${kind.toUpperCase()} 测试失败`),
+      );
     } finally {
       setTestingIdentityConnection(null);
     }
@@ -1722,14 +1663,16 @@ export const ProfilePage = () => {
         outreach_template_body_text: imported.body_text,
         outreach_template_body_html: imported.body_html,
       }));
-      setIdentityMessage(
+      notifySuccess(
+        "模板导入成功",
         hasSubject
           ? `已导入 ${imported.format_name} 模板文件，并自动生成纯文本正文。`
           : `已导入 ${imported.format_name} 模板文件，并自动生成纯文本正文。请继续填写模板主题后再保存身份。`,
       );
     } catch (importError) {
-      setIdentityMessage(
-        importError instanceof Error ? importError.message : "导入模板文件失败",
+      notifyError(
+        "模板导入失败",
+        getActionErrorMessage(importError, "导入模板文件失败"),
       );
     } finally {
       setImportingTemplateFile(false);
@@ -1814,12 +1757,14 @@ export const ProfilePage = () => {
       !identityForm.imap_host.trim() ||
       !identityForm.imap_port.trim()
     ) {
-      setIdentityMessage("请先填写所有带红色星号的身份必填项");
+      notifyFormErrors("请检查表单", [
+        "请先填写所有带红色星号的身份必填项",
+      ]);
       return;
     }
     const templateValidationMessage = getTemplateValidationMessage(identityForm);
     if (templateValidationMessage) {
-      setIdentityMessage(templateValidationMessage);
+      notifyFormErrors("请检查表单", [templateValidationMessage]);
       return;
     }
 
@@ -1829,15 +1774,18 @@ export const ProfilePage = () => {
       const saved = isExistingEditorId(identityEditorId)
         ? await updateIdentity(identityEditorId, payload)
         : await createIdentity(payload);
+      const isCreatingIdentity = identityEditorId === "new";
       await refreshSelections();
       setIdentityEditorId(saved.id);
       setIdentityForm(toIdentityForm(saved));
-      setIdentityMessage(
-        identityEditorId === "new" ? "身份已创建。" : "身份已保存。",
+      notifySuccess(
+        "身份保存成功",
+        isCreatingIdentity ? "身份已创建。" : "身份已保存。",
       );
     } catch (saveError) {
-      setIdentityMessage(
-        saveError instanceof Error ? saveError.message : "身份保存失败",
+      notifyError(
+        "身份保存失败",
+        getActionErrorMessage(saveError, "身份保存失败"),
       );
     } finally {
       setSubmittingIdentity(false);
@@ -1851,7 +1799,7 @@ export const ProfilePage = () => {
       !llmForm.api_key.trim() ||
       !llmForm.model_name.trim()
     ) {
-      setLlmMessage("请先填写所有带红色星号的模型必填项");
+      notifyFormErrors("请检查表单", ["请先填写所有带红色星号的模型必填项"]);
       return;
     }
 
@@ -1861,15 +1809,18 @@ export const ProfilePage = () => {
       const saved = isExistingEditorId(llmEditorId)
         ? await updateLLMProfile(llmEditorId, payload)
         : await createLLMProfile(payload);
+      const isCreatingLlm = llmEditorId === "new";
       await refreshSelections();
       setLlmEditorId(saved.id);
       setLlmForm(toLLMForm(saved));
-      setLlmMessage(
-        llmEditorId === "new" ? "模型配置已创建。" : "模型配置已保存。",
+      notifySuccess(
+        "模型保存成功",
+        isCreatingLlm ? "模型配置已创建。" : "模型配置已保存。",
       );
     } catch (saveError) {
-      setLlmMessage(
-        saveError instanceof Error ? saveError.message : "模型配置保存失败",
+      notifyError(
+        "模型保存失败",
+        getActionErrorMessage(saveError, "模型配置保存失败"),
       );
     } finally {
       setSubmittingLLM(false);
@@ -1881,7 +1832,6 @@ export const ProfilePage = () => {
       return;
     }
     setUploadingMaterial(true);
-    setMaterialFeedback(null);
     try {
       const uploadedMaterial = await uploadIdentityMaterial(
         editingIdentity.id,
@@ -1894,19 +1844,15 @@ export const ProfilePage = () => {
       setMaterialFilter(uploadedMaterial.material_type);
       setHighlightedMaterialId(uploadedMaterial.id);
       await refreshSelections();
-      setIdentityMessage("材料已上传。");
-      setMaterialFeedback({
-        tone: "success",
-        message: `已上传为${getMaterialTypeLabel(uploadedMaterial.material_type)}：${uploadedMaterial.display_name}`,
-      });
+      notifySuccess(
+        "材料上传成功",
+        `已上传为${getMaterialTypeLabel(uploadedMaterial.material_type)}：${uploadedMaterial.display_name}`,
+      );
     } catch (uploadError) {
-      const message =
-        uploadError instanceof Error ? uploadError.message : "材料上传失败";
-      setIdentityMessage(message);
-      setMaterialFeedback({
-        tone: "error",
-        message,
-      });
+      notifyError(
+        "材料上传失败",
+        getActionErrorMessage(uploadError, "材料上传失败"),
+      );
     } finally {
       setUploadingMaterial(false);
     }
@@ -1917,22 +1863,16 @@ export const ProfilePage = () => {
     try {
       await setPrimaryMaterial(material.id);
       await refreshSelections();
-      setIdentityMessage(`已将“${material.display_name}”设为默认材料。`);
-      setMaterialFeedback({
-        tone: "success",
-        message: `已将“${material.display_name}”设为默认材料。`,
-      });
+      notifySuccess(
+        "设为默认材料成功",
+        `已将“${material.display_name}”设为默认材料。`,
+      );
       setHighlightedMaterialId(material.id);
     } catch (materialError) {
-      const message =
-        materialError instanceof Error
-          ? materialError.message
-          : "设置默认材料失败";
-      setIdentityMessage(message);
-      setMaterialFeedback({
-        tone: "error",
-        message,
-      });
+      notifyError(
+        "设为默认材料失败",
+        getActionErrorMessage(materialError, "设置默认材料失败"),
+      );
     } finally {
       setActingOnMaterial(false);
     }
@@ -1946,17 +1886,12 @@ export const ProfilePage = () => {
     try {
       await deleteMaterial(material.id);
       await refreshSelections();
-      setIdentityMessage(
+      notifySuccess(
+        "删除材料成功",
         material.is_primary
           ? `材料“${material.display_name}”已删除，当前未设默认材料。`
           : `材料“${material.display_name}”已删除。`,
       );
-      setMaterialFeedback({
-        tone: "success",
-        message: material.is_primary
-          ? `材料“${material.display_name}”已删除，当前未设默认材料。`
-          : `材料“${material.display_name}”已删除。`,
-      });
       if (optimisticMaterial?.id === material.id) {
         setOptimisticMaterial(null);
       }
@@ -1964,13 +1899,10 @@ export const ProfilePage = () => {
         setHighlightedMaterialId(null);
       }
     } catch (materialError) {
-      const message =
-        materialError instanceof Error ? materialError.message : "删除材料失败";
-      setIdentityMessage(message);
-      setMaterialFeedback({
-        tone: "error",
-        message,
-      });
+      notifyError(
+        "删除材料失败",
+        getActionErrorMessage(materialError, "删除材料失败"),
+      );
     } finally {
       setActingOnMaterial(false);
     }
@@ -1996,9 +1928,6 @@ export const ProfilePage = () => {
             模型：{selectedLlmProfile?.name ?? "未选择"}
           </span>
         </div>
-        {selectionError && (
-          <p className="mt-4 text-sm text-red-600">{selectionError}</p>
-        )}
       </div>
 
       {loading ? (
@@ -2166,7 +2095,6 @@ export const ProfilePage = () => {
               <div className="mt-6">
                 <IdentityConnectionCard
                   testingIdentityConnection={testingIdentityConnection}
-                  feedback={identityConnectionFeedback}
                   onTestSmtp={() => void runIdentityConnectionTest("smtp")}
                   onTestImap={() => void runIdentityConnectionTest("imap")}
                 />
@@ -2186,16 +2114,11 @@ export const ProfilePage = () => {
                   identity={displayIdentity ?? editingIdentity}
                   onOpen={() => {
                     setMaterialFilter("all");
-                    setMaterialFeedback(null);
                     setHighlightedMaterialId(null);
                     setMaterialModalOpen(true);
                   }}
                 />
               </div>
-            )}
-
-            {identityMessage && (
-              <p className="mt-4 text-sm text-stone-700">{identityMessage}</p>
             )}
 
             <div className="mt-6 flex flex-wrap gap-3">
@@ -2221,7 +2144,10 @@ export const ProfilePage = () => {
                       type="button"
                       onClick={() => {
                         setSelectedIdentityId(editingIdentity.id);
-                        setIdentityMessage("已切换当前身份。");
+                        notifySuccess(
+                          "已设为当前身份",
+                          `当前身份已切换为“${editingIdentity.name}”。`,
+                        );
                       }}
                       className="ui-btn-secondary"
                     >
@@ -2243,13 +2169,18 @@ export const ProfilePage = () => {
                               ...previous,
                               is_default: true,
                             }));
-                            setIdentityMessage("已设为默认。");
+                            notifySuccess(
+                              "已设为默认身份",
+                              `“${editingIdentity.name}”已设为默认身份。`,
+                            );
                           })
                           .catch((defaultError) => {
-                            setIdentityMessage(
-                              defaultError instanceof Error
-                                ? defaultError.message
-                                : "设置默认身份失败",
+                            notifyError(
+                              "设为默认身份失败",
+                              getActionErrorMessage(
+                                defaultError,
+                                "设置默认身份失败",
+                              ),
                             );
                           });
                       }}
@@ -2274,12 +2205,14 @@ export const ProfilePage = () => {
                           await refreshSelections();
                           setIdentityEditorId(null);
                           setIdentityForm(createEmptyIdentityForm());
-                          setIdentityMessage("身份已删除。");
+                          notifySuccess(
+                            "删除身份成功",
+                            `身份“${editingIdentity.name}”已删除。`,
+                          );
                         } catch (deleteError) {
-                          setIdentityMessage(
-                            deleteError instanceof Error
-                              ? deleteError.message
-                              : "删除身份失败",
+                          notifyError(
+                            "删除身份失败",
+                            getActionErrorMessage(deleteError, "删除身份失败"),
                           );
                         }
                       })();
@@ -2421,10 +2354,6 @@ export const ProfilePage = () => {
               </label>
             </div>
 
-            {llmMessage && (
-              <p className="mt-4 text-sm text-stone-700">{llmMessage}</p>
-            )}
-
             <div className="mt-6 flex flex-wrap gap-3">
               <button
                 type="button"
@@ -2482,7 +2411,10 @@ export const ProfilePage = () => {
                       type="button"
                       onClick={() => {
                         setSelectedLlmProfileId(editingLLM.id);
-                        setLlmMessage("已切换当前模型。");
+                        notifySuccess(
+                          "已设为当前模型",
+                          `当前模型已切换为“${editingLLM.name}”。`,
+                        );
                       }}
                       className="ui-btn-secondary"
                     >
@@ -2504,13 +2436,18 @@ export const ProfilePage = () => {
                               ...previous,
                               is_default: true,
                             }));
-                            setLlmMessage("已设为默认。");
+                            notifySuccess(
+                              "已设为默认模型",
+                              `“${editingLLM.name}”已设为默认模型。`,
+                            );
                           })
                           .catch((defaultError) => {
-                            setLlmMessage(
-                              defaultError instanceof Error
-                                ? defaultError.message
-                                : "设置默认模型失败",
+                            notifyError(
+                              "设为默认模型失败",
+                              getActionErrorMessage(
+                                defaultError,
+                                "设置默认模型失败",
+                              ),
                             );
                           });
                       }}
@@ -2535,12 +2472,17 @@ export const ProfilePage = () => {
                           await refreshSelections();
                           setLlmEditorId(null);
                           setLlmForm(createEmptyLLMForm());
-                          setLlmMessage("模型配置已删除。");
+                          notifySuccess(
+                            "删除模型配置成功",
+                            `模型配置“${editingLLM.name}”已删除。`,
+                          );
                         } catch (deleteError) {
-                          setLlmMessage(
-                            deleteError instanceof Error
-                              ? deleteError.message
-                              : "删除模型配置失败",
+                          notifyError(
+                            "删除模型配置失败",
+                            getActionErrorMessage(
+                              deleteError,
+                              "删除模型配置失败",
+                            ),
                           );
                         }
                       })();
@@ -2640,7 +2582,6 @@ export const ProfilePage = () => {
           uploading={uploadingMaterial}
           selectedMaterialType={newMaterialType}
           materialFilter={materialFilter}
-          uploadFeedback={materialFeedback}
           highlightedMaterialId={highlightedMaterialId}
           onChangeMaterialType={setNewMaterialType}
           onChangeMaterialFilter={setMaterialFilter}

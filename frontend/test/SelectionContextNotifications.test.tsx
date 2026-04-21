@@ -25,11 +25,10 @@ vi.mock("@/lib/api/systemSettings", () => ({
 }));
 
 const SelectionHarness = () => {
-  const { error, setMailDeliveryMode } = useSelectionContext();
+  const { setMailDeliveryMode } = useSelectionContext();
 
   return (
     <div>
-      <div data-testid="selection-error">{error ?? "EMPTY"}</div>
       <button
         type="button"
         onClick={() => {
@@ -69,13 +68,9 @@ describe("SelectionContext notifications", () => {
         cards.some((card) => card.textContent?.includes("加载全局上下文失败")),
       ).toBe(true);
     });
-
-    expect(screen.getByTestId("selection-error")).toHaveTextContent(
-      "加载全局上下文失败",
-    );
   });
 
-  it("shows a global notification card and keeps context error when switching mail mode fails", async () => {
+  it("shows a global notification card when switching mail mode fails", async () => {
     listIdentities.mockResolvedValue([]);
     listLLMProfiles.mockResolvedValue([]);
     getSystemSettings.mockResolvedValue({ mail_delivery_mode: "dry_run" });
@@ -89,10 +84,6 @@ describe("SelectionContext notifications", () => {
       </NotificationProvider>,
     );
 
-    await waitFor(() => {
-      expect(screen.getByTestId("selection-error")).toHaveTextContent("EMPTY");
-    });
-
     fireEvent.click(screen.getByRole("button", { name: "switch mode" }));
 
     await waitFor(() => {
@@ -104,9 +95,6 @@ describe("SelectionContext notifications", () => {
             card.textContent?.includes("写入发送模式失败"),
         ),
       ).toBe(true);
-      expect(screen.getByTestId("selection-error")).toHaveTextContent(
-        "写入发送模式失败",
-      );
     });
   });
 });
