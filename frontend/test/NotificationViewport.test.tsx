@@ -90,7 +90,23 @@ describe("NotificationViewport", () => {
     expect(within(card).getByText("请选择开始时间")).toBeInTheDocument();
   });
 
-  it("auto-dismisses untouched notifications but keeps hovered notifications sticky", () => {
+  it("auto-dismisses untouched notifications after its timer elapses", () => {
+    render(
+      <NotificationProvider>
+        <Harness />
+      </NotificationProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "长报错" }));
+
+    expect(screen.getByText("复制这条报错")).toBeInTheDocument();
+
+    vi.advanceTimersByTime(10000);
+
+    expect(screen.queryByText("复制这条报错")).not.toBeInTheDocument();
+  });
+
+  it("keeps hovered notifications sticky until the close button is clicked", () => {
     render(
       <NotificationProvider>
         <Harness />
