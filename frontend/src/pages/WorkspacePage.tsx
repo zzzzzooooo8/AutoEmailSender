@@ -92,6 +92,8 @@ export const WorkspacePage = () => {
   const loadedThreadKeyRef = useRef<string | null>(null);
   const activeThreadRequestKeyRef = useRef<string | null>(null);
   const latestThreadRequestIdRef = useRef(0);
+  const currentWorkspaceRequestKeyRef = useRef<string | null>(null);
+  const latestActionRequestIdRef = useRef(0);
   const workspaceRequestKey =
     Number.isFinite(professorId) && selectedIdentityId && selectedLlmProfileId
       ? `${professorId}:${selectedIdentityId}:${selectedLlmProfileId}`
@@ -206,6 +208,12 @@ export const WorkspacePage = () => {
   }, [loadThread]);
 
   useEffect(() => {
+    currentWorkspaceRequestKeyRef.current = workspaceRequestKey;
+    latestActionRequestIdRef.current += 1;
+    setActing(false);
+  }, [workspaceRequestKey]);
+
+  useEffect(() => {
     setComposerExpanded(false);
   }, [professorId, selectedIdentityId, selectedLlmProfileId]);
 
@@ -243,21 +251,41 @@ export const WorkspacePage = () => {
       fallbackMessage: string,
       onSuccess?: (data: WorkspaceThreadDTO) => void,
     ) => {
+      const actionRequestKey = workspaceRequestKey;
+      const actionRequestId = latestActionRequestIdRef.current + 1;
+      latestActionRequestIdRef.current = actionRequestId;
       setActing(true);
       try {
         const data = await action();
+        if (
+          latestActionRequestIdRef.current !== actionRequestId ||
+          currentWorkspaceRequestKeyRef.current !== actionRequestKey
+        ) {
+          return;
+        }
         setThread(data);
         setLoadFailed(false);
         syncComposer(data);
         onSuccess?.(data);
       } catch (actionError) {
+        if (
+          latestActionRequestIdRef.current !== actionRequestId ||
+          currentWorkspaceRequestKeyRef.current !== actionRequestKey
+        ) {
+          return;
+        }
         const message = actionError instanceof Error ? actionError.message : fallbackMessage;
         notifyError(fallbackTitle, message);
       } finally {
-        setActing(false);
+        if (
+          latestActionRequestIdRef.current === actionRequestId &&
+          currentWorkspaceRequestKeyRef.current === actionRequestKey
+        ) {
+          setActing(false);
+        }
       }
     },
-    [notifyError, syncComposer],
+    [notifyError, syncComposer, workspaceRequestKey],
   );
 
   const handleContentChange = useCallback((value: string) => {
