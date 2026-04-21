@@ -1,4 +1,11 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import clsx from "clsx";
 import {
   CheckCircle2,
@@ -1417,6 +1424,24 @@ export const ProfilePage = () => {
   const getActionErrorMessage = (error: unknown, fallbackMessage: string) =>
     error instanceof Error ? error.message : fallbackMessage;
 
+  const applyIdentityEditorState = useCallback(
+    (nextEditor: IdentityDTO | "new") => {
+      if (nextEditor === "new") {
+        setIdentityEditorId("new");
+        setIdentityForm(createEmptyIdentityForm());
+      } else {
+        setIdentityEditorId(nextEditor.id);
+        setIdentityForm(toIdentityForm(nextEditor));
+      }
+      setTemplateModalOpen(false);
+      setTestingIdentityConnection(null);
+      setLastIdentityConnectionResult(null);
+      setHighlightedMaterialId(null);
+      setOptimisticMaterial(null);
+    },
+    [],
+  );
+
   const confirmDeleteTwice = async (targetName: string) => {
     const confirmedOnce = await confirm({
       title: `确认删除${targetName}？`,
@@ -1456,14 +1481,12 @@ export const ProfilePage = () => {
       null;
 
     if (fallback) {
-      setIdentityEditorId(fallback.id);
-      setIdentityForm(toIdentityForm(fallback));
+      applyIdentityEditorState(fallback);
       return;
     }
 
-    setIdentityEditorId("new");
-    setIdentityForm(createEmptyIdentityForm());
-  }, [identities, identityEditorId, loading, selectedIdentityId]);
+    applyIdentityEditorState("new");
+  }, [applyIdentityEditorState, identities, identityEditorId, loading, selectedIdentityId]);
 
   useEffect(() => {
     if (loading || llmEditorId === "new") {
@@ -1588,13 +1611,7 @@ export const ProfilePage = () => {
   }, [displayIdentity, highlightedMaterialId, materialModalOpen]);
 
   const beginIdentityCreation = () => {
-    setIdentityEditorId("new");
-    setIdentityForm(createEmptyIdentityForm());
-    setTemplateModalOpen(false);
-    setTestingIdentityConnection(null);
-    setLastIdentityConnectionResult(null);
-    setHighlightedMaterialId(null);
-    setOptimisticMaterial(null);
+    applyIdentityEditorState("new");
     window.requestAnimationFrame(() =>
       focusInput(identityNameInputRef.current),
     );
@@ -1615,13 +1632,7 @@ export const ProfilePage = () => {
     if (!identity) {
       return;
     }
-    setIdentityEditorId(identity.id);
-    setIdentityForm(toIdentityForm(identity));
-    setTemplateModalOpen(false);
-    setTestingIdentityConnection(null);
-    setLastIdentityConnectionResult(null);
-    setHighlightedMaterialId(null);
-    setOptimisticMaterial(null);
+    applyIdentityEditorState(identity);
   };
 
   const openLLMEditor = (profileId: number) => {
