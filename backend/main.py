@@ -1,29 +1,76 @@
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+
+import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
 
-# 初始化 FastAPI 实例
-app = FastAPI(title="Auto Email Agent API", version="2.0")
-
-# 配置 CORS (虽然前端用了代理，但加上这个配置是好习惯，方便以后扩展)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # 开发阶段允许所有来源，生产环境记得限制
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+from app.api import (
+    batch_tasks_router,
+    email_tasks_router,
+    identities_router,
+    llm_profiles_router,
+    materials_router,
+    professors_router,
+    system_settings_router,
+    workspaces_router,
 )
+from app.core.config import get_settings
+from app.core.database import dispose_engine, get_session_factory
+from app.core.migrations import ensure_database_schema
+from app.services.runtime_manager import RuntimeManager
 
 
-# 注册一个简单的测试路由
-@app.get("/api/ping")
-async def ping():
-    return {
-        "status": "ok",
-        "message": "Hello from FastAPI! 核心引擎已启动。",
-    }
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    runtime_manager: RuntimeManager | None = None
+    await ensure_database_schema()
+    if get_settings().enable_background_workers:
+        runtime_manager = RuntimeManager(get_session_factory())
+        await runtime_manager.start()
+        app.state.runtime_manager = runtime_manager
+
+    try:
+        yield
+    finally:
+        if runtime_manager is not None:
+            await runtime_manager.stop()
+        await dispose_engine()
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(title="Auto Email Agent API", version="3.0", lifespan=lifespan)
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    app.include_router(identities_router)
+    app.include_router(materials_router)
+    app.include_router(llm_profiles_router)
+    app.include_router(system_settings_router)
+    app.include_router(professors_router)
+    app.include_router(batch_tasks_router)
+    app.include_router(email_tasks_router)
+    app.include_router(workspaces_router)
+
+    @app.get("/api/ping")
+    async def ping() -> dict[str, str]:
+        return {
+            "status": "ok",
+            "message": "Auto Email Agent API 已启动",
+        }
+
+    return app
+
+
+app = create_app()
 
 
 if __name__ == "__main__":
-    # 使用 uvicorn 启动服务，开启热更新
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)

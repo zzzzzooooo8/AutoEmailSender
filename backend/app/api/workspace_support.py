@@ -1,0 +1,325 @@
+﻿from __future__ import annotations
+
+from datetime import UTC, datetime
+
+from fastapi import HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.api.identity_serializers import serialize_material
+from app.models import (
+    EmailLog,
+    EmailTask,
+    EmailTaskStatus,
+    IdentityProfile,
+    LLMProfile,
+    Professor,
+)
+from app.schemas.workspace import (
+    WorkspaceIdentityRead,
+    WorkspaceLLMRead,
+    WorkspaceMessageRead,
+    WorkspaceProfessorRead,
+    WorkspaceTaskSummaryRead,
+    WorkspaceThreadRead,
+)
+from app.services import llm_runtime
+from app.services.outreach_templates import resolve_outreach_template_config
+from app.services.system_settings import get_or_create_app_settings
+
+
+async def build_workspace_thread(
+    session: AsyncSession,
+    *,
+    professor_id: int,
+    identity_id: int,
+    llm_profile_id: int,
+) -> WorkspaceThreadRead:
+    professor = await _get_professor(session, professor_id)
+    identity = await _get_identity(session, identity_id)
+    llm_profile = await _get_llm_profile(session, llm_profile_id)
+    current_task = await _get_latest_email_task(session, professor_id, identity_id, llm_profile_id)
+    app_settings = await get_or_create_app_settings(session)
+    current_task_outreach = (
+        _resolve_task_outreach_config(identity, current_task)
+        if current_task is not None
+        else resolve_outreach_template_config(identity)
+    )
+
+    logs = list(
+        (
+            await session.execute(
+                select(EmailLog)
+                .where(
+                    EmailLog.professor_id == professor_id,
+                    EmailLog.identity_id == identity_id,
+                    EmailLog.llm_profile_id == llm_profile_id,
+                )
+                .order_by(EmailLog.created_at.asc()),
+            )
+        ).scalars()
+    )
+    latest_draft_log = next(
+        (
+            log
+            for log in reversed(logs)
+            if log.direction == "draft" and current_task and log.email_task_id == current_task.id
+        ),
+        None,
+    )
+    latest_draft_usage = _extract_usage(latest_draft_log.provider_payload if latest_draft_log else None)
+
+    token_estimate = None
+    if (
+        current_task is not None
+        and current_task.primary_material is not None
+        and current_task_outreach.generation_mode == "llm"
+        and llm_runtime.resolve_template_text(
+            current_task_outreach.body_text_template,
+            current_task_outreach.body_html_template,
+        )
+    ):
+        token_estimate = llm_runtime.estimate_match_and_draft_tokens(
+            identity=identity,
+            primary_material=current_task.primary_material,
+            llm_profile=llm_profile,
+            professor=professor,
+            available_materials=list(identity.materials),
+            custom_subject=current_task_outreach.subject_template,
+            custom_body=llm_runtime.resolve_template_text(
+                current_task_outreach.body_text_template,
+                current_task_outreach.body_html_template,
+            ),
+        )
+
+    return WorkspaceThreadRead(
+        professor=WorkspaceProfessorRead(
+            id=professor.id,
+            name=professor.name,
+            email=professor.email,
+            title=professor.title,
+            university=professor.university,
+            school=professor.school,
+            research_direction=professor.research_direction,
+        ),
+        identity=WorkspaceIdentityRead(
+            id=identity.id,
+            name=identity.name,
+            email_address=identity.email_address,
+        ),
+        llm_profile=WorkspaceLLMRead(
+            id=llm_profile.id,
+            name=llm_profile.name,
+            provider=llm_profile.provider,
+            model_name=llm_profile.model_name,
+        ),
+        mail_delivery_mode=app_settings.mail_delivery_mode,
+        material_options=[
+            serialize_material(material, identity.current_primary_material_id)
+            for material in sorted(identity.materials, key=lambda item: item.created_at, reverse=True)
+        ],
+        current_task=WorkspaceTaskSummaryRead(
+            id=current_task.id if current_task else None,
+            batch_task_id=current_task.batch_task_id if current_task else None,
+            status=current_task.status if current_task else None,
+            outreach_generation_mode=current_task_outreach.generation_mode,
+            outreach_template_subject=current_task_outreach.subject_template,
+            outreach_template_body_text=current_task_outreach.body_text_template,
+            outreach_template_body_html=current_task_outreach.body_html_template,
+            match_score=current_task.match_score if current_task else None,
+            match_reason=current_task.match_reason if current_task else None,
+            fit_points=(current_task.fit_points or []) if current_task else [],
+            risk_points=(current_task.risk_points or []) if current_task else [],
+            match_keywords=(current_task.match_keywords or []) if current_task else [],
+            generated_subject=current_task.generated_subject if current_task else None,
+            generated_content_text=current_task.generated_content_text if current_task else None,
+            generated_content_html=current_task.generated_content_html if current_task else None,
+            approved_subject=current_task.approved_subject if current_task else None,
+            approved_body_text=current_task.approved_body_text if current_task else None,
+            approved_body_html=current_task.approved_body_html if current_task else None,
+            primary_material_id=current_task.primary_material_id if current_task else None,
+            primary_material=(
+                serialize_material(current_task.primary_material, identity.current_primary_material_id)
+                if current_task and current_task.primary_material is not None
+                else None
+            ),
+            selected_material_ids=current_task.selected_material_ids if current_task else None,
+            delivery_mode=current_task.delivery_mode if current_task else None,
+            approved_at=current_task.approved_at if current_task else None,
+            scheduled_at=current_task.scheduled_at if current_task else None,
+            last_send_attempt_at=current_task.last_send_attempt_at if current_task else None,
+            sent_at=current_task.sent_at if current_task else None,
+            last_rfc_message_id=current_task.last_rfc_message_id if current_task else None,
+            retry_count=current_task.retry_count if current_task else 0,
+            last_error=current_task.last_error if current_task else None,
+            is_replied=current_task.is_replied if current_task else False,
+            estimated_prompt_tokens=(
+                token_estimate.estimated_prompt_tokens if token_estimate is not None else None
+            ),
+            estimated_completion_tokens_upper_bound=(
+                token_estimate.estimated_completion_tokens_upper_bound if token_estimate is not None else None
+            ),
+            estimated_total_tokens_upper_bound=(
+                token_estimate.estimated_total_tokens_upper_bound if token_estimate is not None else None
+            ),
+            last_draft_prompt_tokens=latest_draft_usage.get("prompt_tokens"),
+            last_draft_completion_tokens=latest_draft_usage.get("completion_tokens"),
+            last_draft_total_tokens=latest_draft_usage.get("total_tokens"),
+        ),
+        messages=[_serialize_workspace_message(log) for log in logs],
+    )
+
+
+async def ensure_workspace_task(
+    session: AsyncSession,
+    *,
+    professor_id: int,
+    identity_id: int,
+    llm_profile_id: int,
+) -> EmailTask:
+    professor = await _get_professor(session, professor_id)
+    identity = await _get_identity(session, identity_id)
+    await _get_llm_profile(session, llm_profile_id)
+
+    current_task = await _get_latest_email_task(session, professor.id, identity.id, llm_profile_id)
+    if current_task is not None:
+        return current_task
+
+    snapshot = resolve_outreach_template_config(identity)
+    task = EmailTask(
+        batch_task_id=None,
+        identity_id=identity.id,
+        llm_profile_id=llm_profile_id,
+        professor_id=professor.id,
+        primary_material_id=identity.current_primary_material_id,
+        outreach_generation_mode=snapshot.generation_mode,
+        outreach_template_subject=_normalize_nullable_text(snapshot.subject_template),
+        outreach_template_body_text=_normalize_nullable_text(snapshot.body_text_template),
+        outreach_template_body_html=_normalize_nullable_text(snapshot.body_html_template),
+        status=EmailTaskStatus.DISCOVERED.value,
+        selected_material_ids=None,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    session.add(task)
+    await session.commit()
+    await session.refresh(task)
+    return task
+
+
+async def _get_professor(session: AsyncSession, professor_id: int) -> Professor:
+    professor = await session.scalar(
+        select(Professor).where(
+            Professor.id == professor_id,
+            Professor.archived_at.is_(None),
+        ),
+    )
+    if not professor:
+        raise HTTPException(status_code=404, detail="未找到导师或该导师已被移入回收站")
+    return professor
+
+
+async def _get_identity(session: AsyncSession, identity_id: int) -> IdentityProfile:
+    identity = await session.scalar(
+        select(IdentityProfile)
+        .options(
+            selectinload(IdentityProfile.materials),
+            selectinload(IdentityProfile.current_primary_material),
+        )
+        .where(IdentityProfile.id == identity_id),
+    )
+    if not identity:
+        raise HTTPException(status_code=404, detail="未找到身份配置")
+    return identity
+
+
+async def _get_llm_profile(session: AsyncSession, llm_profile_id: int) -> LLMProfile:
+    profile = await session.get(LLMProfile, llm_profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="未找到 LLM 配置")
+    return profile
+
+
+async def _get_latest_email_task(
+    session: AsyncSession,
+    professor_id: int,
+    identity_id: int,
+    llm_profile_id: int,
+) -> EmailTask | None:
+    return await session.scalar(
+        select(EmailTask)
+        .options(
+            selectinload(EmailTask.primary_material),
+            selectinload(EmailTask.batch_task),
+        )
+        .where(
+            EmailTask.professor_id == professor_id,
+            EmailTask.identity_id == identity_id,
+            EmailTask.llm_profile_id == llm_profile_id,
+        )
+        .order_by(EmailTask.created_at.desc()),
+    )
+
+
+def _extract_usage(provider_payload: dict[str, object] | None) -> dict[str, int | None]:
+    if not provider_payload:
+        return {
+            "prompt_tokens": None,
+            "completion_tokens": None,
+            "total_tokens": None,
+        }
+
+    raw_usage = provider_payload.get("usage")
+    if not isinstance(raw_usage, dict):
+        return {
+            "prompt_tokens": None,
+            "completion_tokens": None,
+            "total_tokens": None,
+        }
+
+    return {
+        "prompt_tokens": raw_usage.get("prompt_tokens") if isinstance(raw_usage.get("prompt_tokens"), int) else None,
+        "completion_tokens": (
+            raw_usage.get("completion_tokens")
+            if isinstance(raw_usage.get("completion_tokens"), int)
+            else None
+        ),
+        "total_tokens": raw_usage.get("total_tokens") if isinstance(raw_usage.get("total_tokens"), int) else None,
+    }
+
+
+def _serialize_workspace_message(log: EmailLog) -> WorkspaceMessageRead:
+    usage = _extract_usage(log.provider_payload)
+    return WorkspaceMessageRead(
+        id=log.id,
+        direction=log.direction,
+        delivery_mode=log.delivery_mode,
+        subject=log.subject,
+        content=log.content,
+        content_html=log.content_html,
+        rfc_message_id=log.rfc_message_id,
+        failure_summary=log.failure_summary,
+        reply_headers=log.reply_headers,
+        prompt_tokens=usage.get("prompt_tokens"),
+        completion_tokens=usage.get("completion_tokens"),
+        total_tokens=usage.get("total_tokens"),
+        created_at=log.created_at,
+    )
+
+
+def _resolve_task_outreach_config(identity: IdentityProfile, task: EmailTask):
+    return resolve_outreach_template_config(
+        identity,
+        generation_mode=task.outreach_generation_mode,
+        subject_template=task.outreach_template_subject,
+        body_text_template=task.outreach_template_body_text,
+        body_html_template=task.outreach_template_body_html,
+    )
+
+
+def _normalize_nullable_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
