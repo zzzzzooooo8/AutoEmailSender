@@ -90,6 +90,21 @@ describe("NotificationViewport", () => {
     expect(within(card).getByText("请选择开始时间")).toBeInTheDocument();
   });
 
+  it("renders notification cards into document.body via portal", () => {
+    const { container } = render(
+      <NotificationProvider>
+        <Harness />
+      </NotificationProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "长报错" }));
+
+    const card = screen.getByTestId("notification-card");
+
+    expect(document.body).toContainElement(card);
+    expect(container).not.toContainElement(card);
+  });
+
   it("auto-dismisses untouched notifications after its timer elapses", () => {
     render(
       <NotificationProvider>
@@ -117,6 +132,29 @@ describe("NotificationViewport", () => {
 
     const card = screen.getByTestId("notification-card");
     fireEvent.mouseEnter(card);
+    vi.advanceTimersByTime(10000);
+
+    expect(screen.getByText("复制这条报错")).toBeInTheDocument();
+
+    fireEvent.click(
+      within(card).getByRole("button", { name: "关闭提示" }),
+    );
+    vi.advanceTimersByTime(200);
+
+    expect(screen.queryByText("复制这条报错")).not.toBeInTheDocument();
+  });
+
+  it("keeps notifications sticky after mouse down until dismissed manually", () => {
+    render(
+      <NotificationProvider>
+        <Harness />
+      </NotificationProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "长报错" }));
+
+    const card = screen.getByTestId("notification-card");
+    fireEvent.mouseDown(card);
     vi.advanceTimersByTime(10000);
 
     expect(screen.getByText("复制这条报错")).toBeInTheDocument();

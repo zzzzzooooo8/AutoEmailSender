@@ -1,3 +1,5 @@
+/* eslint-disable react-refresh/only-export-components */
+
 import {
   createContext,
   useCallback,
@@ -147,18 +149,10 @@ export const NotificationProvider = ({ children }: PropsWithChildren) => {
         continue;
       }
 
-      const remainingMs =
-        notification.createdAt + notification.durationMs - Date.now();
-
-      if (remainingMs <= 0) {
-        dismissNotification(notification.id);
-        continue;
-      }
-
       timeoutIds.push(
         window.setTimeout(() => {
           dismissNotification(notification.id);
-        }, remainingMs),
+        }, Math.max(notification.createdAt + notification.durationMs - Date.now(), 0)),
       );
     }
 
@@ -170,11 +164,13 @@ export const NotificationProvider = ({ children }: PropsWithChildren) => {
   }, [dismissNotification, notifications]);
 
   useEffect(() => {
+    const dismissTimers = dismissTimersRef.current;
+
     return () => {
-      dismissTimersRef.current.forEach((timeoutId) => {
+      dismissTimers.forEach((timeoutId) => {
         window.clearTimeout(timeoutId);
       });
-      dismissTimersRef.current.clear();
+      dismissTimers.clear();
     };
   }, []);
 
