@@ -52,10 +52,14 @@ export const NotificationViewport = ({
             key={notification.id}
             data-testid="notification-card"
             className={clsx(
-              "pointer-events-auto rounded-2xl border p-4 shadow-lg backdrop-blur transition-all duration-[180ms] ease-out",
+              "pointer-events-auto origin-bottom-right rounded-2xl border p-4 shadow-lg backdrop-blur will-change-transform",
               styles.container,
-              notification.closing && "translate-y-2 opacity-0",
             )}
+            style={{
+              animation: notification.closing
+                ? "notification-pop-out 220ms cubic-bezier(0.65, 0, 0.35, 1) forwards"
+                : "notification-pop-in 320ms cubic-bezier(0.22, 1, 0.36, 1)",
+            }}
             onMouseEnter={() => {
               onLock(notification.id);
             }}

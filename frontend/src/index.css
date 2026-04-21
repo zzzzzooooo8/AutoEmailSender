@@ -34,6 +34,35 @@ body {
     sans-serif;
 }
 
+@keyframes notification-pop-in {
+  0% {
+    opacity: 0;
+    transform: translate3d(calc(100% + 1.5rem), 0.85rem, 0) scale(0.92);
+  }
+
+  68% {
+    opacity: 1;
+    transform: translate3d(-0.4rem, -0.1rem, 0) scale(1.015);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes notification-pop-out {
+  0% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate3d(calc(100% + 1.75rem), 0.4rem, 0) scale(0.94);
+  }
+}
+
 button,
 select,
 summary,
