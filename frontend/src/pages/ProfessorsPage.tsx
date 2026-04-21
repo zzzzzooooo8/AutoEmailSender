@@ -567,11 +567,17 @@ export const ProfessorsPage = () => {
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-8">
-      <section className="rounded-[32px] border border-stone-200 bg-[linear-gradient(180deg,#fcfbf8,#fffaf2)] p-6 shadow-sm">
+      <section
+        aria-labelledby="professors-workbench-title"
+        className="rounded-[32px] border border-stone-200 bg-[linear-gradient(180deg,#fcfbf8,#fffaf2)] p-6 shadow-sm"
+      >
         <div className="flex flex-col gap-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="max-w-2xl">
-              <h1 className="mt-4 text-3xl font-semibold tracking-[0.01em] text-stone-900">
+              <h1
+                id="professors-workbench-title"
+                className="mt-4 text-3xl font-semibold tracking-[0.01em] text-stone-900"
+              >
                 导师档案工作台
               </h1>
               <p className="mt-3 text-sm leading-6 text-stone-600">
