@@ -30,32 +30,52 @@ export const TasksPage = () => {
   const [tasks, setTasks] = useState<BatchTaskCardDTO[]>([]);
   const [loading, setLoading] = useState(false);
   const lastLoadErrorRef = useRef<string | null>(null);
+  const loadedTasksKeyRef = useRef<string | null>(null);
+  const activeTasksRequestKeyRef = useRef<string | null>(null);
+  const tasksRequestKey =
+    selectedIdentityId && selectedLlmProfileId
+      ? `${selectedIdentityId}:${selectedLlmProfileId}`
+      : null;
 
   const loadTasks = useCallback(async () => {
-    if (!selectedIdentityId || !selectedLlmProfileId) {
+    if (!tasksRequestKey || !selectedIdentityId || !selectedLlmProfileId) {
+      activeTasksRequestKeyRef.current = null;
+      loadedTasksKeyRef.current = null;
       setTasks([]);
       lastLoadErrorRef.current = null;
       return;
     }
+    activeTasksRequestKeyRef.current = tasksRequestKey;
     setLoading(true);
     try {
       const data = await listBatchTasks({
         identityId: selectedIdentityId,
         llmProfileId: selectedLlmProfileId,
       });
+      if (activeTasksRequestKeyRef.current !== tasksRequestKey) {
+        return;
+      }
       setTasks(data);
+      loadedTasksKeyRef.current = tasksRequestKey;
       lastLoadErrorRef.current = null;
     } catch (loadError) {
-      setTasks([]);
+      if (activeTasksRequestKeyRef.current !== tasksRequestKey) {
+        return;
+      }
+      if (loadedTasksKeyRef.current !== tasksRequestKey) {
+        setTasks([]);
+      }
       const message = loadError instanceof Error ? loadError.message : "加载任务失败";
       if (lastLoadErrorRef.current !== message) {
         notifyError("加载任务失败", message);
         lastLoadErrorRef.current = message;
       }
     } finally {
-      setLoading(false);
+      if (activeTasksRequestKeyRef.current === tasksRequestKey) {
+        setLoading(false);
+      }
     }
-  }, [notifyError, selectedIdentityId, selectedLlmProfileId]);
+  }, [notifyError, selectedIdentityId, selectedLlmProfileId, tasksRequestKey]);
 
   useEffect(() => {
     void loadTasks();

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { WorkspaceComposerDock } from '@/components/organisms/WorkspaceComposerDock';
@@ -89,6 +89,12 @@ export const WorkspacePage = () => {
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<number[]>([]);
   const [scheduledAt, setScheduledAt] = useState(getDefaultScheduledAtValue);
   const [composerExpanded, setComposerExpanded] = useState(false);
+  const loadedThreadKeyRef = useRef<string | null>(null);
+  const activeThreadRequestKeyRef = useRef<string | null>(null);
+  const workspaceRequestKey =
+    Number.isFinite(professorId) && selectedIdentityId && selectedLlmProfileId
+      ? `${professorId}:${selectedIdentityId}:${selectedLlmProfileId}`
+      : null;
 
   const syncComposer = useCallback((data: WorkspaceThreadDTO) => {
     const currentTask = getCurrentTaskOrNull(data);
@@ -131,12 +137,15 @@ export const WorkspacePage = () => {
   }, []);
 
   const loadThread = useCallback(async () => {
-    if (!selectedIdentityId || !selectedLlmProfileId || !Number.isFinite(professorId)) {
+    if (!workspaceRequestKey || !selectedIdentityId || !selectedLlmProfileId || !Number.isFinite(professorId)) {
+      activeThreadRequestKeyRef.current = null;
+      loadedThreadKeyRef.current = null;
       setThread(null);
       setLoadFailed(false);
       return;
     }
 
+    activeThreadRequestKeyRef.current = workspaceRequestKey;
     setLoading(true);
     try {
       const data = await getWorkspaceThread(
@@ -152,18 +161,31 @@ export const WorkspacePage = () => {
               selectedLlmProfileId,
             )
           : data;
+      if (activeThreadRequestKeyRef.current !== workspaceRequestKey) {
+        return;
+      }
       setThread(workspaceData);
       setLoadFailed(false);
       syncComposer(workspaceData);
+      loadedThreadKeyRef.current = workspaceRequestKey;
     } catch (loadError) {
+      if (activeThreadRequestKeyRef.current !== workspaceRequestKey) {
+        return;
+      }
       const message = loadError instanceof Error ? loadError.message : '加载工作区失败';
-      setThread(null);
-      setLoadFailed(true);
+      if (loadedThreadKeyRef.current !== workspaceRequestKey) {
+        setThread(null);
+        setLoadFailed(true);
+      } else {
+        setLoadFailed(false);
+      }
       notifyError('加载工作区失败', message);
     } finally {
-      setLoading(false);
+      if (activeThreadRequestKeyRef.current === workspaceRequestKey) {
+        setLoading(false);
+      }
     }
-  }, [notifyError, professorId, selectedIdentityId, selectedLlmProfileId, syncComposer]);
+  }, [notifyError, professorId, selectedIdentityId, selectedLlmProfileId, syncComposer, workspaceRequestKey]);
 
   useEffect(() => {
     void loadThread();

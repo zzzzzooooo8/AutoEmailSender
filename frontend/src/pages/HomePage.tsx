@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { FolderOpen, Loader2, MailPlus, RefreshCcw, Search, Sparkles } from 'lucide-react';
 import { NativeSelectField } from '@/components/atoms/NativeSelectField';
@@ -26,20 +26,37 @@ export const HomePage = () => {
   const [loading, setLoading] = useState(false);
   const [bulkScoring, setBulkScoring] = useState(false);
   const [scoringProfessorIds, setScoringProfessorIds] = useState<Set<number>>(new Set());
+  const loadedProfessorsKeyRef = useRef<string | null>(null);
+  const activeProfessorsRequestKeyRef = useRef<string | null>(null);
+  const professorsRequestKey =
+    selectedIdentityId && selectedLlmProfileId
+      ? `${selectedIdentityId}:${selectedLlmProfileId}`
+      : null;
 
   const loadProfessors = useCallback(async () => {
-    if (!selectedIdentityId || !selectedLlmProfileId) {
+    if (!professorsRequestKey || !selectedIdentityId || !selectedLlmProfileId) {
+      activeProfessorsRequestKeyRef.current = null;
+      loadedProfessorsKeyRef.current = null;
       setProfessors([]);
+      setSelectedIds(new Set());
       return;
     }
+    activeProfessorsRequestKeyRef.current = professorsRequestKey;
     setLoading(true);
     try {
       const data = await listProfessors({
         identityId: selectedIdentityId,
         llmProfileId: selectedLlmProfileId,
       });
+      if (activeProfessorsRequestKeyRef.current !== professorsRequestKey) {
+        return;
+      }
+      const previousLoadedKey = loadedProfessorsKeyRef.current;
       setProfessors(data);
       setSelectedIds((previous) => {
+        if (previousLoadedKey !== professorsRequestKey) {
+          return new Set();
+        }
         const next = new Set<number>();
         data.forEach((item) => {
           if (previous.has(item.id)) {
@@ -48,15 +65,23 @@ export const HomePage = () => {
         });
         return next;
       });
+      loadedProfessorsKeyRef.current = professorsRequestKey;
     } catch (loadError) {
-      setProfessors([]);
-      setSelectedIds(new Set());
+      if (activeProfessorsRequestKeyRef.current !== professorsRequestKey) {
+        return;
+      }
+      if (loadedProfessorsKeyRef.current !== professorsRequestKey) {
+        setProfessors([]);
+        setSelectedIds(new Set());
+      }
       const message = loadError instanceof Error ? loadError.message : '加载导师列表失败';
       notifyError('加载导师列表失败', message);
     } finally {
-      setLoading(false);
+      if (activeProfessorsRequestKeyRef.current === professorsRequestKey) {
+        setLoading(false);
+      }
     }
-  }, [notifyError, selectedIdentityId, selectedLlmProfileId]);
+  }, [notifyError, professorsRequestKey, selectedIdentityId, selectedLlmProfileId]);
 
   useEffect(() => {
     void loadProfessors();

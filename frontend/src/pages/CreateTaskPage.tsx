@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useRef } from 'react';
 import { Loader2 } from 'lucide-react';
 import { NativeSelectField } from '@/components/atoms/NativeSelectField';
 import { useNotification } from '@/context/NotificationContext';
@@ -68,13 +69,22 @@ export const CreateTaskPage = () => {
   const [emailsPerWindow, setEmailsPerWindow] = useState('10');
   const [primaryMaterialId, setPrimaryMaterialId] = useState<number | null>(null);
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<number[]>([]);
+  const loadedProfessorsKeyRef = useRef<string | null>(null);
+  const activeProfessorsRequestKeyRef = useRef<string | null>(null);
+  const professorsRequestKey =
+    selectedIdentityId && selectedLlmProfileId && selectedProfessorIds.length > 0
+      ? `${selectedIdentityId}:${selectedLlmProfileId}:${selectedProfessorIds.join(',')}`
+      : null;
 
   useEffect(() => {
     const loadProfessors = async () => {
-      if (!selectedIdentityId || !selectedLlmProfileId || selectedProfessorIds.length === 0) {
+      if (!professorsRequestKey || !selectedIdentityId || !selectedLlmProfileId || selectedProfessorIds.length === 0) {
+        activeProfessorsRequestKeyRef.current = null;
+        loadedProfessorsKeyRef.current = null;
         setProfessors([]);
         return;
       }
+      activeProfessorsRequestKeyRef.current = professorsRequestKey;
       setLoading(true);
       try {
         const data = await listProfessors({
@@ -82,18 +92,29 @@ export const CreateTaskPage = () => {
           llmProfileId: selectedLlmProfileId,
           ids: selectedProfessorIds,
         });
+        if (activeProfessorsRequestKeyRef.current !== professorsRequestKey) {
+          return;
+        }
         setProfessors(data);
+        loadedProfessorsKeyRef.current = professorsRequestKey;
       } catch (loadError) {
-        setProfessors([]);
+        if (activeProfessorsRequestKeyRef.current !== professorsRequestKey) {
+          return;
+        }
+        if (loadedProfessorsKeyRef.current !== professorsRequestKey) {
+          setProfessors([]);
+        }
         const message = loadError instanceof Error ? loadError.message : '加载已选导师失败';
         notifyError('加载已选导师失败', message);
       } finally {
-        setLoading(false);
+        if (activeProfessorsRequestKeyRef.current === professorsRequestKey) {
+          setLoading(false);
+        }
       }
     };
 
     void loadProfessors();
-  }, [notifyError, selectedIdentityId, selectedLlmProfileId, selectedProfessorIds]);
+  }, [notifyError, professorsRequestKey, selectedIdentityId, selectedLlmProfileId, selectedProfessorIds]);
 
   useEffect(() => {
     if (!selectedIdentity) {
