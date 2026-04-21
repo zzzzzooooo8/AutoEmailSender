@@ -4,13 +4,12 @@ import { ChevronDown, Clock } from 'lucide-react';
 interface TaskTimePickerProps {
   value: string; // "HH:mm"
   onChange: (time: string) => void;
-  error?: string;
 }
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 const MINUTES = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
 
-export const TaskTimePicker: React.FC<TaskTimePickerProps> = ({ value, onChange, error }) => {
+export const TaskTimePicker: React.FC<TaskTimePickerProps> = ({ value, onChange }) => {
   const [open, setOpen] = useState(false);
 
   const [hourStr, minuteStr] = value ? value.split(':') : ['09', '00'];
@@ -82,8 +81,6 @@ export const TaskTimePicker: React.FC<TaskTimePickerProps> = ({ value, onChange,
           </div>
         </div>
       )}
-
-      {error && <span className="text-xs text-red-500">{error}</span>}
 
       {open && (
         <div

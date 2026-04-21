@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Plus } from 'lucide-react';
 import { BatchTaskCard, type BatchTask } from '../molecules/BatchTaskCard';
 import { PrimaryFillButton } from '../atoms/PrimaryFillButton';
+import { useNotification } from '@/context/NotificationContext';
 import { useConfirmDialog } from '@/lib/useConfirmDialog';
 
 interface TasksDashboardClientProps {
@@ -10,6 +11,7 @@ interface TasksDashboardClientProps {
 
 export const TasksDashboardClient: React.FC<TasksDashboardClientProps> = ({ initialTasks }) => {
   const [tasks, setTasks] = useState<BatchTask[]>(initialTasks);
+  const { notifyWarning } = useNotification();
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
 
   const handlePause = (id: string) => setTasks(tasks.map((t) => (t.id === id ? { ...t, status: '已暂停' } : t)));
@@ -28,8 +30,8 @@ export const TasksDashboardClient: React.FC<TasksDashboardClientProps> = ({ init
     setTasks(tasks.map((t) => (t.id === id ? { ...t, status: '已完成' } : t)));
   };
 
-  const handleView = (id: string) => window.alert(`查看任务 ${id} 详情（待开发）`);
-  const handleCreateTask = () => window.alert('新建批量任务（待开发）');
+  const handleView = (id: string) => notifyWarning('功能暂未开放', `查看任务 ${id} 详情（待开发）`);
+  const handleCreateTask = () => notifyWarning('功能暂未开放', '新建批量任务（待开发）');
 
   return (
     <div className="min-h-[calc(100vh-64px)] bg-background p-8">

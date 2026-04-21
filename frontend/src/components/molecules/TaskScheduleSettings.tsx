@@ -7,7 +7,6 @@ interface TaskScheduleSettingsProps {
   onStartTimeChange: (time: string) => void;
   onEndTimeChange: (time: string) => void;
   onEmailsToSendChange: (count: number) => void;
-  errors: Record<string, string>;
 }
 
 export const TaskScheduleSettings: React.FC<TaskScheduleSettingsProps> = ({
@@ -16,7 +15,6 @@ export const TaskScheduleSettings: React.FC<TaskScheduleSettingsProps> = ({
   onStartTimeChange,
   onEndTimeChange,
   onEmailsToSendChange,
-  errors,
 }) => {
   const isScheduled = schedule.type === 'scheduled';
 
@@ -61,7 +59,6 @@ export const TaskScheduleSettings: React.FC<TaskScheduleSettingsProps> = ({
               <TaskTimePicker
                 value={schedule.startTime ?? '09:00'}
                 onChange={onStartTimeChange}
-                error={errors.startTime}
               />
             </div>
 
@@ -70,7 +67,6 @@ export const TaskScheduleSettings: React.FC<TaskScheduleSettingsProps> = ({
               <TaskTimePicker
                 value={schedule.endTime ?? '18:00'}
                 onChange={onEndTimeChange}
-                error={errors.endTime}
               />
             </div>
 
@@ -84,9 +80,6 @@ export const TaskScheduleSettings: React.FC<TaskScheduleSettingsProps> = ({
                 placeholder="例如 20"
                 className="h-9 w-28 rounded-lg border border-stone-200 bg-white px-3 text-sm text-stone-700 transition-all placeholder:text-stone-400 hover:border-stone-300 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
               />
-              {errors.emailsToSend && (
-                <span className="text-xs text-red-500">{errors.emailsToSend}</span>
-              )}
             </div>
           </div>
 

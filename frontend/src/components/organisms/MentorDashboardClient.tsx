@@ -5,6 +5,7 @@ import { MentorListContainer } from './MentorListContainer';
 import type { Mentor } from '@/types';
 import { useMentorFilters } from '@/features/mentor-filter/client/useMentorFilters';
 import { ALL_FILTER_VALUE } from '@/features/mentor-filter/types';
+import { useNotification } from '@/context/NotificationContext';
 import type { MentorStatus } from '@/types';
 
 interface MentorDashboardClientProps {
@@ -24,6 +25,7 @@ const SESSION_KEY = 'selected_mentor_ids';
 
 export const MentorDashboardClient: React.FC<MentorDashboardClientProps> = ({ initialMentors }) => {
   const navigate = useNavigate();
+  const { notifyWarning } = useNotification();
   const {
     filters,
     filteredMentors,
@@ -68,7 +70,7 @@ export const MentorDashboardClient: React.FC<MentorDashboardClientProps> = ({ in
 
   const handleCreateTask = () => {
     if (selectedIds.size === 0) {
-      window.alert('请先在列表中勾选要发送的导师');
+      notifyWarning('请先选择导师', '请先在列表中勾选要发送的导师');
       return;
     }
     sessionStorage.setItem(SESSION_KEY, JSON.stringify([...selectedIds]));
@@ -94,8 +96,8 @@ export const MentorDashboardClient: React.FC<MentorDashboardClientProps> = ({ in
         onMatchScoreRangeChange={setMatchScoreRange}
         onStatusChange={setStatus}
         onResetSchoolAndCollege={resetSchoolAndCollege}
-        onImportClick={() => window.alert('导入导师（待开发）')}
-        onScrapeClick={() => window.alert('智能抓取（待开发）')}
+        onImportClick={() => notifyWarning('功能暂未开放', '导入导师（待开发）')}
+        onScrapeClick={() => notifyWarning('功能暂未开放', '智能抓取（待开发）')}
         onCreateTaskClick={handleCreateTask}
       />
 

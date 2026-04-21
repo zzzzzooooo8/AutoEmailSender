@@ -8,6 +8,7 @@ import { TaskAttachments } from '../molecules/TaskAttachments';
 import { TaskSubmitActions } from '../molecules/TaskSubmitActions';
 import { useCreateTaskForm } from '@/features/create-task/client/useCreateTaskForm';
 import { validateTaskForm } from '@/features/create-task/server/validateTaskForm';
+import { useNotification } from '@/context/NotificationContext';
 import { createTask } from '@/lib/api/createTask';
 import type { Mentor } from '@/types';
 
@@ -17,6 +18,7 @@ interface CreateTaskClientProps {
 
 export const CreateTaskClient: React.FC<CreateTaskClientProps> = ({ mentors }) => {
   const navigate = useNavigate();
+  const { notifyError, notifyFormErrors } = useNotification();
   const {
     name,
     setName,
@@ -32,28 +34,21 @@ export const CreateTaskClient: React.FC<CreateTaskClientProps> = ({ mentors }) =
     removeAttachment,
     isSubmitting,
     setIsSubmitting,
-    errors,
-    setError,
-    clearErrors,
-    clearError,
     buildFormData,
     isScheduleComplete,
   } = useCreateTaskForm(mentors);
 
   const handleSubmit = async () => {
-    clearErrors();
     const formData = buildFormData();
     const validation = validateTaskForm(formData);
 
     if (!validation.valid) {
-      Object.entries(validation.errors).forEach(([field, message]) => {
-        setError(field, message);
-      });
+      notifyFormErrors('请检查表单', Object.values(validation.errors));
       return;
     }
 
     if (!isScheduleComplete) {
-      setError('schedule', '请完善发送策略配置');
+      notifyFormErrors('请检查表单', ['请完善发送策略配置']);
       return;
     }
 
@@ -62,7 +57,7 @@ export const CreateTaskClient: React.FC<CreateTaskClientProps> = ({ mentors }) =
       await createTask({ ...formData, mentors });
       navigate('/tasks');
     } catch {
-      setError('submit', '创建失败，请稍后重试');
+      notifyError('创建失败', '创建失败，请稍后重试');
     } finally {
       setIsSubmitting(false);
     }
@@ -85,12 +80,7 @@ export const CreateTaskClient: React.FC<CreateTaskClientProps> = ({ mentors }) =
         <div className="flex flex-col gap-8">
           {/* 任务名称 */}
           <div className="rounded-2xl border border-stone-200 bg-[#FCFBF8] p-6 shadow-sm">
-            <TaskNameInput
-              value={name}
-              onChange={setName}
-              error={errors.name}
-              onClearError={clearError}
-            />
+            <TaskNameInput value={name} onChange={setName} />
           </div>
 
           {/* 目标导师 */}
@@ -106,18 +96,12 @@ export const CreateTaskClient: React.FC<CreateTaskClientProps> = ({ mentors }) =
               onStartTimeChange={setStartTime}
               onEndTimeChange={setEndTime}
               onEmailsToSendChange={setEmailsToSend}
-              errors={errors}
             />
           </div>
 
           {/* 邮件内容 */}
           <div className="rounded-2xl border border-stone-200 bg-[#FCFBF8] p-6 shadow-sm">
-            <TaskEmailContent
-              emailContent={emailContent}
-              onUpdate={updateEmailContent}
-              onClearError={clearError}
-              errors={errors}
-            />
+            <TaskEmailContent emailContent={emailContent} onUpdate={updateEmailContent} />
           </div>
 
           {/* 附件 */}
@@ -128,11 +112,6 @@ export const CreateTaskClient: React.FC<CreateTaskClientProps> = ({ mentors }) =
               onRemove={removeAttachment}
             />
           </div>
-
-          {/* 提交错误 */}
-          {errors.submit && (
-            <p className="text-center text-sm text-red-500">{errors.submit}</p>
-          )}
 
           {/* 操作按钮 */}
           <TaskSubmitActions

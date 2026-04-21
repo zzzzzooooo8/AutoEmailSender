@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import type { Mentor } from '@/types';
 import type { ScheduleType, CreateTaskFormData, TaskScheduleConfig, EmailContent, Attachment } from '../types';
 
@@ -12,7 +12,6 @@ export const useCreateTaskForm = (initialMentors: Mentor[]) => {
   const [emailContent, setEmailContent] = useState<EmailContent>({ subject: '', body: '' });
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string>>({});
 
   const setScheduleType = useCallback((type: ScheduleType) => {
     setSchedule((prev) => ({
@@ -46,22 +45,6 @@ export const useCreateTaskForm = (initialMentors: Mentor[]) => {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
-  const setError = useCallback((field: string, message: string) => {
-    setErrors((prev) => ({ ...prev, [field]: message }));
-  }, []);
-
-  const clearErrors = useCallback(() => {
-    setErrors({});
-  }, []);
-
-  const clearError = useCallback((field: string) => {
-    setErrors((prev) => {
-      const next = { ...prev };
-      delete next[field];
-      return next;
-    });
-  }, []);
-
   const buildFormData = (): CreateTaskFormData => ({
     name,
     mentorIds: initialMentors.map((m) => m.id),
@@ -88,10 +71,6 @@ export const useCreateTaskForm = (initialMentors: Mentor[]) => {
     removeAttachment,
     isSubmitting,
     setIsSubmitting,
-    errors,
-    setError,
-    clearErrors,
-    clearError,
     buildFormData,
     isScheduleComplete,
     initialMentors,
