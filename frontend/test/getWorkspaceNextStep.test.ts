@@ -49,4 +49,28 @@ describe("getWorkspaceNextStep", () => {
       title: "下一步：人工检查后发送",
     });
   });
+
+  it("still prefers generating a draft when scheduled tasks have no draft yet", () => {
+    expect(
+      getWorkspaceNextStep({
+        status: "scheduled",
+        hasDraft: false,
+        hasPrimaryMaterial: true,
+      }),
+    ).toMatchObject({
+      title: "下一步：生成一版邮件草稿",
+    });
+  });
+
+  it("still prefers selecting materials when other conditions are otherwise ready", () => {
+    expect(
+      getWorkspaceNextStep({
+        status: "scheduled",
+        hasDraft: true,
+        hasPrimaryMaterial: false,
+      }),
+    ).toMatchObject({
+      title: "下一步：先选择用于分析的材料",
+    });
+  });
 });

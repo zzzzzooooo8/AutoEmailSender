@@ -1,5 +1,17 @@
+export type WorkspaceTaskStatus =
+  | "discovered"
+  | "matched"
+  | "draft_generated"
+  | "review_required"
+  | "approved"
+  | "scheduled"
+  | "sent"
+  | "send_failed"
+  | "reply_detected"
+  | "skipped";
+
 export interface WorkspaceNextStepInput {
-  status: string;
+  status: WorkspaceTaskStatus;
   hasDraft: boolean;
   hasPrimaryMaterial: boolean;
 }
