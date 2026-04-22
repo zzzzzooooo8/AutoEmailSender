@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HomePage } from "@/pages/HomePage";
-import type { IdentityDTO, LLMProfileDTO } from "@/types";
+import type { IdentityDTO, LLMProfileDTO, ProfessorDashboardItemDTO } from "@/types";
 
 const mockedUseSelectionContext = vi.hoisted(() => vi.fn());
 const mockedListProfessors = vi.hoisted(() => vi.fn());
@@ -37,7 +37,7 @@ vi.mock("@/context/NotificationContext", () => ({
   }),
 }));
 
-const selectedIdentity: IdentityDTO = {
+const createIdentity = (overrides: Partial<IdentityDTO> = {}): IdentityDTO => ({
   id: 1,
   name: "测试身份",
   email_address: "sender@example.com",
@@ -65,7 +65,8 @@ const selectedIdentity: IdentityDTO = {
   materials: [],
   created_at: "2026-04-22T00:00:00Z",
   updated_at: "2026-04-22T00:00:00Z",
-};
+  ...overrides,
+});
 
 const selectedLlmProfile: LLMProfileDTO = {
   id: 1,
@@ -83,6 +84,31 @@ const selectedLlmProfile: LLMProfileDTO = {
   updated_at: "2026-04-22T00:00:00Z",
 };
 
+const professor: ProfessorDashboardItemDTO = {
+  id: 101,
+  name: "王教授",
+  email: "prof@example.com",
+  title: "教授",
+  university: "测试大学",
+  school: "计算机学院",
+  department: "人工智能系",
+  research_direction: "多智能体系统",
+  recent_papers: [],
+  match_score: 92,
+  sent_count: 0,
+  status: "matched",
+};
+
+const createDeferred = <T,>() => {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+};
+
 const renderPage = () =>
   render(
     <MemoryRouter>
@@ -97,13 +123,26 @@ describe("HomePage onboarding", () => {
     mockedUseSelectionContext.mockReturnValue({
       selectedIdentityId: 1,
       selectedLlmProfileId: 1,
-      selectedIdentity,
+      selectedIdentity: createIdentity(),
       selectedLlmProfile,
       systemSettings: { mail_delivery_mode: "dry_run" },
     });
   });
 
-  it("shows the onboarding checklist when the base setup is incomplete", async () => {
+  it("keeps the original loading state before the first professors load resolves", async () => {
+    const deferred = createDeferred<ProfessorDashboardItemDTO[]>();
+    mockedListProfessors.mockReturnValue(deferred.promise);
+    mockedUseSelectionContext.mockReturnValue({
+      selectedIdentityId: 1,
+      selectedLlmProfileId: 1,
+      selectedIdentity: createIdentity({
+        current_primary_material_id: 11,
+        outreach_template_body_text: "你好",
+      }),
+      selectedLlmProfile,
+      systemSettings: { mail_delivery_mode: "dry_run" },
+    });
+
     renderPage();
 
     await waitFor(() => {
@@ -113,15 +152,75 @@ describe("HomePage onboarding", () => {
       });
     });
 
+    expect(screen.getByText("正在加载导师列表...")).toBeInTheDocument();
     expect(
-      await screen.findByRole("heading", { name: "开始使用前，还差这几步" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("heading", { name: "开始使用前，还差这几步" }),
+    ).not.toBeInTheDocument();
+
+    deferred.resolve([professor]);
+  });
+
+  it("shows the onboarding card and links to profile when materials or templates are missing", async () => {
+    renderPage();
+
+    const heading = await screen.findByRole("heading", {
+      name: "开始使用前，还差这几步",
+    });
+
+    expect(heading).toBeInTheDocument();
     expect(screen.getByText("创建发件身份")).toBeInTheDocument();
     expect(screen.getByText("配置 AI 模型")).toBeInTheDocument();
     expect(screen.getByText("准备材料和模板")).toBeInTheDocument();
     expect(screen.getByText("导入导师")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "继续完成准备" })).toHaveAttribute(
+      "href",
+      "/profile",
+    );
+  });
+
+  it("shows the onboarding card and links to professors when setup is complete but no professors exist", async () => {
+    mockedUseSelectionContext.mockReturnValue({
+      selectedIdentityId: 1,
+      selectedLlmProfileId: 1,
+      selectedIdentity: createIdentity({
+        current_primary_material_id: 11,
+        outreach_template_body_text: "老师您好",
+      }),
+      selectedLlmProfile,
+      systemSettings: { mail_delivery_mode: "dry_run" },
+    });
+
+    renderPage();
+
     expect(
-      screen.getByRole("link", { name: "继续完成准备" }),
+      await screen.findByRole("heading", { name: "开始使用前，还差这几步" }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "继续完成准备" })).toHaveAttribute(
+      "href",
+      "/professors",
+    );
+  });
+
+  it("stays on the dashboard when all onboarding prerequisites are satisfied", async () => {
+    mockedListProfessors.mockResolvedValue([professor]);
+    mockedUseSelectionContext.mockReturnValue({
+      selectedIdentityId: 1,
+      selectedLlmProfileId: 1,
+      selectedIdentity: createIdentity({
+        current_primary_material_id: 11,
+        outreach_template_body_text: "老师您好",
+      }),
+      selectedLlmProfile,
+      systemSettings: { mail_delivery_mode: "dry_run" },
+    });
+
+    renderPage();
+
+    expect(
+      await screen.findByRole("heading", { name: "导师看板" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "开始使用前，还差这几步" }),
+    ).not.toBeInTheDocument();
   });
 });

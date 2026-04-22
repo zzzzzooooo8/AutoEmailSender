@@ -26,6 +26,7 @@ export const HomePage = () => {
   const [university, setUniversity] = useState('all');
   const [status, setStatus] = useState<'all' | ProfessorDashboardItemDTO['status']>('all');
   const [loading, setLoading] = useState(false);
+  const [hasLoadedProfessors, setHasLoadedProfessors] = useState(false);
   const [bulkScoring, setBulkScoring] = useState(false);
   const [scoringProfessorIds, setScoringProfessorIds] = useState<Set<number>>(new Set());
   const loadedProfessorsKeyRef = useRef<string | null>(null);
@@ -41,10 +42,14 @@ export const HomePage = () => {
       latestProfessorsRequestIdRef.current += 1;
       activeProfessorsRequestKeyRef.current = null;
       loadedProfessorsKeyRef.current = null;
+      setHasLoadedProfessors(false);
       setProfessors([]);
       setSelectedIds(new Set());
       setLoading(false);
       return;
+    }
+    if (loadedProfessorsKeyRef.current !== professorsRequestKey) {
+      setHasLoadedProfessors(false);
     }
     const requestId = latestProfessorsRequestIdRef.current + 1;
     latestProfessorsRequestIdRef.current = requestId;
@@ -76,6 +81,7 @@ export const HomePage = () => {
         return next;
       });
       loadedProfessorsKeyRef.current = professorsRequestKey;
+      setHasLoadedProfessors(true);
     } catch (loadError) {
       if (
         latestProfessorsRequestIdRef.current !== requestId ||
@@ -155,8 +161,11 @@ export const HomePage = () => {
     hasLlmProfile: Boolean(selectedLlmProfile),
     hasPrimaryMaterial: hasMaterialsAndTemplate,
     hasProfessors: professors.length > 0,
-    hasFirstTask: true,
+    hasFirstTask: false,
   });
+  const hasResolvedHomeOnboarding =
+    onboardingState.completed || onboardingState.stage === 'first_task';
+  const canEvaluateProfessorOnboarding = professorsRequestKey === null || hasLoadedProfessors;
 
   const toggleScoringProfessor = (professorId: number, active: boolean) => {
     setScoringProfessorIds((previous) => {
@@ -253,7 +262,7 @@ export const HomePage = () => {
     }
   };
 
-  if (!onboardingState.completed) {
+  if (canEvaluateProfessorOnboarding && !hasResolvedHomeOnboarding) {
     return (
       <>
         <main className="mx-auto max-w-6xl px-6 py-8">
