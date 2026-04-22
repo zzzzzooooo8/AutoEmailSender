@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkspacePage } from "@/pages/WorkspacePage";
@@ -12,6 +12,8 @@ const mockedUseSelectionContext = vi.hoisted(() => vi.fn());
 const mockedGetWorkspaceThread = vi.hoisted(() => vi.fn());
 const mockedEnsureWorkspaceTask = vi.hoisted(() => vi.fn());
 const mockedWorkspaceComposerDock = vi.hoisted(() => vi.fn());
+const mockedApproveAndSend = vi.hoisted(() => vi.fn());
+const mockedApproveAndSchedule = vi.hoisted(() => vi.fn());
 
 vi.mock("@/context/SelectionContext", () => ({
   useSelectionContext: mockedUseSelectionContext,
@@ -30,8 +32,8 @@ vi.mock("@/lib/api/workspacesApi", () => ({
 }));
 
 vi.mock("@/lib/api/emailTasksApi", () => ({
-  approveAndSchedule: vi.fn(),
-  approveAndSend: vi.fn(),
+  approveAndSchedule: mockedApproveAndSchedule,
+  approveAndSend: mockedApproveAndSend,
   calculateMatch: vi.fn(),
   cancelScheduledTask: vi.fn(),
   generateDraft: vi.fn(),
@@ -52,6 +54,8 @@ vi.mock("@/components/organisms/WorkspaceComposerDock", () => ({
     nextStepTitle: string;
     nextStepDescription: string;
     draftReady: boolean;
+    onSendNow: () => void;
+    onScheduleSend: () => void;
   }) => {
     mockedWorkspaceComposerDock(props);
     return (
@@ -59,6 +63,12 @@ vi.mock("@/components/organisms/WorkspaceComposerDock", () => ({
         <div>{props.nextStepTitle}</div>
         <div>{props.nextStepDescription}</div>
         <div>{props.draftReady ? "draft-ready" : "draft-empty"}</div>
+        <button type="button" onClick={props.onSendNow}>
+          mock-send-now
+        </button>
+        <button type="button" onClick={props.onScheduleSend}>
+          mock-schedule-send
+        </button>
       </div>
     );
   },
@@ -165,6 +175,19 @@ describe("WorkspacePage next-step", () => {
     mockedWorkspaceComposerDock.mockReset();
     mockedGetWorkspaceThread.mockReset();
     mockedEnsureWorkspaceTask.mockReset();
+    mockedApproveAndSend.mockReset();
+    mockedApproveAndSchedule.mockReset();
+    mockedApproveAndSend.mockImplementation(async () =>
+      buildThread({
+        generatedContentHtml: "<p>发送后的 HTML 草稿</p>",
+      }),
+    );
+    mockedApproveAndSchedule.mockImplementation(async () =>
+      buildThread({
+        status: "scheduled",
+        generatedContentHtml: "<p>定时后的 HTML 草稿</p>",
+      }),
+    );
     mockedUseSelectionContext.mockReturnValue({
       selectedIdentityId: 1,
       selectedLlmProfileId: 1,
@@ -219,5 +242,35 @@ describe("WorkspacePage next-step", () => {
       screen.getByText("邮件已经发出，接下来重点看发送结果，以及导师是否进入真实往来。"),
     ).toBeInTheDocument();
     expect(screen.queryByText("下一步：先选择用于分析的材料")).not.toBeInTheDocument();
+  });
+
+  it("fills a non-empty body_text when sending an HTML-only draft", async () => {
+    mockedGetWorkspaceThread.mockResolvedValue(
+      buildThread({
+        generatedContentHtml: "<p>老师您好</p><p>我想请教一个研究问题。</p>",
+      }),
+    );
+
+    renderPage();
+
+    await screen.findByText("下一步：人工检查后发送");
+
+    fireEvent.click(screen.getByRole("button", { name: "mock-send-now" }));
+
+    await waitFor(() => {
+      expect(mockedApproveAndSend).toHaveBeenCalledTimes(1);
+    });
+
+    expect(mockedApproveAndSend).toHaveBeenCalledWith(
+      301,
+      expect.objectContaining({
+        body_html: "<p>老师您好</p><p>我想请教一个研究问题。</p>",
+        body_text: expect.any(String),
+      }),
+    );
+
+    const payload = mockedApproveAndSend.mock.calls[0][1] as { body_text: string };
+    expect(payload.body_text.trim()).toBeTruthy();
+    expect(payload.body_text).toContain("老师您好");
   });
 });

@@ -106,6 +106,34 @@ const hasVisibleDraftContent = ({
   contentHtml: string | null;
 }) => Boolean(subject.trim() || content.trim() || contentHtml?.trim());
 
+const deriveBodyTextFromDraft = ({
+  content,
+  contentHtml,
+}: {
+  content: string;
+  contentHtml: string | null;
+}) => {
+  const trimmedContent = content.trim();
+  if (trimmedContent) {
+    return trimmedContent;
+  }
+
+  const trimmedHtml = contentHtml?.trim();
+  if (!trimmedHtml) {
+    return '';
+  }
+
+  if (typeof DOMParser !== 'undefined') {
+    const document = new DOMParser().parseFromString(trimmedHtml, 'text/html');
+    const text = document.body.textContent?.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+    if (text) {
+      return text;
+    }
+  }
+
+  return trimmedHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+};
+
 export const WorkspacePage = () => {
   const { id } = useParams<{ id: string }>();
   const professorId = Number(id);
@@ -339,11 +367,13 @@ export const WorkspacePage = () => {
       return;
     }
 
+    const bodyText = deriveBodyTextFromDraft({ content, contentHtml });
+
     void runAction(
       () =>
         approveAndSend(currentTaskId, {
           subject: subject.trim() || null,
-          body_text: content.trim(),
+          body_text: bodyText,
           body_html: contentHtml,
           selected_material_ids: selectedMaterialIds,
         }),
@@ -371,11 +401,13 @@ export const WorkspacePage = () => {
       return;
     }
 
+    const bodyText = deriveBodyTextFromDraft({ content, contentHtml });
+
     void runAction(
       () =>
         approveAndSchedule(currentTaskId, {
           subject: subject.trim() || null,
-          body_text: content.trim(),
+          body_text: bodyText,
           body_html: contentHtml,
           selected_material_ids: selectedMaterialIds,
           scheduled_at: scheduleDate.toISOString(),
