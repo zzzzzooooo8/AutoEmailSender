@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProfilePage } from "@/pages/ProfilePage";
@@ -105,6 +105,12 @@ const renderPage = () =>
     </MemoryRouter>,
   );
 
+const expectToAppearBefore = (first: HTMLElement, second: HTMLElement) => {
+  expect(first.compareDocumentPosition(second)).toBe(
+    Node.DOCUMENT_POSITION_FOLLOWING,
+  );
+};
+
 describe("ProfilePage onboarding", () => {
   beforeEach(() => {
     mockedUseSelectionContext.mockReturnValue({
@@ -139,6 +145,52 @@ describe("ProfilePage onboarding", () => {
       screen.getByText(
         "完成这部分后，下一步去「导师管理」导入第一批导师，再回首页开始创建任务。",
       ),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the four main sections in the expected onboarding order", () => {
+    renderPage();
+
+    const identitySection = screen.getByRole("heading", { name: "发件身份" });
+    const materialsSection = screen.getByRole("heading", {
+      name: "材料与模板",
+    });
+    const modelSection = screen.getByRole("heading", { name: "模型配置" });
+    const advancedSection = screen.getByRole("heading", {
+      name: "回信检测与高级设置",
+    });
+
+    expectToAppearBefore(identitySection, materialsSection);
+    expectToAppearBefore(materialsSection, modelSection);
+    expectToAppearBefore(modelSection, advancedSection);
+  });
+
+  it("renders the material entry and connection testing area for an existing identity", () => {
+    renderPage();
+
+    expect(screen.getByText("材料库")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "打开材料库" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("邮箱连接测试")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "测试 SMTP" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "测试 IMAP" }),
+    ).toBeInTheDocument();
+  });
+
+  it("opens the material library modal from the reordered materials section", async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "打开材料库" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "材料管理" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "关闭材料库" }),
     ).toBeInTheDocument();
   });
 });
