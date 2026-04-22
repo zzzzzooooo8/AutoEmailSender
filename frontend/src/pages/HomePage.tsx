@@ -25,7 +25,7 @@ export const HomePage = () => {
   const [keyword, setKeyword] = useState('');
   const [university, setUniversity] = useState('all');
   const [status, setStatus] = useState<'all' | ProfessorDashboardItemDTO['status']>('all');
-  const [loading, setLoading] = useState(Boolean(selectedIdentityId && selectedLlmProfileId));
+  const [loading, setLoading] = useState(false);
   const [bulkScoring, setBulkScoring] = useState(false);
   const [scoringProfessorIds, setScoringProfessorIds] = useState<Set<number>>(new Set());
   const loadedProfessorsKeyRef = useRef<string | null>(null);
