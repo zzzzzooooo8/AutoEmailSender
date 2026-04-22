@@ -118,6 +118,13 @@ const TEMPLATE_PLACEHOLDERS = [
   ["{{sender_email}}", "你的发件邮箱"],
 ] as const;
 
+const PROFILE_SETUP_STAGES = [
+  "1. 发件身份",
+  "2. 材料与模板",
+  "3. 模型配置",
+  "4. 回信检测与高级设置",
+] as const;
+
 const createEmptyIdentityForm = (): IdentityFormState => ({
   name: "",
   email_address: "",
@@ -1955,6 +1962,103 @@ export const ProfilePage = () => {
     }
   };
 
+  const identityActionButtons = (
+    <div className="mt-6 flex flex-wrap gap-3">
+      <button
+        type="button"
+        onClick={() => void saveIdentity()}
+        disabled={submittingIdentity}
+        className="ui-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {submittingIdentity && <Loader2 className="h-4 w-4 animate-spin" />}
+        保存身份
+      </button>
+      {editingIdentity && (
+        <>
+          {selectedIdentityId === editingIdentity.id ? (
+            <span className="inline-flex items-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700">
+              当前使用中
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedIdentityId(editingIdentity.id);
+                notifySuccess(
+                  "已设为当前身份",
+                  `当前身份已切换为“${editingIdentity.name}”。`,
+                );
+              }}
+              className="ui-btn-secondary"
+            >
+              设为当前
+            </button>
+          )}
+          {editingIdentity.is_default ? (
+            <span className="inline-flex items-center rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">
+              已设为默认
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                void setDefaultIdentity(editingIdentity.id)
+                  .then(async () => {
+                    await refreshSelections();
+                    setIdentityForm((previous) => ({
+                      ...previous,
+                      is_default: true,
+                    }));
+                    notifySuccess(
+                      "已设为默认身份",
+                      `“${editingIdentity.name}”已设为默认身份。`,
+                    );
+                  })
+                  .catch((defaultError) => {
+                    notifyError(
+                      "设为默认身份失败",
+                      getActionErrorMessage(defaultError, "设置默认身份失败"),
+                    );
+                  });
+              }}
+              className="ui-btn-secondary"
+            >
+              设为默认
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              void (async () => {
+                if (!(await confirmDeleteTwice(`身份“${editingIdentity.name}”`))) {
+                  return;
+                }
+                try {
+                  await deleteIdentity(editingIdentity.id);
+                  await refreshSelections();
+                  setIdentityEditorId(null);
+                  setIdentityForm(createEmptyIdentityForm());
+                  notifySuccess(
+                    "删除身份成功",
+                    `身份“${editingIdentity.name}”已删除。`,
+                  );
+                } catch (deleteError) {
+                  notifyError(
+                    "删除身份失败",
+                    getActionErrorMessage(deleteError, "删除身份失败"),
+                  );
+                }
+              })();
+            }}
+            className="ui-btn-danger"
+          >
+            删除
+          </button>
+        </>
+      )}
+    </div>
+  );
+
   return (
     <main className="mx-auto max-w-7xl px-6 py-8">
       <div className="rounded-3xl border border-stone-200 bg-[#fcfbf8] p-6 shadow-sm">
@@ -1983,13 +2087,42 @@ export const ProfilePage = () => {
           正在加载配置...
         </div>
       ) : (
-        <div className="mt-6 grid gap-6 xl:grid-cols-2">
+        <div className="mt-6 space-y-6">
+          <section className="rounded-3xl border border-stone-200 bg-[linear-gradient(135deg,rgba(248,244,236,0.95),rgba(255,255,255,0.98))] p-6 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-semibold text-stone-900">
+                  首次配置建议
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-stone-600">
+                  建议顺序：先完成基础发送，再补充 AI 和回信检测
+                </p>
+              </div>
+              <span className="rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs text-stone-600">
+                新用户上手流程
+              </span>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-3">
+              {PROFILE_SETUP_STAGES.map((stage) => (
+                <span
+                  key={stage}
+                  className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 shadow-sm"
+                >
+                  {stage}
+                </span>
+              ))}
+            </div>
+          </section>
+
           <section className="rounded-3xl border border-stone-200 bg-white p-6 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <h2 className="text-xl font-semibold text-stone-900">
-                  身份配置
+                  发件身份
                 </h2>
+                <p className="mt-2 text-sm leading-6 text-stone-600">
+                  先把发件邮箱和 SMTP 配好，完成第一步基础发送准备。
+                </p>
               </div>
               <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs text-stone-600">
                 默认身份：{defaultIdentity?.name ?? "未设置"}
@@ -2107,47 +2240,23 @@ export const ProfilePage = () => {
                   placeholder="示例：邮箱授权码或应用专用密码"
                 />
               </label>
-              <label className="block">
-                {renderFieldLabel("IMAP Host", true)}
-                <input
-                  value={identityForm.imap_host}
-                  onChange={(event) =>
-                    setIdentityForm((previous) => ({
-                      ...previous,
-                      imap_host: event.target.value,
-                    }))
-                  }
-                  className={inputClassName}
-                  placeholder="示例：imap.qq.com"
-                />
-              </label>
-              <label className="block">
-                {renderFieldLabel("IMAP Port", true)}
-                <input
-                  type="number"
-                  value={identityForm.imap_port}
-                  onChange={(event) =>
-                    setIdentityForm((previous) => ({
-                      ...previous,
-                      imap_port: event.target.value,
-                    }))
-                  }
-                  className={inputClassName}
-                  placeholder="示例：993"
-                />
-              </label>
             </div>
+          </section>
 
-            {editingIdentity ? (
-              <div className="mt-6">
-                <IdentityConnectionCard
-                  testingIdentityConnection={testingIdentityConnection}
-                  lastResult={lastIdentityConnectionResult}
-                  onTestSmtp={() => void runIdentityConnectionTest("smtp")}
-                  onTestImap={() => void runIdentityConnectionTest("imap")}
-                />
+          <section className="rounded-3xl border border-stone-200 bg-white p-6 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-semibold text-stone-900">
+                  材料与模板
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-stone-600">
+                  第二步补齐默认模板和常用材料，后续导入导师后就能直接开始准备任务。
+                </p>
               </div>
-            ) : null}
+              <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs text-stone-600">
+                任务前置内容
+              </span>
+            </div>
 
             <div className="mt-6">
               <OutreachTemplateSummaryCard
@@ -2168,110 +2277,11 @@ export const ProfilePage = () => {
                 />
               </div>
             )}
-
-            <div className="mt-6 flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={() => void saveIdentity()}
-                disabled={submittingIdentity}
-                className="ui-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {submittingIdentity && (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                )}
-                保存身份
-              </button>
-              {editingIdentity && (
-                <>
-                  {selectedIdentityId === editingIdentity.id ? (
-                    <span className="inline-flex items-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700">
-                      当前使用中
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedIdentityId(editingIdentity.id);
-                        notifySuccess(
-                          "已设为当前身份",
-                          `当前身份已切换为“${editingIdentity.name}”。`,
-                        );
-                      }}
-                      className="ui-btn-secondary"
-                    >
-                      设为当前
-                    </button>
-                  )}
-                  {editingIdentity.is_default ? (
-                    <span className="inline-flex items-center rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">
-                      已设为默认
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void setDefaultIdentity(editingIdentity.id)
-                          .then(async () => {
-                            await refreshSelections();
-                            setIdentityForm((previous) => ({
-                              ...previous,
-                              is_default: true,
-                            }));
-                            notifySuccess(
-                              "已设为默认身份",
-                              `“${editingIdentity.name}”已设为默认身份。`,
-                            );
-                          })
-                          .catch((defaultError) => {
-                            notifyError(
-                              "设为默认身份失败",
-                              getActionErrorMessage(
-                                defaultError,
-                                "设置默认身份失败",
-                              ),
-                            );
-                          });
-                      }}
-                      className="ui-btn-secondary"
-                    >
-                      设为默认
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void (async () => {
-                        if (
-                          !(await confirmDeleteTwice(
-                            `身份“${editingIdentity.name}”`,
-                          ))
-                        ) {
-                          return;
-                        }
-                        try {
-                          await deleteIdentity(editingIdentity.id);
-                          await refreshSelections();
-                          setIdentityEditorId(null);
-                          setIdentityForm(createEmptyIdentityForm());
-                          notifySuccess(
-                            "删除身份成功",
-                            `身份“${editingIdentity.name}”已删除。`,
-                          );
-                        } catch (deleteError) {
-                          notifyError(
-                            "删除身份失败",
-                            getActionErrorMessage(deleteError, "删除身份失败"),
-                          );
-                        }
-                      })();
-                    }}
-                    className="ui-btn-danger"
-                  >
-                    删除
-                  </button>
-                </>
-              )}
-            </div>
+            {!editingIdentity ? (
+              <div className="mt-6 rounded-2xl border border-dashed border-stone-200 bg-stone-50/80 px-4 py-4 text-sm leading-6 text-stone-500">
+                先创建并保存一个发件身份，再回来上传材料和设置默认材料。
+              </div>
+            ) : null}
           </section>
 
           <section className="rounded-3xl border border-stone-200 bg-white p-6 shadow-sm">
@@ -2280,6 +2290,9 @@ export const ProfilePage = () => {
                 <h2 className="text-xl font-semibold text-stone-900">
                   模型配置
                 </h2>
+                <p className="mt-2 text-sm leading-6 text-stone-600">
+                  第三步补齐 AI 模型，后续创建任务时就能直接选择并测试可用模型。
+                </p>
               </div>
               <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs text-stone-600">
                 默认模型：{defaultLLMProfile?.name ?? "未设置"}
@@ -2587,6 +2600,71 @@ export const ProfilePage = () => {
                 </div>
               </div>
             )}
+          </section>
+
+          <section className="rounded-3xl border border-stone-200 bg-white p-6 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-semibold text-stone-900">
+                  回信检测与高级设置
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-stone-600">
+                  最后补齐 IMAP，用来检测导师回信并完成身份保存。
+                </p>
+              </div>
+              <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs text-stone-600">
+                建议最后完成
+              </span>
+            </div>
+
+            <div className="mt-6 grid gap-4 md:grid-cols-2">
+              <label className="block">
+                {renderFieldLabel("IMAP Host", true)}
+                <input
+                  value={identityForm.imap_host}
+                  onChange={(event) =>
+                    setIdentityForm((previous) => ({
+                      ...previous,
+                      imap_host: event.target.value,
+                    }))
+                  }
+                  className={inputClassName}
+                  placeholder="示例：imap.qq.com"
+                />
+              </label>
+              <label className="block">
+                {renderFieldLabel("IMAP Port", true)}
+                <input
+                  type="number"
+                  value={identityForm.imap_port}
+                  onChange={(event) =>
+                    setIdentityForm((previous) => ({
+                      ...previous,
+                      imap_port: event.target.value,
+                    }))
+                  }
+                  className={inputClassName}
+                  placeholder="示例：993"
+                />
+              </label>
+            </div>
+
+            {editingIdentity ? (
+              <div className="mt-6">
+                <IdentityConnectionCard
+                  testingIdentityConnection={testingIdentityConnection}
+                  lastResult={lastIdentityConnectionResult}
+                  onTestSmtp={() => void runIdentityConnectionTest("smtp")}
+                  onTestImap={() => void runIdentityConnectionTest("imap")}
+                />
+              </div>
+            ) : null}
+
+            {identityActionButtons}
+
+            <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50/80 px-4 py-4 text-sm leading-6 text-emerald-800">
+              完成这部分后，下一步去「导师管理」导入第一批导师，再回首页开始创建任务。
+            </div>
           </section>
         </div>
       )}
