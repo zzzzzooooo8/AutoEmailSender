@@ -378,7 +378,7 @@ export const WorkspaceComposerDock = ({
                   <button
                     type="button"
                     onClick={onScheduleSend}
-                    disabled={acting || !content.trim() || !scheduledAt}
+                    disabled={acting || !draftReady || !scheduledAt}
                     className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <CalendarClock className="h-4 w-4" />
@@ -389,7 +389,7 @@ export const WorkspaceComposerDock = ({
                 <button
                   type="button"
                   onClick={onSendNow}
-                  disabled={acting || !content.trim()}
+                  disabled={acting || !draftReady}
                   className="ui-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Send className="h-4 w-4" />

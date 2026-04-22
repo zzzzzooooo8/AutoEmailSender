@@ -134,4 +134,44 @@ describe("WorkspaceComposerDock copy", () => {
     expect(screen.queryByRole("button", { name: "先看匹配" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "生成新草稿" })).not.toBeInTheDocument();
   });
+
+  it("keeps send actions enabled for an HTML-only draft", () => {
+    render(
+      <WorkspaceComposerDock
+        thread={thread}
+        currentTask={currentTask}
+        currentTaskMode="llm"
+        draftReady={true}
+        subject=""
+        content=""
+        hasRichHtml={true}
+        selectedMaterialIds={[]}
+        scheduledAt="2026-04-22T18:30"
+        acting={false}
+        primaryMaterialOptions={[material]}
+        canChangePrimaryMaterial={true}
+        canChangeMode={true}
+        canCalculateMatch={true}
+        canGenerateDraft={true}
+        composerExpanded={true}
+        nextStepTitle="下一步：人工检查后发送"
+        nextStepDescription="草稿已经准备好，检查主题、正文和附件后，再决定立即发送还是定时发送。"
+        onToggleExpanded={vi.fn()}
+        onSubjectChange={vi.fn()}
+        onContentChange={vi.fn()}
+        onSelectedMaterialIdsChange={vi.fn()}
+        onScheduledAtChange={vi.fn()}
+        onSelectPrimaryMaterial={vi.fn()}
+        onSendNow={vi.fn()}
+        onScheduleSend={vi.fn()}
+        onCancelSchedule={vi.fn()}
+        onCalculateMatch={vi.fn()}
+        onGenerateDraft={vi.fn()}
+        onChangeMode={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "立即发送" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "定时发送" })).toBeEnabled();
+  });
 });
