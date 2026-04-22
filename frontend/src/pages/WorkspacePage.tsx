@@ -96,16 +96,6 @@ const getWorkspaceNextStepDescription = (title: string) => {
   }
 };
 
-const hasVisibleDraftContent = ({
-  subject,
-  content,
-  contentHtml,
-}: {
-  subject: string;
-  content: string;
-  contentHtml: string | null;
-}) => Boolean(subject.trim() || content.trim() || contentHtml?.trim());
-
 const deriveBodyTextFromDraft = ({
   content,
   contentHtml,
@@ -303,7 +293,8 @@ export const WorkspacePage = () => {
     () => thread?.messages.filter((message) => message.direction !== 'draft').length ?? 0,
     [thread?.messages],
   );
-  const hasDraft = hasVisibleDraftContent({ subject, content, contentHtml });
+  const preparedBodyText = deriveBodyTextFromDraft({ content, contentHtml });
+  const hasDraft = Boolean(preparedBodyText);
   const nextStep = currentTask
     ? getWorkspaceNextStep({
         status: currentTask.status ?? 'discovered',
@@ -367,13 +358,11 @@ export const WorkspacePage = () => {
       return;
     }
 
-    const bodyText = deriveBodyTextFromDraft({ content, contentHtml });
-
     void runAction(
       () =>
         approveAndSend(currentTaskId, {
           subject: subject.trim() || null,
-          body_text: bodyText,
+          body_text: preparedBodyText,
           body_html: contentHtml,
           selected_material_ids: selectedMaterialIds,
         }),
@@ -382,9 +371,9 @@ export const WorkspacePage = () => {
       () => setComposerExpanded(false),
     );
   }, [
-    content,
     contentHtml,
     currentTaskId,
+    preparedBodyText,
     runAction,
     selectedMaterialIds,
     subject,
@@ -401,13 +390,11 @@ export const WorkspacePage = () => {
       return;
     }
 
-    const bodyText = deriveBodyTextFromDraft({ content, contentHtml });
-
     void runAction(
       () =>
         approveAndSchedule(currentTaskId, {
           subject: subject.trim() || null,
-          body_text: bodyText,
+          body_text: preparedBodyText,
           body_html: contentHtml,
           selected_material_ids: selectedMaterialIds,
           scheduled_at: scheduleDate.toISOString(),
@@ -417,10 +404,10 @@ export const WorkspacePage = () => {
       () => setComposerExpanded(false),
     );
   }, [
-    content,
     contentHtml,
     currentTaskId,
     notifyFormErrors,
+    preparedBodyText,
     runAction,
     scheduledAt,
     selectedMaterialIds,

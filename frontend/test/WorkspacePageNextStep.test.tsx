@@ -211,6 +211,23 @@ describe("WorkspacePage next-step", () => {
     expect(screen.queryByText("下一步：生成一版邮件草稿")).not.toBeInTheDocument();
   });
 
+  it("does not treat a subject-only draft as ready to send", async () => {
+    mockedGetWorkspaceThread.mockResolvedValue(
+      buildThread({
+        generatedSubject: "只有主题",
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("下一步：生成一版邮件草稿")).toBeInTheDocument();
+    expect(
+      screen.getByText("先让系统起一版草稿，再人工检查是否保留这位导师。"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("draft-empty")).toBeInTheDocument();
+    expect(screen.queryByText("下一步：人工检查后发送")).not.toBeInTheDocument();
+  });
+
   it("prompts to select material first when no primary material is set", async () => {
     mockedGetWorkspaceThread.mockResolvedValue(
       buildThread({
@@ -270,6 +287,37 @@ describe("WorkspacePage next-step", () => {
     );
 
     const payload = mockedApproveAndSend.mock.calls[0][1] as { body_text: string };
+    expect(payload.body_text.trim()).toBeTruthy();
+    expect(payload.body_text).toContain("老师您好");
+  });
+
+  it("fills a non-empty body_text when scheduling an HTML-only draft", async () => {
+    mockedGetWorkspaceThread.mockResolvedValue(
+      buildThread({
+        generatedContentHtml: "<p>老师您好</p><p>期待和您进一步交流。</p>",
+      }),
+    );
+
+    renderPage();
+
+    await screen.findByText("下一步：人工检查后发送");
+
+    fireEvent.click(screen.getByRole("button", { name: "mock-schedule-send" }));
+
+    await waitFor(() => {
+      expect(mockedApproveAndSchedule).toHaveBeenCalledTimes(1);
+    });
+
+    expect(mockedApproveAndSchedule).toHaveBeenCalledWith(
+      301,
+      expect.objectContaining({
+        body_html: "<p>老师您好</p><p>期待和您进一步交流。</p>",
+        body_text: expect.any(String),
+        scheduled_at: expect.any(String),
+      }),
+    );
+
+    const payload = mockedApproveAndSchedule.mock.calls[0][1] as { body_text: string };
     expect(payload.body_text.trim()).toBeTruthy();
     expect(payload.body_text).toContain("老师您好");
   });
