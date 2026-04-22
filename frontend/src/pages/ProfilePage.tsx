@@ -122,7 +122,6 @@ const PROFILE_SETUP_STAGES = [
   "1. 发件身份",
   "2. 材料与模板",
   "3. 模型配置",
-  "4. 回信检测与高级设置",
 ] as const;
 
 const createEmptyIdentityForm = (): IdentityFormState => ({
@@ -2095,7 +2094,7 @@ export const ProfilePage = () => {
                   首次配置建议
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-stone-600">
-                  建议顺序：先完成基础发送，再补充 AI 和回信检测
+                  建议顺序：先完成发件身份，再准备材料与模板，最后配置模型。
                 </p>
               </div>
               <span className="rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs text-stone-600">
@@ -2121,7 +2120,7 @@ export const ProfilePage = () => {
                   发件身份
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-stone-600">
-                  先把发件邮箱和 SMTP 配好，完成第一步基础发送准备。
+                  先把发件邮箱、SMTP 和 IMAP 一起配好，完成第一步发件身份准备。
                 </p>
               </div>
               <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs text-stone-600">
@@ -2240,7 +2239,47 @@ export const ProfilePage = () => {
                   placeholder="示例：邮箱授权码或应用专用密码"
                 />
               </label>
+              <label className="block">
+                {renderFieldLabel("IMAP Host", true)}
+                <input
+                  value={identityForm.imap_host}
+                  onChange={(event) =>
+                    setIdentityForm((previous) => ({
+                      ...previous,
+                      imap_host: event.target.value,
+                    }))
+                  }
+                  className={inputClassName}
+                  placeholder="示例：imap.qq.com"
+                />
+              </label>
+              <label className="block">
+                {renderFieldLabel("IMAP Port", true)}
+                <input
+                  type="number"
+                  value={identityForm.imap_port}
+                  onChange={(event) =>
+                    setIdentityForm((previous) => ({
+                      ...previous,
+                      imap_port: event.target.value,
+                    }))
+                  }
+                  className={inputClassName}
+                  placeholder="示例：993"
+                />
+              </label>
             </div>
+
+            {editingIdentity ? (
+              <div className="mt-6">
+                <IdentityConnectionCard
+                  testingIdentityConnection={testingIdentityConnection}
+                  lastResult={lastIdentityConnectionResult}
+                  onTestSmtp={() => void runIdentityConnectionTest("smtp")}
+                  onTestImap={() => void runIdentityConnectionTest("imap")}
+                />
+              </div>
+            ) : null}
           </section>
 
           <section className="rounded-3xl border border-stone-200 bg-white p-6 shadow-sm">
@@ -2606,59 +2645,16 @@ export const ProfilePage = () => {
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <h2 className="text-xl font-semibold text-stone-900">
-                  回信检测与高级设置
+                  保存与下一步
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-stone-600">
-                  最后补齐 IMAP，用来检测导师回信并完成身份保存。
+                  完成以上 3 步后，保存当前身份与模型配置，再继续导入导师和创建任务。
                 </p>
               </div>
               <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs text-stone-600">
-                建议最后完成
+                流程收尾
               </span>
             </div>
-
-            <div className="mt-6 grid gap-4 md:grid-cols-2">
-              <label className="block">
-                {renderFieldLabel("IMAP Host", true)}
-                <input
-                  value={identityForm.imap_host}
-                  onChange={(event) =>
-                    setIdentityForm((previous) => ({
-                      ...previous,
-                      imap_host: event.target.value,
-                    }))
-                  }
-                  className={inputClassName}
-                  placeholder="示例：imap.qq.com"
-                />
-              </label>
-              <label className="block">
-                {renderFieldLabel("IMAP Port", true)}
-                <input
-                  type="number"
-                  value={identityForm.imap_port}
-                  onChange={(event) =>
-                    setIdentityForm((previous) => ({
-                      ...previous,
-                      imap_port: event.target.value,
-                    }))
-                  }
-                  className={inputClassName}
-                  placeholder="示例：993"
-                />
-              </label>
-            </div>
-
-            {editingIdentity ? (
-              <div className="mt-6">
-                <IdentityConnectionCard
-                  testingIdentityConnection={testingIdentityConnection}
-                  lastResult={lastIdentityConnectionResult}
-                  onTestSmtp={() => void runIdentityConnectionTest("smtp")}
-                  onTestImap={() => void runIdentityConnectionTest("imap")}
-                />
-              </div>
-            ) : null}
 
             {identityActionButtons}
 

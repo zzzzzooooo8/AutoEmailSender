@@ -135,12 +135,11 @@ describe("ProfilePage onboarding", () => {
       await screen.findByRole("heading", { name: "首次配置建议" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("建议顺序：先完成基础发送，再补充 AI 和回信检测"),
+      screen.getByText("建议顺序：先完成发件身份，再准备材料与模板，最后配置模型。"),
     ).toBeInTheDocument();
     expect(screen.getByText("1. 发件身份")).toBeInTheDocument();
     expect(screen.getByText("2. 材料与模板")).toBeInTheDocument();
     expect(screen.getByText("3. 模型配置")).toBeInTheDocument();
-    expect(screen.getByText("4. 回信检测与高级设置")).toBeInTheDocument();
     expect(
       screen.getByText(
         "完成这部分后，下一步去「导师管理」导入第一批导师，再回首页开始创建任务。",
@@ -148,7 +147,7 @@ describe("ProfilePage onboarding", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders the four main sections in the expected onboarding order", () => {
+  it("renders the three setup sections before the final save section", () => {
     renderPage();
 
     const identitySection = screen.getByRole("heading", { name: "发件身份" });
@@ -156,13 +155,11 @@ describe("ProfilePage onboarding", () => {
       name: "材料与模板",
     });
     const modelSection = screen.getByRole("heading", { name: "模型配置" });
-    const advancedSection = screen.getByRole("heading", {
-      name: "回信检测与高级设置",
-    });
+    const finishSection = screen.getByRole("heading", { name: "保存与下一步" });
 
     expectToAppearBefore(identitySection, materialsSection);
     expectToAppearBefore(materialsSection, modelSection);
-    expectToAppearBefore(modelSection, advancedSection);
+    expectToAppearBefore(modelSection, finishSection);
   });
 
   it("renders the material entry and connection testing area for an existing identity", () => {
