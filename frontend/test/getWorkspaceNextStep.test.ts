@@ -9,7 +9,7 @@ describe("getWorkspaceNextStep", () => {
         hasDraft: false,
         hasPrimaryMaterial: false,
       }),
-    ).toMatchObject({
+    ).toEqual({
       title: "下一步：先选择用于分析的材料",
     });
   });
@@ -21,7 +21,7 @@ describe("getWorkspaceNextStep", () => {
         hasDraft: false,
         hasPrimaryMaterial: true,
       }),
-    ).toMatchObject({
+    ).toEqual({
       title: "下一步：生成一版邮件草稿",
     });
   });
@@ -33,7 +33,7 @@ describe("getWorkspaceNextStep", () => {
         hasDraft: true,
         hasPrimaryMaterial: true,
       }),
-    ).toMatchObject({
+    ).toEqual({
       title: "下一步：确认是否保留定时发送",
     });
   });
@@ -45,7 +45,7 @@ describe("getWorkspaceNextStep", () => {
         hasDraft: true,
         hasPrimaryMaterial: true,
       }),
-    ).toMatchObject({
+    ).toEqual({
       title: "下一步：人工检查后发送",
     });
   });
@@ -57,7 +57,7 @@ describe("getWorkspaceNextStep", () => {
         hasDraft: false,
         hasPrimaryMaterial: true,
       }),
-    ).toMatchObject({
+    ).toEqual({
       title: "下一步：生成一版邮件草稿",
     });
   });
@@ -69,8 +69,49 @@ describe("getWorkspaceNextStep", () => {
         hasDraft: true,
         hasPrimaryMaterial: false,
       }),
-    ).toMatchObject({
+    ).toEqual({
       title: "下一步：先选择用于分析的材料",
     });
+  });
+
+  it.each([
+    [
+      "sent",
+      {
+        status: "sent",
+        hasDraft: true,
+        hasPrimaryMaterial: true,
+      },
+      "下一步：查看发送结果",
+    ],
+    [
+      "reply_detected",
+      {
+        status: "reply_detected",
+        hasDraft: true,
+        hasPrimaryMaterial: true,
+      },
+      "下一步：处理导师回复",
+    ],
+    [
+      "send_failed",
+      {
+        status: "send_failed",
+        hasDraft: true,
+        hasPrimaryMaterial: true,
+      },
+      "下一步：查看失败原因并重试",
+    ],
+    [
+      "skipped",
+      {
+        status: "skipped",
+        hasDraft: true,
+        hasPrimaryMaterial: true,
+      },
+      "下一步：查看跳过原因",
+    ],
+  ])("maps terminal status %s to explicit next-step copy", (_, input, title) => {
+    expect(getWorkspaceNextStep(input)).toEqual({ title });
   });
 });
