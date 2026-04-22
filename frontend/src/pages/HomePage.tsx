@@ -163,7 +163,7 @@ export const HomePage = () => {
     hasProfessors: professors.length > 0,
     hasFirstTask: false,
   });
-  const hasResolvedHomeOnboarding =
+  const shouldSkipHomeOnboardingForCurrentStage =
     onboardingState.completed || onboardingState.stage === 'first_task';
   const canEvaluateProfessorOnboarding = professorsRequestKey === null || hasLoadedProfessors;
 
@@ -262,7 +262,7 @@ export const HomePage = () => {
     }
   };
 
-  if (canEvaluateProfessorOnboarding && !hasResolvedHomeOnboarding) {
+  if (canEvaluateProfessorOnboarding && !shouldSkipHomeOnboardingForCurrentStage) {
     return (
       <>
         <main className="mx-auto max-w-6xl px-6 py-8">

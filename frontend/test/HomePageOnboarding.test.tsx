@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getOnboardingState } from "@/features/onboarding/client/getOnboardingState";
 import { HomePage } from "@/pages/HomePage";
 import type { IdentityDTO, LLMProfileDTO, ProfessorDashboardItemDTO } from "@/types";
 
@@ -99,6 +100,14 @@ const professor: ProfessorDashboardItemDTO = {
   status: "matched",
 };
 
+const materialsStageDescription = getOnboardingState({
+  hasIdentity: true,
+  hasLlmProfile: true,
+  hasPrimaryMaterial: false,
+  hasProfessors: false,
+  hasFirstTask: false,
+}).description;
+
 const createDeferred = <T,>() => {
   let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (reason?: unknown) => void;
@@ -160,7 +169,7 @@ describe("HomePage onboarding", () => {
     deferred.resolve([professor]);
   });
 
-  it("shows the onboarding card and links to profile when materials or templates are missing", async () => {
+  it("shows the materials onboarding stage and links to profile when materials or templates are missing", async () => {
     renderPage();
 
     const heading = await screen.findByRole("heading", {
@@ -168,6 +177,7 @@ describe("HomePage onboarding", () => {
     });
 
     expect(heading).toBeInTheDocument();
+    expect(screen.getByText(materialsStageDescription)).toBeInTheDocument();
     expect(screen.getByText("创建发件身份")).toBeInTheDocument();
     expect(screen.getByText("配置 AI 模型")).toBeInTheDocument();
     expect(screen.getByText("准备材料和模板")).toBeInTheDocument();
