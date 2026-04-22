@@ -22,6 +22,8 @@ type WorkspaceComposerDockProps = {
   thread: WorkspaceThreadDTO;
   currentTask: WorkspaceTaskSummaryDTO;
   currentTaskMode: OutreachGenerationMode;
+  nextStepTitle: string;
+  nextStepDescription: string;
   subject: string;
   content: string;
   hasRichHtml: boolean;
@@ -96,6 +98,8 @@ export const WorkspaceComposerDock = ({
   thread,
   currentTask,
   currentTaskMode,
+  nextStepTitle,
+  nextStepDescription,
   subject,
   content,
   hasRichHtml,
@@ -238,7 +242,7 @@ export const WorkspaceComposerDock = ({
                       className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <RefreshCcw className="h-4 w-4" />
-                      先看匹配
+                      分析这位导师是否值得联系
                     </button>
                     <button
                       type="button"
@@ -247,7 +251,7 @@ export const WorkspaceComposerDock = ({
                       className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <RefreshCcw className="h-4 w-4" />
-                      生成新草稿
+                      生成一版邮件草稿
                     </button>
                   </div>
                   {limitationHint ? (
@@ -405,6 +409,10 @@ export const WorkspaceComposerDock = ({
                   ? '草稿已经准备好。点开后继续修改，再决定发送。'
                   : '编辑区默认收起，需要时再展开，不打断上面的沟通记录。'}
               </div>
+              <div className="mt-3 rounded-2xl border border-primary/15 bg-primary/5 px-4 py-3">
+                <div className="text-sm font-semibold text-stone-900">{nextStepTitle}</div>
+                <div className="mt-1 text-xs leading-5 text-stone-600">{nextStepDescription}</div>
+              </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1 text-xs text-stone-600">
                   {currentTaskMode === 'template' ? '固定模板' : '模板润色'}
@@ -430,7 +438,7 @@ export const WorkspaceComposerDock = ({
                 className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <RefreshCcw className="h-4 w-4" />
-                先看匹配
+                分析这位导师是否值得联系
               </button>
               <button
                 type="button"
@@ -439,7 +447,7 @@ export const WorkspaceComposerDock = ({
                 className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <RefreshCcw className="h-4 w-4" />
-                生成新草稿
+                生成一版邮件草稿
               </button>
               <button
                 type="button"
