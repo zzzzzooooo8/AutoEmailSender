@@ -79,8 +79,8 @@ describe("getWorkspaceNextStep", () => {
       "sent",
       {
         status: "sent",
-        hasDraft: true,
-        hasPrimaryMaterial: true,
+        hasDraft: false,
+        hasPrimaryMaterial: false,
       },
       "下一步：查看发送结果",
     ],
@@ -88,8 +88,8 @@ describe("getWorkspaceNextStep", () => {
       "reply_detected",
       {
         status: "reply_detected",
-        hasDraft: true,
-        hasPrimaryMaterial: true,
+        hasDraft: false,
+        hasPrimaryMaterial: false,
       },
       "下一步：处理导师回复",
     ],
@@ -97,8 +97,8 @@ describe("getWorkspaceNextStep", () => {
       "send_failed",
       {
         status: "send_failed",
-        hasDraft: true,
-        hasPrimaryMaterial: true,
+        hasDraft: false,
+        hasPrimaryMaterial: false,
       },
       "下一步：查看失败原因并重试",
     ],
@@ -106,12 +106,17 @@ describe("getWorkspaceNextStep", () => {
       "skipped",
       {
         status: "skipped",
-        hasDraft: true,
-        hasPrimaryMaterial: true,
+        hasDraft: false,
+        hasPrimaryMaterial: false,
       },
       "下一步：查看跳过原因",
     ],
-  ])("maps terminal status %s to explicit next-step copy", (_, input, title) => {
-    expect(getWorkspaceNextStep(input)).toEqual({ title });
-  });
+  ])(
+    "keeps terminal status %s from falling back to precondition prompts",
+    (_, input, title) => {
+      expect(getWorkspaceNextStep(input)).toEqual({ title });
+      expect(getWorkspaceNextStep(input).title).not.toBe("下一步：先选择用于分析的材料");
+      expect(getWorkspaceNextStep(input).title).not.toBe("下一步：生成一版邮件草稿");
+    },
+  );
 });
