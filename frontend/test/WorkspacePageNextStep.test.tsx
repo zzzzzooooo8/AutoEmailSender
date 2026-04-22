@@ -54,6 +54,7 @@ vi.mock("@/components/organisms/WorkspaceComposerDock", () => ({
     nextStepTitle: string;
     nextStepDescription: string;
     draftReady: boolean;
+    content: string;
     onSendNow: () => void;
     onScheduleSend: () => void;
   }) => {
@@ -63,6 +64,7 @@ vi.mock("@/components/organisms/WorkspaceComposerDock", () => ({
         <div>{props.nextStepTitle}</div>
         <div>{props.nextStepDescription}</div>
         <div>{props.draftReady ? "draft-ready" : "draft-empty"}</div>
+        <div>{props.content ? `draft-content:${props.content}` : "draft-content-empty"}</div>
         <button type="button" onClick={props.onSendNow}>
           mock-send-now
         </button>
@@ -209,6 +211,21 @@ describe("WorkspacePage next-step", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("draft-ready")).toBeInTheDocument();
     expect(screen.queryByText("下一步：生成一版邮件草稿")).not.toBeInTheDocument();
+  });
+
+  it("shows readable draft content in the workspace for an HTML-only draft", async () => {
+    mockedGetWorkspaceThread.mockResolvedValue(
+      buildThread({
+        generatedContentHtml: "<p>老师您好</p><p>这里是 HTML 草稿正文。</p>",
+      }),
+    );
+
+    renderPage();
+
+    expect(
+      await screen.findByText("draft-content:老师您好 这里是 HTML 草稿正文。"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("draft-content-empty")).not.toBeInTheDocument();
   });
 
   it("does not treat a subject-only draft as ready to send", async () => {

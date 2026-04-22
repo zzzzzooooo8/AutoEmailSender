@@ -6,6 +6,7 @@ import { WorkspaceMessageThread } from '@/components/organisms/WorkspaceMessageT
 import { WorkspaceSidebar } from '@/components/organisms/WorkspaceSidebar';
 import { useNotification } from '@/context/NotificationContext';
 import { useSelectionContext } from '@/context/SelectionContext';
+import { getTaskModeCopy } from '@/features/create-task/client/taskCopy';
 import { getWorkspaceNextStep } from '@/features/workspace/client/getWorkspaceNextStep';
 import {
   approveAndSchedule,
@@ -112,16 +113,19 @@ const deriveBodyTextFromDraft = ({
   if (!trimmedHtml) {
     return '';
   }
+  const normalizedHtml = trimmedHtml
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|tr|h[1-6])>/gi, '\n');
 
   if (typeof DOMParser !== 'undefined') {
-    const document = new DOMParser().parseFromString(trimmedHtml, 'text/html');
+    const document = new DOMParser().parseFromString(normalizedHtml, 'text/html');
     const text = document.body.textContent?.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
     if (text) {
       return text;
     }
   }
 
-  return trimmedHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  return normalizedHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 };
 
 export const WorkspacePage = () => {
@@ -156,25 +160,28 @@ export const WorkspacePage = () => {
       currentTask?.status && !['sent', 'reply_detected'].includes(currentTask.status)
         ? latestDraftMessage
         : null;
-
-    setSubject(
+    const nextSubject =
       currentTask?.approved_subject ??
-        currentTask?.generated_subject ??
-        preferredDraftMessage?.subject ??
-        '',
-    );
-    setContent(
-      currentTask?.approved_body_text ??
+      currentTask?.generated_subject ??
+      preferredDraftMessage?.subject ??
+      '';
+    const nextContentHtml =
+      currentTask?.approved_body_html ??
+      currentTask?.generated_content_html ??
+      preferredDraftMessage?.content_html ??
+      null;
+    const nextContentText = deriveBodyTextFromDraft({
+      content:
+        currentTask?.approved_body_text ??
         currentTask?.generated_content_text ??
         preferredDraftMessage?.content ??
         '',
-    );
-    setContentHtml(
-      currentTask?.approved_body_html ??
-        currentTask?.generated_content_html ??
-        preferredDraftMessage?.content_html ??
-        null,
-    );
+      contentHtml: nextContentHtml,
+    });
+
+    setSubject(nextSubject);
+    setContent(nextContentText);
+    setContentHtml(nextContentHtml);
     setSelectedMaterialIds(currentTask?.selected_material_ids ?? []);
     setScheduledAt(
       currentTask?.scheduled_at
@@ -549,7 +556,7 @@ export const WorkspacePage = () => {
                 真实往来 {realMessageCount} 条
               </span>
               <span className="rounded-full border border-stone-200 bg-white/90 px-3 py-1 text-xs font-medium text-stone-600">
-                {currentTaskMode === 'template' ? '固定模板' : '模板润色'}
+                {getTaskModeCopy(currentTaskMode).title}
               </span>
             </div>
           </div>
