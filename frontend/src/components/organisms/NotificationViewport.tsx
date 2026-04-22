@@ -5,7 +5,8 @@ import type { NotificationRecord } from "@/lib/notifications";
 
 type NotificationViewportProps = {
   notifications: NotificationRecord[];
-  onLock: (id: string) => void;
+  onPause: (id: string) => void;
+  onResume: (id: string) => void;
   onDismiss: (id: string) => void;
 };
 
@@ -34,7 +35,8 @@ const LEVEL_STYLES = {
 
 export const NotificationViewport = ({
   notifications,
-  onLock,
+  onPause,
+  onResume,
   onDismiss,
 }: NotificationViewportProps) => {
   if (typeof document === "undefined") {
@@ -61,24 +63,10 @@ export const NotificationViewport = ({
                 : "notification-pop-in 320ms cubic-bezier(0.22, 1, 0.36, 1)",
             }}
             onMouseEnter={() => {
-              onLock(notification.id);
+              onPause(notification.id);
             }}
-            onMouseDown={() => {
-              onLock(notification.id);
-            }}
-            onMouseUp={() => {
-              const selection = window.getSelection();
-
-              if (selection?.toString()) {
-                onLock(notification.id);
-              }
-            }}
-            onClick={(event) => {
-              const target = event.target;
-
-              if (target instanceof Element && target.closest("a,button")) {
-                onLock(notification.id);
-              }
+            onMouseLeave={() => {
+              onResume(notification.id);
             }}
           >
             <div className="flex items-start gap-3">

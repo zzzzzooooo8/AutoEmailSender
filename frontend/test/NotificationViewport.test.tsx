@@ -121,7 +121,7 @@ describe("NotificationViewport", () => {
     expect(screen.queryByText("复制这条报错")).not.toBeInTheDocument();
   });
 
-  it("keeps hovered notifications sticky until the close button is clicked", () => {
+  it("pauses the timer while hovered and resumes countdown after mouse leave", () => {
     render(
       <NotificationProvider>
         <Harness />
@@ -136,15 +136,13 @@ describe("NotificationViewport", () => {
 
     expect(screen.getByText("复制这条报错")).toBeInTheDocument();
 
-    fireEvent.click(
-      within(card).getByRole("button", { name: "关闭提示" }),
-    );
-    vi.advanceTimersByTime(200);
+    fireEvent.mouseLeave(card);
+    vi.advanceTimersByTime(10000);
 
     expect(screen.queryByText("复制这条报错")).not.toBeInTheDocument();
   });
 
-  it("keeps notifications sticky after mouse down until dismissed manually", () => {
+  it("does not force manual dismiss after clicking the notification body", () => {
     render(
       <NotificationProvider>
         <Harness />
@@ -153,16 +151,8 @@ describe("NotificationViewport", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "长报错" }));
 
-    const card = screen.getByTestId("notification-card");
-    fireEvent.mouseDown(card);
+    fireEvent.click(screen.getByText("复制这条报错"));
     vi.advanceTimersByTime(10000);
-
-    expect(screen.getByText("复制这条报错")).toBeInTheDocument();
-
-    fireEvent.click(
-      within(card).getByRole("button", { name: "关闭提示" }),
-    );
-    vi.advanceTimersByTime(200);
 
     expect(screen.queryByText("复制这条报错")).not.toBeInTheDocument();
   });

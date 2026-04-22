@@ -28,7 +28,8 @@ type NotificationContextValue = {
   notifyError: (title: string, description?: string) => NotificationRecord;
   notifyFormErrors: (title: string, details: string[]) => NotificationRecord | null;
   dismissNotification: (id: string) => void;
-  lockNotification: (id: string) => void;
+  pauseNotification: (id: string) => void;
+  resumeNotification: (id: string) => void;
 };
 
 const NotificationContext = createContext<NotificationContextValue | null>(null);
@@ -75,13 +76,49 @@ export const NotificationProvider = ({ children }: PropsWithChildren) => {
     [clearDismissTimer],
   );
 
-  const lockNotification = useCallback((id: string) => {
+  const pauseNotification = useCallback((id: string) => {
+    clearDismissTimer(id);
+
     setNotifications((current) =>
-      current.map((notification) =>
-        notification.id === id
-          ? { ...notification, interactiveLocked: true }
-          : notification,
-      ),
+      current.map((notification) => {
+        if (
+          notification.id !== id ||
+          notification.closing ||
+          notification.interactiveLocked
+        ) {
+          return notification;
+        }
+
+        return {
+          ...notification,
+          interactiveLocked: true,
+          createdAt: Date.now(),
+          durationMs: Math.max(
+            notification.createdAt + notification.durationMs - Date.now(),
+            0,
+          ),
+        };
+      }),
+    );
+  }, [clearDismissTimer]);
+
+  const resumeNotification = useCallback((id: string) => {
+    setNotifications((current) =>
+      current.map((notification) => {
+        if (
+          notification.id !== id ||
+          notification.closing ||
+          !notification.interactiveLocked
+        ) {
+          return notification;
+        }
+
+        return {
+          ...notification,
+          interactiveLocked: false,
+          createdAt: Date.now(),
+        };
+      }),
     );
   }, []);
 
@@ -183,17 +220,19 @@ export const NotificationProvider = ({ children }: PropsWithChildren) => {
       notifyError,
       notifyFormErrors,
       dismissNotification,
-      lockNotification,
+      pauseNotification,
+      resumeNotification,
     }),
     [
       dismissNotification,
-      lockNotification,
       notifications,
       notify,
       notifyError,
       notifyFormErrors,
       notifySuccess,
       notifyWarning,
+      pauseNotification,
+      resumeNotification,
     ],
   );
 
@@ -202,7 +241,8 @@ export const NotificationProvider = ({ children }: PropsWithChildren) => {
       {children}
       <NotificationViewport
         notifications={notifications}
-        onLock={lockNotification}
+        onPause={pauseNotification}
+        onResume={resumeNotification}
         onDismiss={dismissNotification}
       />
     </NotificationContext.Provider>
