@@ -42,6 +42,10 @@ export const TopNavBar = () => {
   }));
 
   const mailDeliveryMode = systemSettings?.mail_delivery_mode ?? "dry_run";
+  const mailDeliveryDescription =
+    mailDeliveryMode === "live"
+      ? "后续批准发送将真实发出邮件"
+      : "当前只做本地演练，不会真的发信";
 
   const handleModeChange = async (mode: MailDeliveryMode) => {
     if (mode === mailDeliveryMode) {
@@ -94,7 +98,7 @@ export const TopNavBar = () => {
 
                   <div>
                     <div className="text-[11px] font-medium text-stone-500">
-                      发送模式
+                      当前发送状态
                     </div>
                     <div
                       className={clsx(
@@ -105,6 +109,16 @@ export const TopNavBar = () => {
                       )}
                     >
                       {MAIL_DELIVERY_MODE_LABELS[mailDeliveryMode]}
+                    </div>
+                    <div
+                      className={clsx(
+                        "mt-1 text-[11px]",
+                        mailDeliveryMode === "live"
+                          ? "text-amber-700"
+                          : "text-emerald-700",
+                      )}
+                    >
+                      {mailDeliveryDescription}
                     </div>
                   </div>
                 </div>
