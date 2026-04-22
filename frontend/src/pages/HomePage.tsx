@@ -2,8 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { FolderOpen, Loader2, MailPlus, RefreshCcw, Search, Sparkles } from 'lucide-react';
 import { NativeSelectField } from '@/components/atoms/NativeSelectField';
+import { OnboardingChecklistCard } from '@/components/molecules/OnboardingChecklistCard';
 import { useNotification } from '@/context/NotificationContext';
 import { useSelectionContext } from '@/context/SelectionContext';
+import { getOnboardingState } from '@/features/onboarding/client/getOnboardingState';
 import { calculateMatch } from '@/lib/api/emailTasksApi';
 import { useConfirmDialog } from '@/lib/useConfirmDialog';
 import { listProfessors } from '@/lib/api/professorsApi';
@@ -24,6 +26,7 @@ export const HomePage = () => {
   const [university, setUniversity] = useState('all');
   const [status, setStatus] = useState<'all' | ProfessorDashboardItemDTO['status']>('all');
   const [loading, setLoading] = useState(false);
+  const [hasLoadedProfessors, setHasLoadedProfessors] = useState(false);
   const [bulkScoring, setBulkScoring] = useState(false);
   const [scoringProfessorIds, setScoringProfessorIds] = useState<Set<number>>(new Set());
   const loadedProfessorsKeyRef = useRef<string | null>(null);
@@ -39,10 +42,14 @@ export const HomePage = () => {
       latestProfessorsRequestIdRef.current += 1;
       activeProfessorsRequestKeyRef.current = null;
       loadedProfessorsKeyRef.current = null;
+      setHasLoadedProfessors(false);
       setProfessors([]);
       setSelectedIds(new Set());
       setLoading(false);
       return;
+    }
+    if (loadedProfessorsKeyRef.current !== professorsRequestKey) {
+      setHasLoadedProfessors(false);
     }
     const requestId = latestProfessorsRequestIdRef.current + 1;
     latestProfessorsRequestIdRef.current = requestId;
@@ -74,6 +81,7 @@ export const HomePage = () => {
         return next;
       });
       loadedProfessorsKeyRef.current = professorsRequestKey;
+      setHasLoadedProfessors(true);
     } catch (loadError) {
       if (
         latestProfessorsRequestIdRef.current !== requestId ||
@@ -144,6 +152,20 @@ export const HomePage = () => {
   };
 
   const hasPrimaryMaterial = Boolean(selectedIdentity?.current_primary_material_id);
+  const hasTemplate = Boolean(
+    selectedIdentity?.outreach_template_body_text?.trim() || selectedIdentity?.outreach_template_body_html?.trim(),
+  );
+  const hasMaterialsAndTemplate = hasPrimaryMaterial && hasTemplate;
+  const onboardingState = getOnboardingState({
+    hasIdentity: Boolean(selectedIdentity),
+    hasLlmProfile: Boolean(selectedLlmProfile),
+    hasPrimaryMaterial: hasMaterialsAndTemplate,
+    hasProfessors: professors.length > 0,
+    hasFirstTask: false,
+  });
+  const shouldSkipHomeOnboardingForCurrentStage =
+    onboardingState.completed || onboardingState.stage === 'first_task';
+  const canEvaluateProfessorOnboarding = professorsRequestKey === null || hasLoadedProfessors;
 
   const toggleScoringProfessor = (professorId: number, active: boolean) => {
     setScoringProfessorIds((previous) => {
@@ -240,21 +262,30 @@ export const HomePage = () => {
     }
   };
 
-  if (!selectedIdentityId || !selectedLlmProfileId || !selectedIdentity || !selectedLlmProfile) {
+  if (canEvaluateProfessorOnboarding && !shouldSkipHomeOnboardingForCurrentStage) {
     return (
       <>
-        <main className="mx-auto max-w-5xl px-6 py-10">
-          <div className="rounded-3xl border border-dashed border-stone-300 bg-[#fcfbf8] p-10 text-center shadow-sm">
-            <h1 className="text-2xl font-semibold text-stone-900">先选择身份和模型</h1>
-            <p className="mt-3 text-sm leading-6 text-stone-600">先到个人页配置，再在顶部切换到要使用的上下文。</p>
-            <Link to="/profile" data-interactive="button" className="ui-btn-primary mt-6">
-              去个人页配置
-            </Link>
-          </div>
+        <main className="mx-auto max-w-6xl px-6 py-8">
+          <OnboardingChecklistCard
+            title="开始使用前，还差这几步"
+            description={onboardingState.description}
+            nextActionHref={onboardingState.nextActionHref}
+            nextActionLabel="继续完成准备"
+            items={[
+              { label: '创建发件身份', done: Boolean(selectedIdentity) },
+              { label: '配置 AI 模型', done: Boolean(selectedLlmProfile) },
+              { label: '准备材料和模板', done: hasMaterialsAndTemplate },
+              { label: '导入导师', done: professors.length > 0 },
+            ]}
+          />
         </main>
         {confirmDialog}
       </>
     );
+  }
+
+  if (!selectedIdentityId || !selectedLlmProfileId || !selectedIdentity || !selectedLlmProfile) {
+    return null;
   }
 
   return (

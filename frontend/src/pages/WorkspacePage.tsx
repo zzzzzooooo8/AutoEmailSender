@@ -6,6 +6,8 @@ import { WorkspaceMessageThread } from '@/components/organisms/WorkspaceMessageT
 import { WorkspaceSidebar } from '@/components/organisms/WorkspaceSidebar';
 import { useNotification } from '@/context/NotificationContext';
 import { useSelectionContext } from '@/context/SelectionContext';
+import { getTaskModeCopy } from '@/features/create-task/client/taskCopy';
+import { getWorkspaceNextStep } from '@/features/workspace/client/getWorkspaceNextStep';
 import {
   approveAndSchedule,
   approveAndSend,
@@ -74,6 +76,58 @@ const getStatusLabel = (currentTask: WorkspaceTaskSummaryDTO | null) => {
   return WORKSPACE_STATUS_LABELS[currentTask.status] ?? currentTask.status;
 };
 
+const getWorkspaceNextStepDescription = (title: string) => {
+  switch (title) {
+    case '下一步：查看发送结果':
+      return '邮件已经发出，接下来重点看发送结果，以及导师是否进入真实往来。';
+    case '下一步：处理导师回复':
+      return '这里已经进入回信阶段，下一步重点是确认导师意图并及时跟进。';
+    case '下一步：查看失败原因并重试':
+      return '先检查失败原因，确认正文和收件信息没有问题后再重试。';
+    case '下一步：查看跳过原因':
+      return '先看清这次为什么被跳过，再决定是否需要补材料或调整策略。';
+    case '下一步：先选择用于分析的材料':
+      return '先选一份材料，系统才能继续分析这位导师是否值得联系。';
+    case '下一步：生成一版邮件草稿':
+      return '先让系统起一版草稿，再人工检查是否保留这位导师。';
+    case '下一步：确认是否保留定时发送':
+      return '确认发送时间没问题就保留；如果节奏要调整，可以重新定时或直接发送。';
+    default:
+      return '草稿已经准备好，检查主题、正文和附件后，再决定立即发送还是定时发送。';
+  }
+};
+
+const deriveBodyTextFromDraft = ({
+  content,
+  contentHtml,
+}: {
+  content: string;
+  contentHtml: string | null;
+}) => {
+  const trimmedContent = content.trim();
+  if (trimmedContent) {
+    return trimmedContent;
+  }
+
+  const trimmedHtml = contentHtml?.trim();
+  if (!trimmedHtml) {
+    return '';
+  }
+  const normalizedHtml = trimmedHtml
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|tr|h[1-6])>/gi, '\n');
+
+  if (typeof DOMParser !== 'undefined') {
+    const document = new DOMParser().parseFromString(normalizedHtml, 'text/html');
+    const text = document.body.textContent?.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+    if (text) {
+      return text;
+    }
+  }
+
+  return normalizedHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+};
+
 export const WorkspacePage = () => {
   const { id } = useParams<{ id: string }>();
   const professorId = Number(id);
@@ -106,25 +160,28 @@ export const WorkspacePage = () => {
       currentTask?.status && !['sent', 'reply_detected'].includes(currentTask.status)
         ? latestDraftMessage
         : null;
-
-    setSubject(
+    const nextSubject =
       currentTask?.approved_subject ??
-        currentTask?.generated_subject ??
-        preferredDraftMessage?.subject ??
-        '',
-    );
-    setContent(
-      currentTask?.approved_body_text ??
+      currentTask?.generated_subject ??
+      preferredDraftMessage?.subject ??
+      '';
+    const nextContentHtml =
+      currentTask?.approved_body_html ??
+      currentTask?.generated_content_html ??
+      preferredDraftMessage?.content_html ??
+      null;
+    const nextContentText = deriveBodyTextFromDraft({
+      content:
+        currentTask?.approved_body_text ??
         currentTask?.generated_content_text ??
         preferredDraftMessage?.content ??
         '',
-    );
-    setContentHtml(
-      currentTask?.approved_body_html ??
-        currentTask?.generated_content_html ??
-        preferredDraftMessage?.content_html ??
-        null,
-    );
+      contentHtml: nextContentHtml,
+    });
+
+    setSubject(nextSubject);
+    setContent(nextContentText);
+    setContentHtml(nextContentHtml);
     setSelectedMaterialIds(currentTask?.selected_material_ids ?? []);
     setScheduledAt(
       currentTask?.scheduled_at
@@ -243,6 +300,16 @@ export const WorkspacePage = () => {
     () => thread?.messages.filter((message) => message.direction !== 'draft').length ?? 0,
     [thread?.messages],
   );
+  const preparedBodyText = deriveBodyTextFromDraft({ content, contentHtml });
+  const hasDraft = Boolean(preparedBodyText);
+  const nextStep = currentTask
+    ? getWorkspaceNextStep({
+        status: currentTask.status ?? 'discovered',
+        hasDraft,
+        hasPrimaryMaterial: Boolean(currentTask.primary_material_id),
+      })
+    : null;
+  const nextStepDescription = nextStep ? getWorkspaceNextStepDescription(nextStep.title) : '';
 
   const runAction = useCallback(
     async (
@@ -302,7 +369,7 @@ export const WorkspacePage = () => {
       () =>
         approveAndSend(currentTaskId, {
           subject: subject.trim() || null,
-          body_text: content.trim(),
+          body_text: preparedBodyText,
           body_html: contentHtml,
           selected_material_ids: selectedMaterialIds,
         }),
@@ -311,9 +378,9 @@ export const WorkspacePage = () => {
       () => setComposerExpanded(false),
     );
   }, [
-    content,
     contentHtml,
     currentTaskId,
+    preparedBodyText,
     runAction,
     selectedMaterialIds,
     subject,
@@ -334,7 +401,7 @@ export const WorkspacePage = () => {
       () =>
         approveAndSchedule(currentTaskId, {
           subject: subject.trim() || null,
-          body_text: content.trim(),
+          body_text: preparedBodyText,
           body_html: contentHtml,
           selected_material_ids: selectedMaterialIds,
           scheduled_at: scheduleDate.toISOString(),
@@ -344,10 +411,10 @@ export const WorkspacePage = () => {
       () => setComposerExpanded(false),
     );
   }, [
-    content,
     contentHtml,
     currentTaskId,
     notifyFormErrors,
+    preparedBodyText,
     runAction,
     scheduledAt,
     selectedMaterialIds,
@@ -489,7 +556,7 @@ export const WorkspacePage = () => {
                 真实往来 {realMessageCount} 条
               </span>
               <span className="rounded-full border border-stone-200 bg-white/90 px-3 py-1 text-xs font-medium text-stone-600">
-                {currentTaskMode === 'template' ? '固定模板' : '模板润色'}
+                {getTaskModeCopy(currentTaskMode).title}
               </span>
             </div>
           </div>
@@ -509,6 +576,9 @@ export const WorkspacePage = () => {
                   thread={thread}
                   currentTask={currentTask}
                   currentTaskMode={currentTaskMode}
+                  draftReady={hasDraft}
+                  nextStepTitle={nextStep?.title ?? '下一步：继续整理这位导师的沟通动作'}
+                  nextStepDescription={nextStepDescription}
                   subject={subject}
                   content={content}
                   hasRichHtml={Boolean(contentHtml)}

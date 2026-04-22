@@ -7,6 +7,7 @@ import { useNotification } from '@/context/NotificationContext';
 import { createBatchTask } from '@/lib/api/batchTasksApi';
 import { listProfessors } from '@/lib/api/professorsApi';
 import { useSelectionContext } from '@/context/SelectionContext';
+import { getTaskModeCopy } from '@/features/create-task/client/taskCopy';
 import {
   MATERIAL_TYPE_LABELS,
   type IdentityMaterialDTO,
@@ -35,18 +36,10 @@ const MODE_OPTIONS: Array<{
   value: OutreachGenerationMode;
   title: string;
   description: string;
-}> = [
-  {
-    value: 'llm',
-    title: '模板润色',
-    description: '必须先提供套磁信模板，AI 只会基于模板做小幅定制化润色。',
-  },
-  {
-    value: 'template',
-    title: '固定模板',
-    description: '本次任务直接渲染模板变量，适合批量统一表达。',
-  },
-];
+}> = (['llm', 'template'] as const).map((value) => ({
+  value,
+  ...getTaskModeCopy(value),
+}));
 
 export const CreateTaskPage = () => {
   const navigate = useNavigate();
@@ -330,6 +323,9 @@ export const CreateTaskPage = () => {
                 </div>
                 <div className="mt-3 text-xs leading-6 text-stone-500">
                   当前会一并快照模板内容；之后就算你改身份默认值，已创建任务也不会跟着漂移。
+                </div>
+                <div className="mt-3 rounded-2xl border border-primary/15 bg-primary/5 px-4 py-3 text-sm leading-6 text-stone-700">
+                  创建任务后，下一步通常是进入工作区生成草稿、人工检查，再决定立即发送或定时发送。
                 </div>
               </div>
 

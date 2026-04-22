@@ -322,6 +322,18 @@ export interface CreateBatchTaskRequestDTO {
 
 export type BatchTaskRuntimeStatus = 'running' | 'paused' | 'stopped' | 'completed';
 
+export type WorkspaceTaskStatus =
+  | 'discovered'
+  | 'matched'
+  | 'draft_generated'
+  | 'review_required'
+  | 'approved'
+  | 'scheduled'
+  | 'sent'
+  | 'send_failed'
+  | 'reply_detected'
+  | 'skipped';
+
 export interface BatchTaskCardDTO {
   id: number;
   name: string;
@@ -373,7 +385,7 @@ export interface WorkspaceLLMDTO {
 export interface WorkspaceTaskSummaryDTO {
   id: number | null;
   batch_task_id: number | null;
-  status: string | null;
+  status: WorkspaceTaskStatus | null;
   outreach_generation_mode: OutreachGenerationMode;
   outreach_template_subject: string | null;
   outreach_template_body_text: string | null;
