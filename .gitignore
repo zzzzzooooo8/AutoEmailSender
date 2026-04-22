@@ -14,3 +14,4 @@ frontend/dist/
 .omx
 .worktrees/
 docs/superpowers/plans/
+.codex
