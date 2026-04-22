@@ -91,6 +91,7 @@ describe("WorkspaceComposerDock copy", () => {
         thread={thread}
         currentTask={currentTask}
         currentTaskMode="llm"
+        draftReady={false}
         subject=""
         content=""
         hasRichHtml={false}

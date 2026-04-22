@@ -10,6 +10,7 @@ import {
   Send,
   TimerReset,
 } from 'lucide-react';
+import { getTaskModeCopy } from '@/features/create-task/client/taskCopy';
 import {
   MATERIAL_TYPE_LABELS,
   type IdentityMaterialDTO,
@@ -22,6 +23,7 @@ type WorkspaceComposerDockProps = {
   thread: WorkspaceThreadDTO;
   currentTask: WorkspaceTaskSummaryDTO;
   currentTaskMode: OutreachGenerationMode;
+  draftReady: boolean;
   nextStepTitle: string;
   nextStepDescription: string;
   subject: string;
@@ -54,8 +56,8 @@ const MODE_OPTIONS: Array<{
   value: OutreachGenerationMode;
   label: string;
 }> = [
-  { value: 'llm', label: '模板润色' },
-  { value: 'template', label: '固定模板' },
+  { value: 'llm', label: getTaskModeCopy('llm').title },
+  { value: 'template', label: getTaskModeCopy('template').title },
 ];
 
 const Panel = ({
@@ -98,6 +100,7 @@ export const WorkspaceComposerDock = ({
   thread,
   currentTask,
   currentTaskMode,
+  draftReady,
   nextStepTitle,
   nextStepDescription,
   subject,
@@ -137,7 +140,6 @@ export const WorkspaceComposerDock = ({
   const hasTemplateConfigured = Boolean(
     currentTask.outreach_template_body_text?.trim() || currentTask.outreach_template_body_html?.trim(),
   );
-  const draftReady = Boolean(subject.trim() || content.trim());
   const scheduledSummary = formatScheduleSummary(scheduledAt);
   const limitationHint =
     currentTaskMode === 'template'
@@ -415,7 +417,7 @@ export const WorkspaceComposerDock = ({
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1 text-xs text-stone-600">
-                  {currentTaskMode === 'template' ? '固定模板' : '模板润色'}
+                  {getTaskModeCopy(currentTaskMode).title}
                 </span>
                 <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1 text-xs text-stone-600">
                   <Paperclip className="mr-1 inline h-3.5 w-3.5" />
