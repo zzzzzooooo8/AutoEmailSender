@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "f14c0e8d3b7a"
+HEAD_REVISION = "d91f2a4b8c7e"
 LEGACY_RUNTIME_REVISION = "7a1d5e42c9bd"
 
 
