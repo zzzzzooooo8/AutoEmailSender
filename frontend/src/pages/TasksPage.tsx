@@ -12,7 +12,6 @@ import {
 } from "@/lib/api/batchTasksApi";
 import {
   BATCH_TASK_STATUS_LABELS,
-  MAIL_DELIVERY_MODE_LABELS,
   type BatchTaskCardDTO,
 } from "@/types";
 
@@ -170,12 +169,6 @@ export const TasksPage = () => {
               task.target_count === 0
                 ? 0
                 : Math.round((task.completed_count / task.target_count) * 100);
-            const modeSummary =
-              task.live_count > 0 && task.dry_run_count > 0
-                ? `${MAIL_DELIVERY_MODE_LABELS.live} ${task.live_count} / ${MAIL_DELIVERY_MODE_LABELS.dry_run} ${task.dry_run_count}`
-                : task.live_count > 0
-                  ? `全部已快照为${MAIL_DELIVERY_MODE_LABELS.live}（${task.live_count}）`
-                  : `全部已快照为${MAIL_DELIVERY_MODE_LABELS.dry_run}（${task.dry_run_count}）`;
 
             return (
               <article
@@ -243,10 +236,6 @@ export const TasksPage = () => {
                   <div className="rounded-2xl border border-stone-100 px-3 py-2 text-emerald-700">
                     已回复 {task.replied_count}
                   </div>
-                </div>
-
-                <div className="mt-4 rounded-2xl bg-stone-50 px-4 py-3 text-sm text-stone-600">
-                  发送模式快照：{modeSummary}
                 </div>
 
                 <div className="mt-6 flex flex-wrap gap-3">

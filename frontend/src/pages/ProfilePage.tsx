@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { Link } from "react-router-dom";
 import clsx from "clsx";
 import {
   CheckCircle2,
@@ -48,7 +49,6 @@ import {
   updateLLMProfile,
 } from "@/lib/api/llmProfiles";
 import {
-  MAIL_DELIVERY_MODE_LABELS,
   MATERIAL_TYPE_LABELS,
   type IdentityDTO,
   type IdentityMaterialDTO,
@@ -1366,7 +1366,6 @@ export const ProfilePage = () => {
   const {
     identities,
     llmProfiles,
-    systemSettings,
     selectedIdentityId,
     selectedLlmProfileId,
     selectedIdentity,
@@ -2064,14 +2063,6 @@ export const ProfilePage = () => {
         <h1 className="text-3xl font-semibold text-stone-900">个人页</h1>
         <div className="mt-4 flex flex-wrap gap-3 text-xs text-stone-600">
           <span className="rounded-full border border-stone-200 bg-white px-3 py-1.5">
-            模式：
-            {
-              MAIL_DELIVERY_MODE_LABELS[
-                systemSettings?.mail_delivery_mode ?? "dry_run"
-              ]
-            }
-          </span>
-          <span className="rounded-full border border-stone-200 bg-white px-3 py-1.5">
             身份：{selectedIdentity?.name ?? "未选择"}
           </span>
           <span className="rounded-full border border-stone-200 bg-white px-3 py-1.5">
@@ -2660,6 +2651,32 @@ export const ProfilePage = () => {
 
             <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50/80 px-4 py-4 text-sm leading-6 text-emerald-800">
               完成这部分后，下一步去「导师管理」导入第一批导师，再回首页开始创建任务。
+            </div>
+          </section>
+
+          <section className="rounded-3xl border border-stone-200 bg-white p-6 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-semibold text-stone-900">
+                  测试写信
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-stone-600">
+                  配置完成后，先给自己发一封测试邮件，确认模板、附件和 SMTP 都正常。
+                </p>
+              </div>
+              <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs text-stone-600">
+                测试闭环
+              </span>
+            </div>
+
+            <div className="mt-6 rounded-2xl border border-stone-200 bg-[#fcfbf8] px-4 py-4 text-sm leading-6 text-stone-600">
+              这个入口不会进入导师任务流，只会把测试邮件发到当前身份自己的邮箱。
+            </div>
+
+            <div className="mt-6">
+              <Link to="/test-compose" className="ui-btn-primary">
+                进入测试写信页
+              </Link>
             </div>
           </section>
         </div>

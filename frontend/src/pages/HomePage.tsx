@@ -10,7 +10,7 @@ import { calculateMatch } from '@/lib/api/emailTasksApi';
 import { useConfirmDialog } from '@/lib/useConfirmDialog';
 import { listProfessors } from '@/lib/api/professorsApi';
 import { ensureWorkspaceTask } from '@/lib/api/workspacesApi';
-import { MAIL_DELIVERY_MODE_LABELS, PROFESSOR_STATUS_LABELS, type ProfessorDashboardItemDTO } from '@/types';
+import { PROFESSOR_STATUS_LABELS, type ProfessorDashboardItemDTO } from '@/types';
 
 const SESSION_KEY = 'selected_professor_ids';
 
@@ -18,7 +18,7 @@ export const HomePage = () => {
   const navigate = useNavigate();
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const { notifyError, notifyWarning } = useNotification();
-  const { selectedIdentityId, selectedLlmProfileId, selectedIdentity, selectedLlmProfile, systemSettings } =
+  const { selectedIdentityId, selectedLlmProfileId, selectedIdentity, selectedLlmProfile } =
     useSelectionContext();
   const [professors, setProfessors] = useState<ProfessorDashboardItemDTO[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -301,9 +301,6 @@ export const HomePage = () => {
                 </span>
                 <span className="rounded-full border border-stone-200 bg-white px-3 py-1.5">
                   模型：{selectedLlmProfile.name}
-                </span>
-                <span className="rounded-full border border-stone-200 bg-white px-3 py-1.5">
-                  模式：{MAIL_DELIVERY_MODE_LABELS[systemSettings?.mail_delivery_mode ?? 'dry_run']}
                 </span>
               </div>
             </div>

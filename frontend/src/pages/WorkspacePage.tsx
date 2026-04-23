@@ -19,6 +19,7 @@ import {
 } from '@/lib/api/emailTasksApi';
 import { ensureWorkspaceTask, getWorkspaceThread } from '@/lib/api/workspacesApi';
 import { parseApiDateTime } from '@/lib/dateTime';
+import { useConfirmDialog } from '@/lib/useConfirmDialog';
 import {
   PROFESSOR_STATUS_LABELS,
   type IdentityMaterialDTO,
@@ -132,6 +133,7 @@ export const WorkspacePage = () => {
   const { id } = useParams<{ id: string }>();
   const professorId = Number(id);
   const { notifyError, notifyFormErrors } = useNotification();
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const { selectedIdentityId, selectedLlmProfileId } = useSelectionContext();
   const [thread, setThread] = useState<WorkspaceThreadDTO | null>(null);
   const [loading, setLoading] = useState(false);
@@ -365,25 +367,40 @@ export const WorkspacePage = () => {
       return;
     }
 
-    void runAction(
-      () =>
-        approveAndSend(currentTaskId, {
-          subject: subject.trim() || null,
-          body_text: preparedBodyText,
-          body_html: contentHtml,
-          selected_material_ids: selectedMaterialIds,
-        }),
-      '发送失败',
-      '发送失败',
-      () => setComposerExpanded(false),
-    );
+    void (async () => {
+      const confirmed = await confirm({
+        title: '确认立即发送这封真实邮件？',
+        description: `将真实发给 ${thread?.professor.email ?? '当前导师邮箱'}，并附带 ${selectedMaterialIds.length} 份附件。`,
+        confirmLabel: '确认发送',
+        cancelLabel: '再检查一下',
+        tone: 'danger',
+      });
+      if (!confirmed) {
+        return;
+      }
+
+      await runAction(
+        () =>
+          approveAndSend(currentTaskId, {
+            subject: subject.trim() || null,
+            body_text: preparedBodyText,
+            body_html: contentHtml,
+            selected_material_ids: selectedMaterialIds,
+          }),
+        '发送失败',
+        '发送失败',
+        () => setComposerExpanded(false),
+      );
+    })();
   }, [
+    confirm,
     contentHtml,
     currentTaskId,
     preparedBodyText,
     runAction,
     selectedMaterialIds,
     subject,
+    thread?.professor.email,
   ]);
 
   const handleScheduleSend = useCallback(() => {
@@ -397,20 +414,34 @@ export const WorkspacePage = () => {
       return;
     }
 
-    void runAction(
-      () =>
-        approveAndSchedule(currentTaskId, {
-          subject: subject.trim() || null,
-          body_text: preparedBodyText,
-          body_html: contentHtml,
-          selected_material_ids: selectedMaterialIds,
-          scheduled_at: scheduleDate.toISOString(),
-        }),
-      '定时发送失败',
-      '定时发送失败',
-      () => setComposerExpanded(false),
-    );
+    void (async () => {
+      const confirmed = await confirm({
+        title: '确认定时发送这封真实邮件？',
+        description: `会在 ${scheduleDate.toLocaleString('zh-CN')} 自动发给 ${thread?.professor.email ?? '当前导师邮箱'}。`,
+        confirmLabel: '确认定时',
+        cancelLabel: '再检查一下',
+        tone: 'danger',
+      });
+      if (!confirmed) {
+        return;
+      }
+
+      await runAction(
+        () =>
+          approveAndSchedule(currentTaskId, {
+            subject: subject.trim() || null,
+            body_text: preparedBodyText,
+            body_html: contentHtml,
+            selected_material_ids: selectedMaterialIds,
+            scheduled_at: scheduleDate.toISOString(),
+          }),
+        '定时发送失败',
+        '定时发送失败',
+        () => setComposerExpanded(false),
+      );
+    })();
   }, [
+    confirm,
     contentHtml,
     currentTaskId,
     notifyFormErrors,
@@ -419,6 +450,7 @@ export const WorkspacePage = () => {
     scheduledAt,
     selectedMaterialIds,
     subject,
+    thread?.professor.email,
   ]);
 
   const handleCancelSchedule = useCallback(() => {
@@ -489,12 +521,15 @@ export const WorkspacePage = () => {
 
   if (!selectedIdentityId || !selectedLlmProfileId) {
     return (
-      <main className="mx-auto max-w-4xl px-6 py-10">
-        <div className="rounded-3xl border border-dashed border-stone-300 bg-[#fcfbf8] p-10 text-center">
-          <h1 className="text-2xl font-semibold text-stone-900">先选择身份和模型</h1>
-          <p className="mt-3 text-sm text-stone-600">工作区会跟随你当前的上下文。</p>
-        </div>
-      </main>
+      <>
+        <main className="mx-auto max-w-4xl px-6 py-10">
+          <div className="rounded-3xl border border-dashed border-stone-300 bg-[#fcfbf8] p-10 text-center">
+            <h1 className="text-2xl font-semibold text-stone-900">先选择身份和模型</h1>
+            <p className="mt-3 text-sm text-stone-600">工作区会跟随你当前的上下文。</p>
+          </div>
+        </main>
+        {confirmDialog}
+      </>
     );
   }
 
@@ -524,8 +559,9 @@ export const WorkspacePage = () => {
     '学校信息待补充';
 
   return (
-    <main className="h-full min-h-0 overflow-hidden bg-[linear-gradient(180deg,rgba(255,250,243,0.92),rgba(255,255,255,0.98))]">
-      <div className="mx-auto flex h-full min-h-0 max-w-[1440px] flex-col px-4 py-4 sm:px-6 sm:py-5">
+    <>
+      <main className="h-full min-h-0 overflow-hidden bg-[linear-gradient(180deg,rgba(255,250,243,0.92),rgba(255,255,255,0.98))]">
+        <div className="mx-auto flex h-full min-h-0 max-w-[1440px] flex-col px-4 py-4 sm:px-6 sm:py-5">
         <header className="mb-4 shrink-0 rounded-[34px] border border-stone-200/80 bg-[radial-gradient(circle_at_top_right,rgba(153,27,27,0.08),transparent_28%),linear-gradient(180deg,rgba(255,248,240,0.98),rgba(255,255,255,0.98))] px-5 py-5 shadow-[0_20px_50px_-34px_rgba(41,37,36,0.28)] sm:px-6">
           <Link
             to="/"
@@ -621,7 +657,9 @@ export const WorkspacePage = () => {
             )}
           </section>
         </div>
-      </div>
-    </main>
+        </div>
+      </main>
+      {confirmDialog}
+    </>
   );
 };

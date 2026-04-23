@@ -14,6 +14,7 @@ const mockedEnsureWorkspaceTask = vi.hoisted(() => vi.fn());
 const mockedWorkspaceComposerDock = vi.hoisted(() => vi.fn());
 const mockedApproveAndSend = vi.hoisted(() => vi.fn());
 const mockedApproveAndSchedule = vi.hoisted(() => vi.fn());
+const mockedConfirm = vi.hoisted(() => vi.fn());
 
 vi.mock("@/context/SelectionContext", () => ({
   useSelectionContext: mockedUseSelectionContext,
@@ -39,6 +40,13 @@ vi.mock("@/lib/api/emailTasksApi", () => ({
   generateDraft: vi.fn(),
   updateTaskOutreachConfig: vi.fn(),
   updateTaskPrimaryMaterial: vi.fn(),
+}));
+
+vi.mock("@/lib/useConfirmDialog", () => ({
+  useConfirmDialog: () => ({
+    confirm: mockedConfirm,
+    dialog: null,
+  }),
 }));
 
 vi.mock("@/components/organisms/WorkspaceMessageThread", () => ({
@@ -120,7 +128,6 @@ const buildThread = ({
     provider: "openai",
     model_name: "gpt-test",
   },
-  mail_delivery_mode: "dry_run",
   material_options: primaryMaterialId ? [primaryMaterial] : [],
   current_task: {
     id: 301,
@@ -144,7 +151,6 @@ const buildThread = ({
     primary_material_id: primaryMaterialId,
     primary_material: primaryMaterialId ? primaryMaterial : null,
     selected_material_ids: [],
-    delivery_mode: "dry_run",
     approved_at: null,
     scheduled_at: status === "scheduled" ? "2026-04-22T10:00:00Z" : null,
     last_send_attempt_at: null,
@@ -179,6 +185,8 @@ describe("WorkspacePage next-step", () => {
     mockedEnsureWorkspaceTask.mockReset();
     mockedApproveAndSend.mockReset();
     mockedApproveAndSchedule.mockReset();
+    mockedConfirm.mockReset();
+    mockedConfirm.mockResolvedValue(true);
     mockedApproveAndSend.mockImplementation(async () =>
       buildThread({
         generatedContentHtml: "<p>发送后的 HTML 草稿</p>",
@@ -292,6 +300,11 @@ describe("WorkspacePage next-step", () => {
     fireEvent.click(screen.getByRole("button", { name: "mock-send-now" }));
 
     await waitFor(() => {
+      expect(mockedConfirm).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "确认立即发送这封真实邮件？",
+        }),
+      );
       expect(mockedApproveAndSend).toHaveBeenCalledTimes(1);
     });
 
@@ -322,6 +335,11 @@ describe("WorkspacePage next-step", () => {
     fireEvent.click(screen.getByRole("button", { name: "mock-schedule-send" }));
 
     await waitFor(() => {
+      expect(mockedConfirm).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "确认定时发送这封真实邮件？",
+        }),
+      );
       expect(mockedApproveAndSchedule).toHaveBeenCalledTimes(1);
     });
 

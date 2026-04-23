@@ -8,6 +8,7 @@ import { createBatchTask } from '@/lib/api/batchTasksApi';
 import { listProfessors } from '@/lib/api/professorsApi';
 import { useSelectionContext } from '@/context/SelectionContext';
 import { getTaskModeCopy } from '@/features/create-task/client/taskCopy';
+import { useConfirmDialog } from '@/lib/useConfirmDialog';
 import {
   MATERIAL_TYPE_LABELS,
   type IdentityMaterialDTO,
@@ -44,6 +45,7 @@ const MODE_OPTIONS: Array<{
 export const CreateTaskPage = () => {
   const navigate = useNavigate();
   const { notifyError, notifyFormErrors } = useNotification();
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const { selectedIdentityId, selectedLlmProfileId, selectedIdentity } = useSelectionContext();
   const [selectedProfessorIds] = useState<number[]>(readSelectedProfessorIds());
   const [professors, setProfessors] = useState<ProfessorDashboardItemDTO[]>([]);
@@ -191,6 +193,20 @@ export const CreateTaskPage = () => {
       return;
     }
 
+    const confirmed = await confirm({
+      title: scheduleType === 'scheduled' ? '确认创建定时批量发送任务？' : '确认创建真实发送任务？',
+      description:
+        scheduleType === 'scheduled'
+          ? '这会创建一个自动定时真实发送的批量任务。'
+          : '后续进入工作区审批后，发送将是真实发给导师。',
+      confirmLabel: '继续创建',
+      cancelLabel: '再检查一下',
+      tone: 'danger',
+    });
+    if (!confirmed) {
+      return;
+    }
+
     setSubmitting(true);
     try {
       const llmTemplateSubject = subject.trim() || null;
@@ -260,21 +276,22 @@ export const CreateTaskPage = () => {
   }
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-8">
-      <div className="rounded-3xl border border-stone-200 bg-[#fcfbf8] p-6 shadow-sm">
-        <h1 className="text-3xl font-semibold text-stone-900">创建批量任务</h1>
-        <p className="mt-2 text-sm text-stone-600">
-          当前身份：{selectedIdentity.name}，本次将覆盖 {selectedProfessorIds.length} 位导师。
-        </p>
-      </div>
-
-      {loading ? (
-        <div className="mt-6 flex items-center justify-center gap-2 rounded-3xl border border-stone-200 bg-white px-6 py-14 text-sm text-stone-500 shadow-sm">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          正在加载已选导师...
+    <>
+      <main className="mx-auto max-w-6xl px-6 py-8">
+        <div className="rounded-3xl border border-stone-200 bg-[#fcfbf8] p-6 shadow-sm">
+          <h1 className="text-3xl font-semibold text-stone-900">创建批量任务</h1>
+          <p className="mt-2 text-sm text-stone-600">
+            当前身份：{selectedIdentity.name}，本次将覆盖 {selectedProfessorIds.length} 位导师。
+          </p>
         </div>
-      ) : (
-        <div className="mt-6 grid gap-6 lg:grid-cols-[1.45fr,0.85fr]">
+
+        {loading ? (
+          <div className="mt-6 flex items-center justify-center gap-2 rounded-3xl border border-stone-200 bg-white px-6 py-14 text-sm text-stone-500 shadow-sm">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            正在加载已选导师...
+          </div>
+        ) : (
+          <div className="mt-6 grid gap-6 lg:grid-cols-[1.45fr,0.85fr]">
           <section className="rounded-3xl border border-stone-200 bg-white p-6 shadow-sm">
             <div className="space-y-6">
               <label className="block">
@@ -563,8 +580,10 @@ export const CreateTaskPage = () => {
               ))}
             </div>
           </aside>
-        </div>
-      )}
-    </main>
+          </div>
+        )}
+      </main>
+      {confirmDialog}
+    </>
   );
 };

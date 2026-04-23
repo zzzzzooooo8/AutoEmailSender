@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CreateTaskPage } from "@/pages/CreateTaskPage";
@@ -7,6 +7,7 @@ import type { IdentityDTO, LLMProfileDTO, ProfessorDashboardItemDTO } from "@/ty
 const mockedUseSelectionContext = vi.hoisted(() => vi.fn());
 const mockedListProfessors = vi.hoisted(() => vi.fn());
 const mockedCreateBatchTask = vi.hoisted(() => vi.fn());
+const mockedConfirm = vi.hoisted(() => vi.fn());
 
 vi.mock("@/context/SelectionContext", () => ({
   useSelectionContext: mockedUseSelectionContext,
@@ -16,6 +17,13 @@ vi.mock("@/context/NotificationContext", () => ({
   useNotification: () => ({
     notifyError: vi.fn(),
     notifyFormErrors: vi.fn(),
+  }),
+}));
+
+vi.mock("@/lib/useConfirmDialog", () => ({
+  useConfirmDialog: () => ({
+    confirm: mockedConfirm,
+    dialog: null,
   }),
 }));
 
@@ -100,6 +108,8 @@ describe("CreateTaskPage copy", () => {
     window.sessionStorage.setItem("selected_professor_ids", JSON.stringify([professor.id]));
     mockedListProfessors.mockReset();
     mockedCreateBatchTask.mockReset();
+    mockedConfirm.mockReset();
+    mockedConfirm.mockResolvedValue(true);
     mockedListProfessors.mockResolvedValue([professor]);
     mockedUseSelectionContext.mockReturnValue({
       selectedIdentityId: selectedIdentity.id,
@@ -121,5 +131,20 @@ describe("CreateTaskPage copy", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText("模板润色")).not.toBeInTheDocument();
     expect(screen.queryByText("固定模板")).not.toBeInTheDocument();
+  });
+
+  it("asks for confirmation before creating a real batch task", async () => {
+    renderPage();
+
+    await screen.findByText("本次发信模式");
+    fireEvent.click(screen.getByText("创建任务").closest("button")!);
+
+    await waitFor(() => {
+      expect(mockedConfirm).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "确认创建真实发送任务？",
+        }),
+      );
+    });
   });
 });

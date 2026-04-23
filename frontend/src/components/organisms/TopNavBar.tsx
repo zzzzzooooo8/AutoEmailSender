@@ -1,28 +1,21 @@
 import { Link, NavLink } from "react-router-dom";
-import clsx from "clsx";
 import {
-  AlertTriangle,
   BrainCircuit,
   Mail,
-  Shield,
   UserCircle2,
 } from "lucide-react";
 import { TopBarSelectMenu } from "@/components/atoms/TopBarSelectMenu";
 import { useSelectionContext } from "@/context/SelectionContext";
-import { MAIL_DELIVERY_MODE_LABELS, type MailDeliveryMode } from "@/types";
 
 export const TopNavBar = () => {
   const {
     identities,
     llmProfiles,
-    systemSettings,
     selectedIdentityId,
     selectedLlmProfileId,
     setSelectedIdentityId,
     setSelectedLlmProfileId,
-    setMailDeliveryMode,
     loading,
-    updatingMode,
   } = useSelectionContext();
 
   const navItems = [
@@ -40,19 +33,6 @@ export const TopNavBar = () => {
     value: profile.id,
     label: `${profile.name}${profile.is_default ? "（默认）" : ""}`,
   }));
-
-  const mailDeliveryMode = systemSettings?.mail_delivery_mode ?? "dry_run";
-  const mailDeliveryDescription =
-    mailDeliveryMode === "live"
-      ? "后续批准发送将真实发出邮件"
-      : "当前只做本地演练，不会真的发信";
-
-  const handleModeChange = async (mode: MailDeliveryMode) => {
-    if (mode === mailDeliveryMode) {
-      return;
-    }
-    await setMailDeliveryMode(mode);
-  };
 
   return (
     <nav className="sticky top-0 z-50 border-b border-stone-200/80 bg-[linear-gradient(180deg,rgba(255,250,241,0.98),rgba(255,247,237,0.94))] shadow-[0_10px_30px_-24px_rgba(41,37,36,0.4)] backdrop-blur-xl">
@@ -72,79 +52,6 @@ export const TopNavBar = () => {
             </Link>
 
             <div className="flex flex-wrap items-center justify-end gap-3">
-              <div
-                className={clsx(
-                  "inline-flex items-center gap-3 rounded-2xl border px-3 py-2 shadow-sm",
-                  mailDeliveryMode === "live"
-                    ? "border-amber-200 bg-amber-50/90 shadow-amber-100/70"
-                    : "border-emerald-200 bg-emerald-50/90 shadow-emerald-100/70",
-                )}
-              >
-                <div className="flex items-center gap-2">
-                  <div
-                    className={clsx(
-                      "flex h-9 w-9 items-center justify-center rounded-xl",
-                      mailDeliveryMode === "live"
-                        ? "bg-amber-100 text-amber-700"
-                        : "bg-emerald-100 text-emerald-700",
-                    )}
-                  >
-                    {mailDeliveryMode === "live" ? (
-                      <AlertTriangle className="h-4 w-4" />
-                    ) : (
-                      <Shield className="h-4 w-4" />
-                    )}
-                  </div>
-
-                  <div>
-                    <div className="text-[11px] font-medium text-stone-500">
-                      当前发送状态
-                    </div>
-                    <div
-                      className={clsx(
-                        "text-sm font-semibold",
-                        mailDeliveryMode === "live"
-                          ? "text-amber-900"
-                          : "text-emerald-900",
-                      )}
-                    >
-                      {MAIL_DELIVERY_MODE_LABELS[mailDeliveryMode]}
-                    </div>
-                    <div
-                      className={clsx(
-                        "mt-1 text-[11px]",
-                        mailDeliveryMode === "live"
-                          ? "text-amber-700"
-                          : "text-emerald-700",
-                      )}
-                    >
-                      {mailDeliveryDescription}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="inline-flex gap-1 rounded-xl bg-white/90 p-1 ring-1 ring-black/5">
-                  {(["dry_run", "live"] as MailDeliveryMode[]).map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      disabled={updatingMode}
-                      onClick={() => void handleModeChange(mode)}
-                      className={clsx(
-                        "rounded-lg px-3 py-1.5 text-xs font-semibold transition",
-                        mailDeliveryMode === mode
-                          ? mode === "live"
-                            ? "bg-amber-500 text-white shadow-sm"
-                            : "bg-emerald-600 text-white shadow-sm"
-                          : "text-stone-600 hover:bg-stone-100 hover:text-stone-900",
-                      )}
-                    >
-                      {MAIL_DELIVERY_MODE_LABELS[mode]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               <TopBarSelectMenu
                 placeholder="身份"
                 icon={<UserCircle2 className="h-4 w-4" />}

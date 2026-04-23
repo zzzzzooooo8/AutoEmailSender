@@ -12,28 +12,22 @@ import {
 import { useNotification } from '@/context/NotificationContext';
 import { listIdentities } from '@/lib/api/identities';
 import { listLLMProfiles } from '@/lib/api/llmProfiles';
-import { getSystemSettings, updateSystemSettings } from '@/lib/api/systemSettings';
 import type {
   IdentityDTO,
   LLMProfileDTO,
-  MailDeliveryMode,
-  SystemSettingsDTO,
 } from '@/types';
 
 interface SelectionContextValue {
   identities: IdentityDTO[];
   llmProfiles: LLMProfileDTO[];
-  systemSettings: SystemSettingsDTO | null;
   selectedIdentityId: number | null;
   selectedLlmProfileId: number | null;
   selectedIdentity: IdentityDTO | null;
   selectedLlmProfile: LLMProfileDTO | null;
   loading: boolean;
-  updatingMode: boolean;
   setSelectedIdentityId: (value: number | null) => void;
   setSelectedLlmProfileId: (value: number | null) => void;
   refreshSelections: () => Promise<void>;
-  setMailDeliveryMode: (value: MailDeliveryMode) => Promise<void>;
 }
 
 const IDENTITY_STORAGE_KEY = 'selected_identity_id';
@@ -54,26 +48,22 @@ export const SelectionProvider = ({ children }: PropsWithChildren) => {
   const { notifyError } = useNotification();
   const [identities, setIdentities] = useState<IdentityDTO[]>([]);
   const [llmProfiles, setLlmProfiles] = useState<LLMProfileDTO[]>([]);
-  const [systemSettings, setSystemSettings] = useState<SystemSettingsDTO | null>(null);
   const [selectedIdentityId, setSelectedIdentityId] = useState<number | null>(null);
   const [selectedLlmProfileId, setSelectedLlmProfileId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const bootstrappedRef = useRef(false);
-  const [updatingMode, setUpdatingMode] = useState(false);
 
   const refreshSelections = useCallback(async () => {
     if (!bootstrappedRef.current) {
       setLoading(true);
     }
     try {
-      const [identityData, llmData, settingsData] = await Promise.all([
+      const [identityData, llmData] = await Promise.all([
         listIdentities(),
         listLLMProfiles(),
-        getSystemSettings(),
       ]);
       setIdentities(identityData);
       setLlmProfiles(llmData);
-      setSystemSettings(settingsData);
     } catch (refreshError) {
       const message = refreshError instanceof Error ? refreshError.message : '加载全局上下文失败';
       notifyError('加载全局上下文失败', message);
@@ -133,34 +123,17 @@ export const SelectionProvider = ({ children }: PropsWithChildren) => {
     window.localStorage.setItem(LLM_STORAGE_KEY, String(selectedLlmProfileId));
   }, [selectedLlmProfileId]);
 
-  const setMailDeliveryMode = async (value: MailDeliveryMode) => {
-    setUpdatingMode(true);
-    try {
-      const nextSettings = await updateSystemSettings(value);
-      setSystemSettings(nextSettings);
-    } catch (updateError) {
-      const message = updateError instanceof Error ? updateError.message : '切换发送模式失败';
-      notifyError('切换发送模式失败', message);
-      throw updateError;
-    } finally {
-      setUpdatingMode(false);
-    }
-  };
-
   const value: SelectionContextValue = {
     identities,
     llmProfiles,
-    systemSettings,
     selectedIdentityId,
     selectedLlmProfileId,
     selectedIdentity: identities.find((item) => item.id === selectedIdentityId) ?? null,
     selectedLlmProfile: llmProfiles.find((item) => item.id === selectedLlmProfileId) ?? null,
     loading,
-    updatingMode,
     setSelectedIdentityId,
     setSelectedLlmProfileId,
     refreshSelections,
-    setMailDeliveryMode,
   };
 
   return <SelectionContext.Provider value={value}>{children}</SelectionContext.Provider>;

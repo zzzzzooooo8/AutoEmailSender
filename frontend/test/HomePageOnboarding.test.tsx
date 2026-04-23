@@ -134,7 +134,6 @@ describe("HomePage onboarding", () => {
       selectedLlmProfileId: 1,
       selectedIdentity: createIdentity(),
       selectedLlmProfile,
-      systemSettings: { mail_delivery_mode: "dry_run" },
     });
   });
 
@@ -149,7 +148,6 @@ describe("HomePage onboarding", () => {
         outreach_template_body_text: "你好",
       }),
       selectedLlmProfile,
-      systemSettings: { mail_delivery_mode: "dry_run" },
     });
 
     renderPage();
@@ -197,7 +195,6 @@ describe("HomePage onboarding", () => {
         outreach_template_body_text: "老师您好",
       }),
       selectedLlmProfile,
-      systemSettings: { mail_delivery_mode: "dry_run" },
     });
 
     renderPage();
@@ -221,7 +218,6 @@ describe("HomePage onboarding", () => {
         outreach_template_body_text: "老师您好",
       }),
       selectedLlmProfile,
-      systemSettings: { mail_delivery_mode: "dry_run" },
     });
 
     renderPage();
@@ -229,6 +225,7 @@ describe("HomePage onboarding", () => {
     expect(
       await screen.findByRole("heading", { name: "导师看板" }),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/模式：/)).not.toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: "开始使用前，还差这几步" }),
     ).not.toBeInTheDocument();

@@ -116,7 +116,6 @@ describe("ProfilePage onboarding", () => {
     mockedUseSelectionContext.mockReturnValue({
       identities: [selectedIdentity],
       llmProfiles: [selectedLlmProfile],
-      systemSettings: { mail_delivery_mode: "dry_run" },
       selectedIdentityId: selectedIdentity.id,
       selectedLlmProfileId: selectedLlmProfile.id,
       selectedIdentity,
@@ -189,5 +188,16 @@ describe("ProfilePage onboarding", () => {
     expect(
       screen.getByRole("button", { name: "关闭材料库" }),
     ).toBeInTheDocument();
+  });
+
+  it("shows a test compose entry after the final save section", () => {
+    renderPage();
+
+    const finishSection = screen.getByRole("heading", { name: "保存与下一步" });
+    const testComposeSection = screen.getByRole("heading", { name: "测试写信" });
+    const entryLink = screen.getByRole("link", { name: "进入测试写信页" });
+
+    expectToAppearBefore(finishSection, testComposeSection);
+    expect(entryLink).toHaveAttribute("href", "/test-compose");
   });
 });

@@ -8,6 +8,7 @@ import { NotFoundPage } from '@/pages/NotFoundPage';
 import { ProfessorsPage } from '@/pages/ProfessorsPage';
 import { ProfilePage } from '@/pages/ProfilePage';
 import { TasksPage } from '@/pages/TasksPage';
+import { TestComposePage } from '@/pages/TestComposePage';
 import { WorkspacePage } from '@/pages/WorkspacePage';
 
 function App() {
@@ -23,6 +24,7 @@ function App() {
                 <Route path="/professors" element={<ProfessorsPage />} />
                 <Route path="/tasks" element={<TasksPage />} />
                 <Route path="/create-task" element={<CreateTaskPage />} />
+                <Route path="/test-compose" element={<TestComposePage />} />
                 <Route path="/workspace/:id" element={<WorkspacePage />} />
                 <Route path="/profile" element={<ProfilePage />} />
                 <Route path="/404" element={<NotFoundPage />} />

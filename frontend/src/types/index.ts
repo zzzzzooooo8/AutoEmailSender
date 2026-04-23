@@ -1,4 +1,3 @@
-export type MailDeliveryMode = 'dry_run' | 'live';
 export type OutreachGenerationMode = 'llm' | 'template';
 
 export type MentorStatus = '未发送' | '已读' | '待审核' | '已回复' | '婉拒';
@@ -199,11 +198,6 @@ export interface LLMProfileModelsResultDTO {
   selected_model_available: boolean | null;
 }
 
-export interface SystemSettingsDTO {
-  mail_delivery_mode: MailDeliveryMode;
-  updated_at: string;
-}
-
 export interface ProfessorDashboardItemDTO {
   id: number;
   name: string;
@@ -353,8 +347,6 @@ export interface BatchTaskCardDTO {
   sent_count: number;
   failed_count: number;
   replied_count: number;
-  dry_run_count: number;
-  live_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -404,7 +396,6 @@ export interface WorkspaceTaskSummaryDTO {
   primary_material_id: number | null;
   primary_material: IdentityMaterialDTO | null;
   selected_material_ids: number[] | null;
-  delivery_mode: MailDeliveryMode | null;
   approved_at: string | null;
   scheduled_at: string | null;
   last_send_attempt_at: string | null;
@@ -424,7 +415,6 @@ export interface WorkspaceTaskSummaryDTO {
 export interface WorkspaceMessageDTO {
   id: number;
   direction: 'sent' | 'received' | 'draft';
-  delivery_mode: MailDeliveryMode | null;
   subject: string | null;
   content: string;
   content_html: string | null;
@@ -441,10 +431,39 @@ export interface WorkspaceThreadDTO {
   professor: WorkspaceProfessorDTO;
   identity: WorkspaceIdentityDTO;
   llm_profile: WorkspaceLLMDTO;
-  mail_delivery_mode: MailDeliveryMode;
   material_options: IdentityMaterialDTO[];
   current_task: WorkspaceTaskSummaryDTO;
   messages: WorkspaceMessageDTO[];
+}
+
+export interface TestComposeThreadDTO {
+  identity: WorkspaceIdentityDTO;
+  llm_profile: WorkspaceLLMDTO;
+  material_options: IdentityMaterialDTO[];
+  draft: {
+    subject: string | null;
+    body_text: string;
+    body_html: string | null;
+    selected_material_ids: number[];
+  };
+  history: Array<{
+    id: number;
+    recipient_email: string;
+    subject: string | null;
+    content: string;
+    content_html: string | null;
+    status: string;
+    rfc_message_id: string | null;
+    failure_summary: string | null;
+    created_at: string;
+  }>;
+}
+
+export interface TestComposeDraftPayloadDTO {
+  subject: string | null;
+  body_text: string;
+  body_html: string | null;
+  selected_material_ids: number[] | null;
 }
 
 export interface EmailTaskApprovalPayloadDTO {
@@ -481,11 +500,6 @@ export const BATCH_TASK_STATUS_LABELS: Record<BatchTaskRuntimeStatus, string> = 
   paused: '已暂停',
   stopped: '已中止',
   completed: '已完成',
-};
-
-export const MAIL_DELIVERY_MODE_LABELS: Record<MailDeliveryMode, string> = {
-  dry_run: '本地演练',
-  live: '真实发送',
 };
 
 export const MATERIAL_TYPE_LABELS: Record<IdentityMaterialType, string> = {
