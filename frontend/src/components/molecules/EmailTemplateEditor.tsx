@@ -5,16 +5,18 @@ import Link from "@tiptap/extension-link";
 import Underline from "@tiptap/extension-underline";
 import TextAlign from "@tiptap/extension-text-align";
 import TextStyle from "@tiptap/extension-text-style";
-import Table from "@tiptap/extension-table";
 import TableRow from "@tiptap/extension-table-row";
-import TableHeader from "@tiptap/extension-table-header";
-import TableCell from "@tiptap/extension-table-cell";
 import { Bold, Italic, Link2, Table2, Underline as UnderlineIcon } from "lucide-react";
 import { deriveTextFromEmailHtml } from "@/lib/richEmail";
 import { FontFamily } from "@/components/molecules/tiptap/FontFamily";
 import { FontSize } from "@/components/molecules/tiptap/FontSize";
 import { LineHeight } from "@/components/molecules/tiptap/LineHeight";
 import { FirstLineIndent } from "@/components/molecules/tiptap/FirstLineIndent";
+import {
+  EmailTable,
+  EmailTableCell,
+  EmailTableHeader,
+} from "@/components/molecules/tiptap/EmailTable";
 import {
   EMAIL_FIRST_LINE_INDENT_OPTIONS,
   EMAIL_FONT_OPTIONS,
@@ -45,10 +47,10 @@ export const EmailTemplateEditor = ({
       Underline,
       TextStyle,
       TextAlign.configure({ types: ["paragraph"] }),
-      Table.configure({ resizable: true }),
+      EmailTable.configure({ resizable: true }),
       TableRow,
-      TableHeader,
-      TableCell,
+      EmailTableHeader,
+      EmailTableCell,
       FontFamily,
       FontSize,
       LineHeight,
@@ -75,7 +77,7 @@ export const EmailTemplateEditor = ({
 
   useEffect(() => {
     if (editor && html !== editor.getHTML()) {
-      editor.commands.setContent(html, { emitUpdate: false });
+      editor.commands.setContent(html, false);
     }
   }, [editor, html]);
 
