@@ -1,69 +1,76 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TestComposePage } from "@/pages/TestComposePage";
 
 const mockedUseSelectionContext = vi.hoisted(() => vi.fn());
 const mockedGetTestComposeThread = vi.hoisted(() => vi.fn());
+const mockedSaveTestComposeDraft = vi.hoisted(() => vi.fn());
+const mockedNotificationApi = vi.hoisted(() => ({
+  notifyError: vi.fn(),
+  notifyFormErrors: vi.fn(),
+  notifySuccess: vi.fn(),
+}));
 
 vi.mock("@/context/SelectionContext", () => ({
   useSelectionContext: mockedUseSelectionContext,
 }));
 
 vi.mock("@/context/NotificationContext", () => ({
-  useNotification: () => ({
-    notifyError: vi.fn(),
-    notifyFormErrors: vi.fn(),
-    notifySuccess: vi.fn(),
-  }),
+  useNotification: () => mockedNotificationApi,
 }));
 
 vi.mock("@/lib/api/testComposeApi", () => ({
   getTestComposeThread: mockedGetTestComposeThread,
   generateTestComposeDraft: vi.fn(),
-  saveTestComposeDraft: vi.fn(),
+  saveTestComposeDraft: mockedSaveTestComposeDraft,
   sendTestComposeMessage: vi.fn(),
 }));
 
 describe("TestComposePage", () => {
+  const thread = {
+    identity: {
+      id: 1,
+      name: "测试身份",
+      email_address: "sender@example.com",
+    },
+    llm_profile: {
+      id: 1,
+      name: "测试模型",
+      provider: "openai",
+      model_name: "gpt-test",
+    },
+    material_options: [],
+    draft: {
+      subject: "测试主题",
+      body_text: "测试正文",
+      body_html: "<p>测试正文</p>",
+      selected_material_ids: [],
+    },
+    history: [
+      {
+        id: 1,
+        recipient_email: "sender@example.com",
+        subject: "测试主题",
+        content: "测试正文",
+        content_html: "<p>测试正文</p>",
+        status: "sent",
+        rfc_message_id: "<self-test@example.com>",
+        failure_summary: null,
+        created_at: "2026-04-23T08:00:00Z",
+      },
+    ],
+  };
+
   beforeEach(() => {
+    mockedGetTestComposeThread.mockReset();
+    mockedSaveTestComposeDraft.mockReset();
     mockedUseSelectionContext.mockReturnValue({
       selectedIdentityId: 1,
       selectedLlmProfileId: 1,
     });
-    mockedGetTestComposeThread.mockResolvedValue({
-      identity: {
-        id: 1,
-        name: "测试身份",
-        email_address: "sender@example.com",
-      },
-      llm_profile: {
-        id: 1,
-        name: "测试模型",
-        provider: "openai",
-        model_name: "gpt-test",
-      },
-      material_options: [],
-      draft: {
-        subject: "测试主题",
-        body_text: "测试正文",
-        body_html: "<p>测试正文</p>",
-        selected_material_ids: [],
-      },
-      history: [
-        {
-          id: 1,
-          recipient_email: "sender@example.com",
-          subject: "测试主题",
-          content: "测试正文",
-          content_html: "<p>测试正文</p>",
-          status: "sent",
-          rfc_message_id: "<self-test@example.com>",
-          failure_summary: null,
-          created_at: "2026-04-23T08:00:00Z",
-        },
-      ],
-    });
+    mockedGetTestComposeThread.mockResolvedValue(thread);
+    mockedSaveTestComposeDraft.mockResolvedValue(thread);
   });
 
   it("loads the draft and send history for the current identity and llm", async () => {
@@ -74,8 +81,31 @@ describe("TestComposePage", () => {
     );
 
     expect(await screen.findByDisplayValue("测试主题")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("测试正文")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "邮件正文" })).toHaveTextContent("测试正文");
+    expect(screen.queryByDisplayValue("测试正文")).not.toBeInTheDocument();
     expect(screen.getByText("sender@example.com")).toBeInTheDocument();
     expect(screen.getByText("模型：测试模型")).toBeInTheDocument();
+  });
+
+  it("saves rich text draft html and derived text", async () => {
+    render(
+      <MemoryRouter>
+        <TestComposePage />
+      </MemoryRouter>,
+    );
+
+    const editor = await screen.findByRole("textbox", { name: "邮件正文" });
+    editor.innerHTML = "<p>更新后的正文</p>";
+    fireEvent.input(editor);
+    fireEvent.click(await screen.findByRole("button", { name: "保存草稿" }));
+
+    await waitFor(() => {
+      expect(mockedSaveTestComposeDraft).toHaveBeenCalledWith(1, 1, {
+        subject: "测试主题",
+        body_text: "更新后的正文",
+        body_html: "<p>更新后的正文</p>",
+        selected_material_ids: [],
+      });
+    });
   });
 });

@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, RefreshCcw, Send } from "lucide-react";
 import { useNotification } from "@/context/NotificationContext";
 import { useSelectionContext } from "@/context/SelectionContext";
+import { RichEmailEditor } from "@/components/molecules/RichEmailEditor";
 import {
   generateTestComposeDraft,
   getTestComposeThread,
   saveTestComposeDraft,
   sendTestComposeMessage,
 } from "@/lib/api/testComposeApi";
+import { textToEmailHtml } from "@/lib/richEmail";
 import { MATERIAL_TYPE_LABELS, type TestComposeThreadDTO } from "@/types";
 
 export const TestComposePage = () => {
@@ -16,6 +18,7 @@ export const TestComposePage = () => {
   const [thread, setThread] = useState<TestComposeThreadDTO | null>(null);
   const [subject, setSubject] = useState("");
   const [bodyText, setBodyText] = useState("");
+  const [bodyHtml, setBodyHtml] = useState("");
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
   const [acting, setActing] = useState(false);
@@ -24,6 +27,7 @@ export const TestComposePage = () => {
     setThread(nextThread);
     setSubject(nextThread.draft.subject ?? "");
     setBodyText(nextThread.draft.body_text);
+    setBodyHtml(nextThread.draft.body_html || textToEmailHtml(nextThread.draft.body_text));
     setSelectedMaterialIds(nextThread.draft.selected_material_ids);
   }, []);
 
@@ -128,7 +132,7 @@ export const TestComposePage = () => {
                         sendTestComposeMessage(selectedIdentityId, selectedLlmProfileId, {
                           subject: subject.trim() || null,
                           body_text: bodyText,
-                          body_html: thread.draft.body_html,
+                          body_html: bodyHtml,
                           selected_material_ids: selectedMaterialIds,
                         }),
                       "测试邮件已发送",
@@ -152,14 +156,14 @@ export const TestComposePage = () => {
                   className="form-input"
                 />
               </label>
-              <label className="block">
-                <div className="mb-2 text-sm font-medium text-stone-800">邮件正文</div>
-                <textarea
-                  value={bodyText}
-                  onChange={(event) => setBodyText(event.target.value)}
-                  className="min-h-[320px] w-full rounded-[28px] border border-stone-200 bg-white px-4 py-4 text-sm leading-7 text-stone-700 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
-                />
-              </label>
+              <RichEmailEditor
+                label="邮件正文"
+                html={bodyHtml}
+                onChange={({ html, text }) => {
+                  setBodyHtml(html);
+                  setBodyText(text);
+                }}
+              />
               <button
                 type="button"
                 onClick={() =>
@@ -168,7 +172,7 @@ export const TestComposePage = () => {
                       saveTestComposeDraft(selectedIdentityId, selectedLlmProfileId, {
                         subject: subject.trim() || null,
                         body_text: bodyText,
-                        body_html: thread.draft.body_html,
+                        body_html: bodyHtml,
                         selected_material_ids: selectedMaterialIds,
                       }),
                     "已保存测试草稿",
