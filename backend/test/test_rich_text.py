@@ -1,0 +1,72 @@
+import unittest
+
+from app.services.rich_text import render_rich_text_document
+
+
+class RichTextRenderingTest(unittest.TestCase):
+    def test_renders_rich_text_json_to_safe_html_and_text(self) -> None:
+        result = render_rich_text_document(
+            {
+                "type": "doc",
+                "blocks": [
+                    {
+                        "type": "paragraph",
+                        "children": [
+                            {"type": "text", "text": "王老师您好，"},
+                            {
+                                "type": "strong",
+                                "children": [
+                                    {"type": "text", "text": "我很关注您的研究"}
+                                ],
+                            },
+                        ],
+                    },
+                    {
+                        "type": "bullet_list",
+                        "items": [
+                            [{"type": "text", "text": "信息抽取方向"}],
+                            [
+                                {
+                                    "type": "emphasis",
+                                    "children": [
+                                        {"type": "text", "text": "医学 NLP 应用"}
+                                    ],
+                                }
+                            ],
+                        ],
+                    },
+                ],
+            }
+        )
+
+        self.assertIn(
+            "<p>王老师您好，<strong>我很关注您的研究</strong></p>",
+            result.html,
+        )
+        self.assertIn("<ul>", result.html)
+        self.assertEqual(
+            result.text,
+            "王老师您好，我很关注您的研究\n- 信息抽取方向\n- 医学 NLP 应用",
+        )
+
+    def test_rejects_unsafe_link_protocol(self) -> None:
+        with self.assertRaisesRegex(ValueError, "不支持的链接协议"):
+            render_rich_text_document(
+                {
+                    "type": "doc",
+                    "blocks": [
+                        {
+                            "type": "paragraph",
+                            "children": [
+                                {
+                                    "type": "link",
+                                    "href": "javascript:alert(1)",
+                                    "children": [
+                                        {"type": "text", "text": "危险链接"}
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            )
