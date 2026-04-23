@@ -16,6 +16,11 @@ from app.core.config import get_settings
 from app.models import IdentityMaterial, IdentityProfile, LLMProfile, Professor
 from app.services.html_text import html_to_text
 from app.services.mail_runtime import text_to_html
+from app.services.rich_text import (
+    normalize_email_html,
+    render_rich_text_document,
+    text_to_email_html,
+)
 
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
@@ -31,8 +36,7 @@ SYSTEM_MATCH_AND_DRAFT_PROMPT = dedent(
     - risk_points: 字符串数组
     - keywords: 字符串数组
     - subject: 邮件主题
-    - body_text: 纯文本正文
-    - body_html: HTML 正文
+    - rich_body: 受控富文本 JSON 正文
     - suggested_material_ids: 整数数组，只能从输入给出的可选材料 ID 中选择
 
     输出示例：
@@ -43,15 +47,29 @@ SYSTEM_MATCH_AND_DRAFT_PROMPT = dedent(
       "risk_points": ["暂未体现具体合作问题"],
       "keywords": ["信息抽取", "大模型"],
       "subject": "申请与王老师交流科研方向",
-      "body_text": "王老师，您好：\\n\\n我是张三，正在关注您在信息抽取方向上的研究……",
-      "body_html": "<p>王老师，您好：</p><p>我是张三，正在关注您在信息抽取方向上的研究……</p>",
+      "rich_body": {
+        "type": "doc",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "children": [{"type": "text", "text": "王老师，您好："}]
+          },
+          {
+            "type": "paragraph",
+            "children": [{"type": "text", "text": "我是张三，正在关注您在信息抽取方向上的研究……"}]
+          }
+        ]
+      },
       "suggested_material_ids": [12]
     }
 
     额外要求：
     - 只能输出一个 JSON 对象。
     - 不要省略字段。
-    - body_html 必须是合法 HTML，且要和 body_text 语义一致。
+    - rich_body 根节点必须是 {"type":"doc","blocks":[...]}。
+    - blocks 只允许 paragraph、bullet_list、numbered_list。
+    - 内联节点只允许 text、strong、emphasis、link、line_break。
+    - link 的 href 只能使用 http、https、mailto。
     - fit_points、risk_points、keywords 即使为空也要输出数组。
     """
 ).strip()
@@ -92,15 +110,25 @@ SYSTEM_DRAFT_PROMPT = dedent(
 
     JSON 字段必须包含：
     - subject: 邮件主题
-    - body_text: 纯文本正文
-    - body_html: HTML 正文
+    - rich_body: 受控富文本 JSON 正文
     - suggested_material_ids: 整数数组，只能从输入给出的可选材料 ID 中选择
 
     输出示例：
     {
       "subject": "申请与李老师交流科研方向",
-      "body_text": "李老师，您好：\\n\\n我是张三，正在关注您在……",
-      "body_html": "<p>李老师，您好：</p><p>我是张三，正在关注您在……</p>",
+      "rich_body": {
+        "type": "doc",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "children": [{"type": "text", "text": "李老师，您好："}]
+          },
+          {
+            "type": "paragraph",
+            "children": [{"type": "text", "text": "我是张三，正在关注您在……"}]
+          }
+        ]
+      },
       "suggested_material_ids": [8, 12]
     }
 
@@ -108,7 +136,10 @@ SYSTEM_DRAFT_PROMPT = dedent(
     - 只能输出一个 JSON 对象。
     - 必须保留模板的整体结构、段落顺序和主要话术风格。
     - 只允许改动：称呼、匹配理由、个性化一段、结尾、主题。
-    - body_html 必须是合法 HTML，且要和 body_text 语义一致。
+    - rich_body 根节点必须是 {"type":"doc","blocks":[...]}。
+    - blocks 只允许 paragraph、bullet_list、numbered_list。
+    - 内联节点只允许 text、strong、emphasis、link、line_break。
+    - link 的 href 只能使用 http、https、mailto。
     - 如果没有合适材料，suggested_material_ids 返回 []。
     """
 ).strip()
@@ -165,8 +196,9 @@ class MatchAndDraftResult(BaseModel):
     risk_points: list[str] = Field(default_factory=list)
     keywords: list[str] = Field(default_factory=list)
     subject: str
-    body_text: str
-    body_html: str
+    body_text: str | None = None
+    body_html: str | None = None
+    rich_body: dict[str, object] | None = None
     suggested_material_ids: list[int] = Field(default_factory=list)
 
 
@@ -180,8 +212,9 @@ class MatchEvaluationResult(BaseModel):
 
 class DraftGenerationResult(BaseModel):
     subject: str
-    body_text: str
-    body_html: str
+    body_text: str | None = None
+    body_html: str | None = None
+    rich_body: dict[str, object] | None = None
     suggested_material_ids: list[int] = Field(default_factory=list)
 
 
@@ -843,7 +876,7 @@ def build_draft_prompt(
         3. 不得改写整体结构、段落顺序和主要话术风格。
         4. 只生成邮件草稿，不要输出 match_score 等匹配字段。
         5. 用中文生成专业、克制、具体的套磁邮件。
-        6. body_html 必须是可直接发送的 HTML，且与 body_text 语义一致。
+        6. rich_body 必须是可渲染为邮件正文的受控富文本 JSON。
         7. suggested_material_ids 只能返回可选材料里存在的 id。
         """,
         current_match=current_match,
@@ -870,7 +903,7 @@ def build_match_and_draft_prompt(
         任务要求：
         1. 先根据默认材料和导师方向判断匹配度。
         2. 用中文生成专业、克制、具体的套磁邮件。
-        3. body_html 必须是可直接发送的 HTML，且与 body_text 语义一致。
+        3. rich_body 必须是可渲染为邮件正文的受控富文本 JSON。
         4. suggested_material_ids 只能返回可选材料里存在的 id。
         """,
         current_match=None,
@@ -1111,6 +1144,7 @@ def _normalize_match_and_draft_result(result: MatchAndDraftResult) -> MatchAndDr
             subject=result.subject,
             body_text=result.body_text,
             body_html=result.body_html,
+            rich_body=result.rich_body,
             suggested_material_ids=result.suggested_material_ids,
         ),
     )
@@ -1122,6 +1156,7 @@ def _normalize_match_and_draft_result(result: MatchAndDraftResult) -> MatchAndDr
     result.subject = normalized_draft.subject
     result.body_text = normalized_draft.body_text
     result.body_html = normalized_draft.body_html
+    result.rich_body = normalized_draft.rich_body
     result.suggested_material_ids = normalized_draft.suggested_material_ids
     return result
 
@@ -1136,8 +1171,16 @@ def _normalize_match_evaluation_result(result: MatchEvaluationResult) -> MatchEv
 
 def _normalize_draft_generation_result(result: DraftGenerationResult) -> DraftGenerationResult:
     result.subject = _normalize_text_field(result.subject, "subject")
-    result.body_text = _normalize_text_field(result.body_text, "body_text")
-    result.body_html = _normalize_html_field(result.body_html, result.body_text)
+    if result.rich_body is not None:
+        rendered = render_rich_text_document(result.rich_body)
+    elif result.body_html:
+        rendered = normalize_email_html(result.body_html)
+    elif result.body_text:
+        rendered = text_to_email_html(result.body_text)
+    else:
+        raise LLMRuntimeError("模型返回的富文本正文为空")
+    result.body_text = rendered.text
+    result.body_html = rendered.html
     result.suggested_material_ids = _normalize_integer_list(result.suggested_material_ids)
     return result
 
