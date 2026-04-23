@@ -105,7 +105,6 @@ export const WorkspaceComposerDock = ({
   nextStepTitle,
   nextStepDescription,
   subject,
-  content,
   contentHtml,
   selectedMaterialIds,
   scheduledAt,
