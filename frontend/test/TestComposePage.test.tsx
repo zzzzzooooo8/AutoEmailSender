@@ -82,7 +82,7 @@ describe("TestComposePage", () => {
 
     expect(await screen.findByDisplayValue("测试主题")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "邮件正文" })).toHaveTextContent("测试正文");
-    expect(screen.queryByDisplayValue("测试正文")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "插入表格" })).toBeInTheDocument();
     expect(screen.getByText("sender@example.com")).toBeInTheDocument();
     expect(screen.getByText("模型：测试模型")).toBeInTheDocument();
   });

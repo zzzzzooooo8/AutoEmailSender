@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, RefreshCcw, Send } from "lucide-react";
 import { useNotification } from "@/context/NotificationContext";
 import { useSelectionContext } from "@/context/SelectionContext";
-import { RichEmailEditor } from "@/components/molecules/RichEmailEditor";
+import { EmailTemplateEditor } from "@/components/molecules/EmailTemplateEditor";
 import {
   generateTestComposeDraft,
   getTestComposeThread,
@@ -156,7 +156,7 @@ export const TestComposePage = () => {
                   className="form-input"
                 />
               </label>
-              <RichEmailEditor
+              <EmailTemplateEditor
                 label="邮件正文"
                 html={bodyHtml}
                 onChange={({ html, text }) => {
