@@ -16,7 +16,6 @@ from app.models import (
     EmailTaskStatus,
     IdentityMaterial,
     IdentityProfile,
-    MailDeliveryMode,
     Professor,
 )
 from app.schemas.email_task import EmailTaskApprovalRequest, EmailTaskScheduleRequest
@@ -33,7 +32,6 @@ from app.services.outreach_templates import (
     render_outreach_template,
     resolve_outreach_template_config,
 )
-from app.services.system_settings import get_or_create_app_settings
 
 
 TASK_RELATION_OPTIONS = (
@@ -353,7 +351,6 @@ async def update_task_primary_material(
         task.approved_body_html = None
         task.approved_at = None
         task.scheduled_at = None
-        task.delivery_mode = None
         task.last_error = None
         task.updated_at = datetime.now(UTC)
         await session.commit()
@@ -402,7 +399,6 @@ async def update_task_outreach_config(
         task.approved_body_html = None
         task.approved_at = None
         task.scheduled_at = None
-        task.delivery_mode = None
         task.last_error = None
         task.updated_at = datetime.now(UTC)
         await session.commit()
@@ -491,29 +487,16 @@ async def dispatch_email_task(
         task.retry_count = (task.retry_count or 0) + 1
 
         try:
-            if task.delivery_mode == MailDeliveryMode.LIVE.value:
-                result = await mail_runtime.send_email(
-                    identity=task.identity,
-                    professor=task.professor,
-                    subject=subject,
-                    body_text=body_text,
-                    body_html=body_html,
-                    attachments=attachments,
-                )
-                rfc_message_id = result.message_id
-                provider_payload = result.provider_payload
-            else:
-                rfc_message_id = None
-                provider_payload = {
-                    "mode": MailDeliveryMode.DRY_RUN.value,
-                    "attachments": [
-                        {
-                            "file_path": attachment.file_path,
-                            "download_name": attachment.download_name,
-                        }
-                        for attachment in attachments
-                    ],
-                }
+            result = await mail_runtime.send_email(
+                identity=task.identity,
+                professor=task.professor,
+                subject=subject,
+                body_text=body_text,
+                body_html=body_html,
+                attachments=attachments,
+            )
+            rfc_message_id = result.message_id
+            provider_payload = result.provider_payload
 
             task.status = EmailTaskStatus.SENT.value
             task.sent_at = datetime.now(UTC)
@@ -527,7 +510,6 @@ async def dispatch_email_task(
                     llm_profile_id=task.llm_profile_id,
                     professor_id=task.professor_id,
                     direction=EmailDirection.SENT.value,
-                    delivery_mode=task.delivery_mode,
                     subject=subject,
                     content=body_text,
                     content_html=body_html,
@@ -546,7 +528,6 @@ async def dispatch_email_task(
                     llm_profile_id=task.llm_profile_id,
                     professor_id=task.professor_id,
                     direction=EmailDirection.SENT.value,
-                    delivery_mode=task.delivery_mode,
                     subject=subject,
                     content=body_text,
                     content_html=body_html,
@@ -592,7 +573,6 @@ async def poll_identity_replies(
                     llm_profile_id=task.llm_profile_id,
                     professor_id=task.professor_id,
                     direction=EmailDirection.RECEIVED.value,
-                    delivery_mode=MailDeliveryMode.LIVE.value,
                     subject=message.subject,
                     content=message.content,
                     content_html=message.content_html,
@@ -610,10 +590,8 @@ async def _snapshot_approval(
     task: EmailTask,
     payload: EmailTaskApprovalRequest,
 ) -> None:
-    app_settings = await get_or_create_app_settings(session)
     await _validate_selected_material_ids(session, task.identity_id, payload.selected_material_ids)
 
-    task.delivery_mode = app_settings.mail_delivery_mode
     task.approved_subject = (payload.subject or task.generated_subject or "").strip()
     task.approved_body_text = payload.body_text.strip()
     task.approved_body_html = (payload.body_html or mail_runtime.text_to_html(payload.body_text)).strip()
@@ -704,7 +682,6 @@ async def _find_reply_target(
             .where(
                 EmailLog.identity_id == identity_id,
                 EmailLog.direction == EmailDirection.SENT.value,
-                EmailLog.delivery_mode == MailDeliveryMode.LIVE.value,
                 EmailLog.rfc_message_id.in_(reference_ids),
             )
             .order_by(EmailLog.created_at.desc()),
@@ -723,7 +700,6 @@ async def _find_reply_target(
                 .join(Professor, EmailTask.professor_id == Professor.id)
                 .where(
                     EmailTask.identity_id == identity_id,
-                    EmailTask.delivery_mode == MailDeliveryMode.LIVE.value,
                     Professor.email == message.from_email,
                     EmailTask.status.in_(
                         [

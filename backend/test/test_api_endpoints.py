@@ -934,22 +934,32 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(switched_workspace.json()["current_task"]["primary_material_id"], publication_material_id)
         self.assertEqual(switched_workspace.json()["current_task"]["status"], "review_required")
 
-        workspace_after = self.client.post(
-            f"/api/email-tasks/{task_id}/approve-and-send",
-            json={
-                "subject": "科研交流申请",
-                "body_text": "老师您好，我希望进一步交流。",
-                "body_html": None,
-                "selected_material_ids": [],
-            },
-        )
+        with patch(
+            "app.services.task_runtime.mail_runtime.send_email",
+            AsyncMock(
+                return_value=self._build_send_result(
+                    message_id="<manual-send@example.com>",
+                    provider_payload={"smtp_host": "smtp.example.com"},
+                ),
+            ),
+        ) as mocked_send:
+            workspace_after = self.client.post(
+                f"/api/email-tasks/{task_id}/approve-and-send",
+                json={
+                    "subject": "科研交流申请",
+                    "body_text": "老师您好，我希望进一步交流。",
+                    "body_html": None,
+                    "selected_material_ids": [],
+                },
+            )
         payload = workspace_after.json()
         self.assertEqual(workspace_after.status_code, 200)
         self.assertEqual(payload["current_task"]["status"], "sent")
-        self.assertEqual(payload["current_task"]["delivery_mode"], "dry_run")
+        self.assertNotIn("delivery_mode", payload["current_task"])
         self.assertEqual(payload["current_task"]["selected_material_ids"], [])
         self.assertGreaterEqual(len(payload["messages"]), 2)
         self.assertEqual(payload["messages"][-1]["direction"], "sent")
+        mocked_send.assert_awaited_once()
 
     def test_batch_task_without_default_material_can_still_send_manually(self) -> None:
         identity_id = self._create_identity(with_imap=False)
@@ -989,15 +999,24 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(regenerate_response.status_code, 400)
         self.assertEqual(regenerate_response.json()["detail"], "请先选择用于匹配的默认材料")
 
-        send_response = self.client.post(
-            f"/api/email-tasks/{task_id}/approve-and-send",
-            json={
-                "subject": "手动邮件",
-                "body_text": "老师您好，这是一封手动编写的邮件。",
-                "body_html": None,
-                "selected_material_ids": [],
-            },
-        )
+        with patch(
+            "app.services.task_runtime.mail_runtime.send_email",
+            AsyncMock(
+                return_value=self._build_send_result(
+                    message_id="<manual-no-primary@example.com>",
+                    provider_payload={"smtp_host": "smtp.example.com"},
+                ),
+            ),
+        ):
+            send_response = self.client.post(
+                f"/api/email-tasks/{task_id}/approve-and-send",
+                json={
+                    "subject": "手动邮件",
+                    "body_text": "老师您好，这是一封手动编写的邮件。",
+                    "body_html": None,
+                    "selected_material_ids": [],
+                },
+            )
         self.assertEqual(send_response.status_code, 200)
         self.assertEqual(send_response.json()["current_task"]["status"], "sent")
 
@@ -1112,7 +1131,7 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(generate_response.json()["detail"], "请先填写默认套磁信主题和纯文本正文")
         mocked_generate.assert_not_awaited()
 
-    def test_global_mode_snapshot_schedule_and_reply_detection(self) -> None:
+    def test_schedule_and_reply_detection_use_sent_message_id(self) -> None:
         identity_id = self._create_identity(with_imap=True)
         llm_id = self._create_llm()
         self.client.post("/api/professors/import-sample")
@@ -1141,8 +1160,6 @@ class ApiEndpointTests(unittest.TestCase):
         ).json()
         task_id = workspace["current_task"]["id"]
 
-        self.client.patch("/api/system-settings", json={"mail_delivery_mode": "live"})
-
         schedule_time = datetime.now(UTC) + timedelta(hours=1)
         with patch(
             "app.services.task_runtime.mail_runtime.send_email",
@@ -1164,9 +1181,7 @@ class ApiEndpointTests(unittest.TestCase):
                 },
             )
             self.assertEqual(schedule_response.status_code, 200)
-            self.assertEqual(schedule_response.json()["current_task"]["delivery_mode"], "live")
 
-            self.client.patch("/api/system-settings", json={"mail_delivery_mode": "dry_run"})
             self._run_async(self._force_task_due(task_id))
             self._run_async(self._dispatch_due_tasks())
 
@@ -1175,7 +1190,6 @@ class ApiEndpointTests(unittest.TestCase):
             params={"identity_id": identity_id, "llm_profile_id": llm_id},
         ).json()
         self.assertEqual(sent_workspace["current_task"]["status"], "sent")
-        self.assertEqual(sent_workspace["current_task"]["delivery_mode"], "live")
         self.assertEqual(sent_workspace["current_task"]["last_rfc_message_id"], "<msg-1@example.com>")
 
         with patch(
@@ -1201,6 +1215,39 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(replied_workspace["current_task"]["status"], "reply_detected")
         self.assertTrue(replied_workspace["current_task"]["is_replied"])
         self.assertEqual(replied_workspace["messages"][-1]["direction"], "received")
+
+    def test_batch_task_card_hides_delivery_mode_snapshot(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        self.client.post("/api/professors/import-sample")
+        professor_id = self.client.get("/api/professors").json()[0]["id"]
+
+        create_response = self.client.post(
+            "/api/batch-tasks",
+            json={
+                "identity_id": identity_id,
+                "llm_profile_id": llm_id,
+                "name": "批量列表不再显示模式",
+                "professor_ids": [professor_id],
+                "schedule_type": "immediate",
+                "window_start_time": None,
+                "window_end_time": None,
+                "emails_per_window": None,
+                "primary_material_id": None,
+                "email_subject": "申请与{{name}}老师交流",
+                "email_body": "老师您好，我是{{sender_name}}。",
+                "selected_material_ids": None,
+            },
+        )
+
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+
+        task_payload = self.client.get(
+            "/api/batch-tasks",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        ).json()[0]
+        self.assertNotIn("dry_run_count", task_payload)
+        self.assertNotIn("live_count", task_payload)
 
     def test_batch_task_outreach_snapshot_is_independent_from_identity_defaults(self) -> None:
         identity_id = self._create_identity(with_imap=False)
