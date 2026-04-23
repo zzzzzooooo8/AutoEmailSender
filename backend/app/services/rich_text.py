@@ -19,8 +19,23 @@ ALLOWED_HTML_TAGS = {
     "p",
     "span",
     "strong",
+    "table",
+    "tbody",
+    "td",
+    "th",
+    "thead",
+    "tr",
     "u",
     "ul",
+}
+
+ALLOWED_NON_LINK_ATTRS = {
+    "align",
+    "cellpadding",
+    "cellspacing",
+    "colspan",
+    "rowspan",
+    "style",
 }
 
 
@@ -88,6 +103,11 @@ def sanitize_email_html(value: str) -> str:
             _validate_href(href)
             tag.attrs["href"] = href
             tag.attrs["target"] = "_blank"
+        else:
+            for attr_name in ALLOWED_NON_LINK_ATTRS:
+                attr_value = original_attrs.get(attr_name)
+                if attr_value is not None and str(attr_value).strip():
+                    tag.attrs[attr_name] = str(attr_value).strip()
 
     normalized = str(soup).strip()
     if not normalized:

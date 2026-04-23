@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef } from "react";
 import { Bold, Italic, Link as LinkIcon, List, ListOrdered } from "lucide-react";
-import { deriveTextFromEmailHtml, normalizeEmailHtml } from "@/lib/richEmail";
+import { deriveTextFromEmailHtml } from "@/lib/richEmail";
 
 export type RichEmailValue = {
   html: string;
@@ -28,7 +28,7 @@ export const RichEmailEditor = ({
   }, [html]);
 
   const emitChange = () => {
-    const nextHtml = normalizeEmailHtml(editorRef.current?.innerHTML ?? "");
+    const nextHtml = (editorRef.current?.innerHTML ?? "").trim();
     onChange({
       html: nextHtml,
       text: deriveTextFromEmailHtml(nextHtml),

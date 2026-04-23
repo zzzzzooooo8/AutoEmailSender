@@ -134,11 +134,14 @@ describe("ProfilePage onboarding", () => {
       await screen.findByRole("heading", { name: "首次配置建议" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("建议顺序：先完成发件身份，再准备材料与模板，最后配置模型。"),
+      screen.getByText(
+        "建议顺序：先完成发件身份，再准备材料与模板，配置模型后，用测试写信确认整条发送链路。",
+      ),
     ).toBeInTheDocument();
     expect(screen.getByText("1. 发件身份")).toBeInTheDocument();
     expect(screen.getByText("2. 材料与模板")).toBeInTheDocument();
     expect(screen.getByText("3. 模型配置")).toBeInTheDocument();
+    expect(screen.getByText("4. 测试写信")).toBeInTheDocument();
     expect(
       screen.getByText(
         "完成这部分后，下一步去「导师管理」导入第一批导师，再回首页开始创建任务。",
@@ -146,7 +149,7 @@ describe("ProfilePage onboarding", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders the three setup sections before the final save section", () => {
+  it("renders the three setup sections before the final save and test section", () => {
     renderPage();
 
     const identitySection = screen.getByRole("heading", { name: "发件身份" });
@@ -154,7 +157,7 @@ describe("ProfilePage onboarding", () => {
       name: "材料与模板",
     });
     const modelSection = screen.getByRole("heading", { name: "模型配置" });
-    const finishSection = screen.getByRole("heading", { name: "保存与下一步" });
+    const finishSection = screen.getByRole("heading", { name: "保存与测试写信" });
 
     expectToAppearBefore(identitySection, materialsSection);
     expectToAppearBefore(materialsSection, modelSection);
@@ -190,29 +193,21 @@ describe("ProfilePage onboarding", () => {
     ).toBeInTheDocument();
   });
 
-  it("uses the tiptap email editor for the default template body", async () => {
-    renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "打开默认值编辑" }));
-
-    expect(
-      await screen.findByRole("heading", { name: "默认发信模式与默认模板" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "加粗" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "插入表格" })).toBeInTheDocument();
-    expect(screen.queryByText("默认模板正文（纯文本）")).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("默认模板正文（HTML，可保留格式）"),
-    ).not.toBeInTheDocument();
-  });
-
-  it("shows a test compose entry after the final save section", () => {
+  it("shows the test compose entry inside the final save section", () => {
     renderPage();
 
-    const finishSection = screen.getByRole("heading", { name: "保存与下一步" });
-    const testComposeSection = screen.getByRole("heading", { name: "测试写信" });
+    const finishSection = screen.getByRole("heading", { name: "保存与测试写信" });
     const entryLink = screen.getByRole("link", { name: "进入测试写信页" });
 
-    expectToAppearBefore(finishSection, testComposeSection);
+    expect(screen.getByText("保存配置")).toBeInTheDocument();
+    expect(screen.getByText("发送测试邮件")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "第四步给自己发一封测试邮件，确认模板、附件、模型生成和 SMTP 发送都正常。",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("第四步：测试写信")).not.toBeInTheDocument();
+    expectToAppearBefore(finishSection, entryLink);
     expect(entryLink).toHaveAttribute("href", "/test-compose");
   });
 });

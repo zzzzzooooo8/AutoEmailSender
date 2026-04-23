@@ -11,11 +11,26 @@ const ALLOWED_TAGS = [
   "p",
   "span",
   "strong",
+  "table",
+  "tbody",
+  "td",
+  "th",
+  "thead",
+  "tr",
   "u",
   "ul",
 ];
 
-const ALLOWED_ATTR = ["href", "target"];
+const ALLOWED_ATTR = [
+  "align",
+  "cellpadding",
+  "cellspacing",
+  "colspan",
+  "href",
+  "rowspan",
+  "style",
+  "target",
+];
 
 export const normalizeEmailHtml = (value: string): string =>
   DOMPurify.sanitize(value.trim(), {
@@ -27,7 +42,7 @@ export const normalizeEmailHtml = (value: string): string =>
 
 export const deriveTextFromEmailHtml = (value: string): string => {
   const container = document.createElement("div");
-  container.innerHTML = normalizeEmailHtml(value);
+  container.innerHTML = value.trim();
   const lines: string[] = [];
 
   container.querySelectorAll("p, li").forEach((element) => {

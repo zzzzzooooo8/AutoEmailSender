@@ -1,6 +1,6 @@
 import unittest
 
-from app.services.rich_text import render_rich_text_document
+from app.services.rich_text import normalize_email_html, render_rich_text_document
 
 
 class RichTextRenderingTest(unittest.TestCase):
@@ -70,3 +70,19 @@ class RichTextRenderingTest(unittest.TestCase):
                     ],
                 }
             )
+
+    def test_preserves_table_and_font_styles_in_email_html(self) -> None:
+        result = normalize_email_html(
+            '<table style="font-family:SimSun;border-collapse:collapse"><tbody><tr><td style="font-family:SimSun">老师您好</td></tr></tbody></table>'
+        )
+
+        self.assertIn("<table", result.html)
+        self.assertIn("<tbody>", result.html)
+        self.assertIn("<tr>", result.html)
+        self.assertIn("<td", result.html)
+        self.assertIn(
+            'style="font-family:SimSun;border-collapse:collapse"',
+            result.html,
+        )
+        self.assertIn('style="font-family:SimSun"', result.html)
+        self.assertIn("老师您好", result.text)
