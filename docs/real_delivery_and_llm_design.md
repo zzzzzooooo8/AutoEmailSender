@@ -5,10 +5,10 @@
 
 ## 2. 核心设计决策
 ### 2.1 发送安全
-- 系统采用全局发送开关，而不是逐次选择。
-- 开关持久化在 `app_settings.mail_delivery_mode`。
-- 任务在批准时把当时的模式写入 `email_tasks.delivery_mode`。
-- dispatcher 只看任务快照，不看发送当刻的当前全局开关。
+- 导师工作区里的“批准并发送 / 批准并排程”始终是真实发送。
+- 风险通过动作前确认表达，不再要求用户先理解全局模式。
+- 个人页底部提供独立的测试写信页，测试邮件固定发给当前身份自己的邮箱。
+- 测试写信与正式导师任务流分离保存。
 
 ### 2.2 真实 LLM
 - 统一走 OpenAI 兼容 `chat/completions`。
@@ -25,12 +25,12 @@
 - 后端必须做 JSON 解析和结构校验，拒绝把不合法输出直接落库。
 
 ### 2.3 真实发信
-- `dry_run` 不出网，只写 `email_logs(sent)`。
-- `live` 走真实 SMTP，构造 `text/plain + text/html + attachments` 邮件。
+- 导师发送统一走真实 SMTP，构造 `text/plain + text/html + attachments` 邮件。
+- 测试写信页也走真实 SMTP，但收件人固定为当前身份自己的邮箱。
 - 发信成功后写入 `last_rfc_message_id`，供 IMAP 回信关联。
 
 ### 2.4 回信检测
-- 只处理 `delivery_mode=live` 且已发送的任务。
+- 只处理已经真实发出的导师任务。
 - 关联顺序：
   1. `In-Reply-To`
   2. `References`
@@ -44,14 +44,15 @@
 1. 发送 dispatcher
 - 读取 `EmailTask.status in (approved, scheduled)`
 - 立即发送或按 `scheduled_at` 发送
-- 按任务快照的 `delivery_mode` 执行
+- 统一按真实 SMTP 发送
 
 2. IMAP poller
 - 按身份轮询最近若干小时收件箱
 - 关联回信并写入 `email_logs(received)`
 
 ## 4. 前端交互原则
-- 顶部导航展示全局 `Dry Run / Live` 模式。
+- 顶部导航只展示身份与模型上下文，不再展示发送模式。
+- 个人页底部提供“进入测试写信页”入口。
 - 工作区是唯一的任务审批中心：
   - 手动选择用于匹配的默认材料
   - 看匹配原因
@@ -60,6 +61,11 @@
   - 批准并发送
   - 批准并排程
   - 取消排程
+- 测试写信页负责：
+  - 生成测试草稿
+  - 编辑主题 / 正文 / 附件
+  - 真实发送测试邮件给自己
+  - 查看测试发送历史
 - 任务页只做批次控制和状态观察，不承担逐封审批。
 
 ## 5. 失败处理

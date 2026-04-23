@@ -8,7 +8,6 @@
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `id` | INTEGER PK | 固定使用 `1` |
-| `mail_delivery_mode` | TEXT | `dry_run` / `live` |
 | `created_at` | DATETIME | 创建时间 |
 | `updated_at` | DATETIME | 最近更新时间 |
 
@@ -116,7 +115,6 @@ LLM 配置表。
 - `match_score` / `match_reason`
 - `generated_subject` / `generated_content_text` / `generated_content_html`
 - `selected_material_ids`
-- `delivery_mode`
 - `approved_subject` / `approved_body_text` / `approved_body_html`
 - `scheduled_at`
 - `last_send_attempt_at`
@@ -140,7 +138,6 @@ LLM 配置表。
 - `llm_profile_id`
 - `professor_id`
 - `direction`
-- `delivery_mode`
 - `subject`
 - `content`
 - `content_html`
@@ -152,11 +149,47 @@ LLM 配置表。
 
 说明：
 - `draft` 日志记录模型生成草稿
-- `sent` 日志记录 `dry_run` 或 `live` 发信动作
+- `sent` 日志记录真实发信动作
 - `received` 日志仅来自 IMAP 回复检测
 - 草稿日志的 `provider_payload.usage` 会记录 `prompt_tokens / completion_tokens / total_tokens`
 
-## 9. 导师导入与归档规则
+## 9. `test_compose_sessions`
+测试写信页的当前草稿会话。
+
+关键字段：
+- `identity_id`
+- `llm_profile_id`
+- `subject`
+- `body_text`
+- `body_html`
+- `selected_material_ids`
+- `created_at` / `updated_at`
+
+说明：
+- 每套“身份 + 模型”组合会维护一份测试写信草稿
+- 这套数据不进入导师任务流
+
+## 10. `test_compose_messages`
+测试写信页的发送历史。
+
+关键字段：
+- `session_id`
+- `identity_id`
+- `llm_profile_id`
+- `recipient_email`
+- `subject`
+- `content` / `content_html`
+- `status`
+- `rfc_message_id`
+- `provider_payload`
+- `failure_summary`
+- `created_at`
+
+说明：
+- 测试邮件固定发给当前身份自己的邮箱
+- 历史与 `email_logs` 分离保存，不污染导师通信记录
+
+## 11. 导师导入与归档规则
 - 模板字段固定为：
   - `name`
   - `email`
