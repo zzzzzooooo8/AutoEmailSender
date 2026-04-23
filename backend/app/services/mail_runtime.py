@@ -98,6 +98,39 @@ async def send_email(
     )
 
 
+async def send_email_to_recipient(
+    *,
+    identity: IdentityProfile,
+    recipient_name: str,
+    recipient_email: str,
+    subject: str,
+    body_text: str,
+    body_html: str | None,
+    attachments: list[MailAttachment],
+) -> SendMailResult:
+    recipient = Professor(
+        name=recipient_name or recipient_email,
+        email=recipient_email,
+    )
+    message = build_email_message(
+        identity=identity,
+        professor=recipient,
+        subject=subject,
+        body_text=body_text,
+        body_html=body_html,
+        attachments=attachments,
+    )
+    await asyncio.to_thread(_send_email_sync, identity, message)
+    return SendMailResult(
+        message_id=message["Message-ID"],
+        provider_payload={
+            "smtp_host": identity.smtp_host,
+            "smtp_port": identity.smtp_port,
+            "to": recipient_email,
+        },
+    )
+
+
 async def fetch_recent_inbox_messages(identity: IdentityProfile) -> list[ReceivedEmail]:
     if not identity.imap_host or not identity.imap_username or not identity.imap_password:
         return []

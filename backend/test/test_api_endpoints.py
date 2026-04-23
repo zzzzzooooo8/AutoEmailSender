@@ -1249,6 +1249,67 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertNotIn("dry_run_count", task_payload)
         self.assertNotIn("live_count", task_payload)
 
+    def test_test_compose_page_can_generate_and_send_to_self(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        material_id = self._upload_material(
+            identity_id,
+            filename="resume.txt",
+            content=b"My research focuses on information extraction and agents.",
+            material_type="resume",
+        )
+        set_primary_response = self.client.post(f"/api/materials/{material_id}/set-primary")
+        self.assertEqual(set_primary_response.status_code, 200, msg=set_primary_response.text)
+
+        with (
+            patch(
+                "app.services.test_compose_runtime.llm_runtime.generate_draft_content",
+                AsyncMock(
+                    return_value=self._build_draft_generation_result(
+                        subject="测试主题",
+                        body_text="测试正文",
+                        body_html="<p>测试正文</p>",
+                    ),
+                ),
+            ),
+            patch(
+                "app.services.test_compose_runtime.mail_runtime.send_email_to_recipient",
+                AsyncMock(
+                    return_value=self._build_send_result(
+                        message_id="<self-test@example.com>",
+                        provider_payload={"to": "sender@example.com"},
+                    ),
+                ),
+            ) as mocked_send,
+        ):
+            thread_response = self.client.get(f"/api/test-compose/{identity_id}/{llm_id}")
+            draft_response = self.client.post(f"/api/test-compose/{identity_id}/{llm_id}/generate-draft")
+            send_response = self.client.post(
+                f"/api/test-compose/{identity_id}/{llm_id}/send",
+                json={
+                    "subject": "测试主题",
+                    "body_text": "测试正文",
+                    "body_html": "<p>测试正文</p>",
+                    "selected_material_ids": [],
+                },
+            )
+
+        self.assertEqual(thread_response.status_code, 200, msg=thread_response.text)
+        self.assertEqual(draft_response.status_code, 200, msg=draft_response.text)
+        self.assertEqual(send_response.status_code, 200, msg=send_response.text)
+
+        thread_payload = thread_response.json()
+        draft_payload = draft_response.json()
+        send_payload = send_response.json()
+
+        self.assertEqual(thread_payload["draft"]["selected_material_ids"], [])
+        self.assertEqual(draft_payload["draft"]["subject"], "测试主题")
+        self.assertEqual(draft_payload["draft"]["body_text"], "测试正文")
+        self.assertEqual(send_payload["history"][0]["recipient_email"], "sender@example.com")
+        self.assertEqual(send_payload["history"][0]["status"], "sent")
+        self.assertEqual(send_payload["history"][0]["rfc_message_id"], "<self-test@example.com>")
+        mocked_send.assert_awaited_once()
+
     def test_batch_task_outreach_snapshot_is_independent_from_identity_defaults(self) -> None:
         identity_id = self._create_identity(with_imap=False)
         llm_id = self._create_llm()

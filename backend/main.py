@@ -13,6 +13,7 @@ from app.api import (
     llm_profiles_router,
     materials_router,
     professors_router,
+    test_compose_router,
     workspaces_router,
 )
 from app.core.config import get_settings
@@ -53,6 +54,7 @@ def create_app() -> FastAPI:
     app.include_router(materials_router)
     app.include_router(llm_profiles_router)
     app.include_router(professors_router)
+    app.include_router(test_compose_router)
     app.include_router(batch_tasks_router)
     app.include_router(email_tasks_router)
     app.include_router(workspaces_router)
