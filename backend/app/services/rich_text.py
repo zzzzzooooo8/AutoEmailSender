@@ -67,12 +67,16 @@ def text_to_email_html(value: str) -> RichTextRenderResult:
         raise ValueError("纯文本正文不能为空")
     paragraphs = [line.strip() for line in text.splitlines() if line.strip()]
     html = "".join(f"<p>{escape(paragraph)}</p>" for paragraph in paragraphs)
-    return RichTextRenderResult(html=html, text="\n".join(paragraphs))
+    return RichTextRenderResult(html=html, text=text)
 
 
 def sanitize_email_html(value: str) -> str:
     soup = BeautifulSoup(value.strip(), "html.parser")
     for tag in list(soup.find_all(True)):
+        if tag.name in {"script", "style"}:
+            tag.decompose()
+            continue
+
         if tag.name not in ALLOWED_HTML_TAGS:
             tag.unwrap()
             continue
@@ -104,7 +108,7 @@ def html_to_text(value: str) -> str:
             lines.append(text)
 
     if lines:
-        return "\n".join(lines).strip()
+        return "\n\n".join(lines).strip()
     return soup.get_text(" ", strip=True)
 
 

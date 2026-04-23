@@ -9,6 +9,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from app.services.outreach_templates import import_outreach_template_file
+
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 HEAD_REVISION = "9c3d5b4a7f21"
@@ -85,6 +87,15 @@ class DatabaseSchemaTests(unittest.TestCase):
         self.assertIn("reply_headers", log_columns)
         self.assertNotIn("mail_delivery_mode", settings_columns)
         self.assertNotIn("signature", identity_columns)
+
+    def test_html_template_import_derives_text_from_sanitized_html(self) -> None:
+        imported = import_outreach_template_file(
+            "template.html",
+            b'<p>Hello <strong>{{name}}</strong></p><script>alert(1)</script>',
+        )
+
+        self.assertEqual(imported.body_html, "<p>Hello <strong>{{name}}</strong></p>")
+        self.assertEqual(imported.body_text, "Hello {{name}}")
 
     def test_old_revision_can_upgrade_to_head(self) -> None:
         version = self.connection.execute(

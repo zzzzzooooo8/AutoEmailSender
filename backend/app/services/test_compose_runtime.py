@@ -33,6 +33,7 @@ from app.services.outreach_templates import (
     render_outreach_template,
     resolve_outreach_template_config,
 )
+from app.services.rich_text import normalize_email_html, text_to_email_html
 
 
 async def build_test_compose_thread(
@@ -120,11 +121,15 @@ async def send_test_compose_message(
     await _validate_selected_material_ids(session, identity_id, selected_material_ids)
 
     subject = (payload.subject or "").strip()
-    body_text = payload.body_text.strip()
+    if payload.body_html:
+        rendered = normalize_email_html(payload.body_html)
+    else:
+        rendered = text_to_email_html(payload.body_text)
+    body_text = rendered.text
+    body_html = rendered.html
     if not subject or not body_text:
         raise ValueError("测试邮件需要主题和正文")
 
-    body_html = (payload.body_html or mail_runtime.text_to_html(payload.body_text)).strip()
     compose_session.subject = subject
     compose_session.body_text = body_text
     compose_session.body_html = body_html
@@ -190,8 +195,12 @@ async def save_test_compose_draft(
     await _validate_selected_material_ids(session, identity_id, selected_material_ids)
 
     compose_session.subject = (payload.subject or "").strip() or None
-    compose_session.body_text = payload.body_text.strip()
-    compose_session.body_html = (payload.body_html or mail_runtime.text_to_html(payload.body_text)).strip()
+    if payload.body_html:
+        rendered = normalize_email_html(payload.body_html)
+    else:
+        rendered = text_to_email_html(payload.body_text)
+    compose_session.body_text = rendered.text
+    compose_session.body_html = rendered.html
     compose_session.selected_material_ids = selected_material_ids
     compose_session.updated_at = datetime.now(UTC)
     await session.commit()

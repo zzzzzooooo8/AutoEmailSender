@@ -32,6 +32,7 @@ from app.services.outreach_templates import (
     render_outreach_template,
     resolve_outreach_template_config,
 )
+from app.services.rich_text import normalize_email_html, text_to_email_html
 
 
 TASK_RELATION_OPTIONS = (
@@ -593,8 +594,12 @@ async def _snapshot_approval(
     await _validate_selected_material_ids(session, task.identity_id, payload.selected_material_ids)
 
     task.approved_subject = (payload.subject or task.generated_subject or "").strip()
-    task.approved_body_text = payload.body_text.strip()
-    task.approved_body_html = (payload.body_html or mail_runtime.text_to_html(payload.body_text)).strip()
+    if payload.body_html:
+        rendered = normalize_email_html(payload.body_html)
+    else:
+        rendered = text_to_email_html(payload.body_text)
+    task.approved_body_text = rendered.text
+    task.approved_body_html = rendered.html
     if payload.selected_material_ids is not None:
         task.selected_material_ids = payload.selected_material_ids
     task.approved_at = datetime.now(UTC)

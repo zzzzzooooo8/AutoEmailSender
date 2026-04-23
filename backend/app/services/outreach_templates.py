@@ -13,6 +13,7 @@ from app.services.html_text import normalize_plain_text
 from app.models import IdentityProfile, Professor
 from app.services.file_storage import extract_text_from_document
 from app.services.mail_runtime import text_to_html
+from app.services.rich_text import normalize_email_html, text_to_email_html
 
 
 OUTREACH_GENERATION_MODE_LLM = "llm"
@@ -206,10 +207,11 @@ def import_outreach_template_file(file_name: str, content: bytes) -> ImportedOut
         html_content = _decode_text_file(content).strip()
         if not html_content:
             raise ValueError("模板文件内容为空")
+        rendered = normalize_email_html(html_content)
         return ImportedOutreachTemplate(
             subject=None,
-            body_text=html_to_text(html_content),
-            body_html=normalize_html_template(html_content),
+            body_text=rendered.text,
+            body_html=rendered.html,
             format_name=suffix.lstrip("."),
         )
 
@@ -221,10 +223,11 @@ def import_outreach_template_file(file_name: str, content: bytes) -> ImportedOut
     if not body_text:
         raise ValueError("模板文件里没有可用正文")
 
+    rendered = text_to_email_html(body_text)
     return ImportedOutreachTemplate(
         subject=None,
-        body_text=body_text,
-        body_html=text_to_html(body_text),
+        body_text=rendered.text,
+        body_html=rendered.html,
         format_name=suffix.lstrip("."),
     )
 
