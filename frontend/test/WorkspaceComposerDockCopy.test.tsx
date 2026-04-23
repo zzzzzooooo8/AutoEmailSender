@@ -210,7 +210,7 @@ describe("WorkspaceComposerDock copy", () => {
     );
 
     expect(screen.getByRole("textbox", { name: "邮件正文" })).toHaveTextContent("老师您好");
-    expect(screen.getByRole("button", { name: "加粗" })).toBeInTheDocument();
-    expect(screen.queryByText("系统会自动切回普通文本")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "插入表格" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "HTML 预览" })).toBeInTheDocument();
   });
 });

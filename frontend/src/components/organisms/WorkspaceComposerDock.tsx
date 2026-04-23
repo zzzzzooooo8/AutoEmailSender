@@ -10,7 +10,8 @@ import {
   Send,
   TimerReset,
 } from 'lucide-react';
-import { RichEmailEditor, type RichEmailValue } from '@/components/molecules/RichEmailEditor';
+import { EmailTemplateEditor } from '@/components/molecules/EmailTemplateEditor';
+type RichEmailValue = { html: string; text: string };
 import { getTaskModeCopy } from '@/features/create-task/client/taskCopy';
 import {
   MATERIAL_TYPE_LABELS,
@@ -187,7 +188,7 @@ export const WorkspaceComposerDock = ({
                   />
                 </label>
 
-                <RichEmailEditor
+                <EmailTemplateEditor
                   label="邮件正文"
                   html={contentHtml}
                   onChange={onContentChange}
