@@ -16,7 +16,6 @@ from app.models import (
     EmailTaskStatus,
     IdentityProfile,
     LLMProfile,
-    MailDeliveryMode,
     Professor,
 )
 from app.schemas.batch_task import (
@@ -226,7 +225,6 @@ async def _get_batch_task(session: AsyncSession, task_id: int) -> BatchTask:
 
 def _serialize_batch_task(task: BatchTask) -> BatchTaskCardRead:
     status_counter = Counter(email_task.status for email_task in task.email_tasks)
-    mode_counter = Counter(email_task.delivery_mode or "" for email_task in task.email_tasks)
 
     completed_count = sum(
         1
@@ -272,8 +270,6 @@ def _serialize_batch_task(task: BatchTask) -> BatchTaskCardRead:
         sent_count=status_counter.get(EmailTaskStatus.SENT.value, 0),
         failed_count=status_counter.get(EmailTaskStatus.SEND_FAILED.value, 0),
         replied_count=status_counter.get(EmailTaskStatus.REPLY_DETECTED.value, 0),
-        dry_run_count=mode_counter.get(MailDeliveryMode.DRY_RUN.value, 0),
-        live_count=mode_counter.get(MailDeliveryMode.LIVE.value, 0),
         created_at=task.created_at,
         updated_at=task.updated_at,
     )

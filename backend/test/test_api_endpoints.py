@@ -52,7 +52,7 @@ class ApiEndpointTests(unittest.TestCase):
         os.environ.pop("ENABLE_BACKGROUND_WORKERS", None)
         self.temp_dir.cleanup()
 
-    def test_identity_llm_and_system_settings_endpoints(self) -> None:
+    def test_identity_and_llm_connectivity_endpoints(self) -> None:
         identity_id = self._create_identity(with_imap=False)
         llm_id = self._create_llm()
         identities = self.client.get("/api/identities").json()
@@ -77,12 +77,6 @@ class ApiEndpointTests(unittest.TestCase):
             imap_result = self.client.post(f"/api/identities/{identity_id}/imap-test")
             llm_result = self.client.post(f"/api/llm-profiles/{llm_id}/test")
 
-        settings_before = self.client.get("/api/system-settings")
-        settings_after = self.client.patch(
-            "/api/system-settings",
-            json={"mail_delivery_mode": "live"},
-        )
-
         self.assertEqual(smtp_result.status_code, 200)
         self.assertTrue(smtp_result.json()["ok"])
         self.assertEqual(imap_result.status_code, 200)
@@ -94,8 +88,11 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(created_identity["imap_port"], 993)
         self.assertEqual(created_identity["imap_username"], "sender@example.com")
         self.assertEqual(created_identity["imap_password"], "secret")
-        self.assertEqual(settings_before.json()["mail_delivery_mode"], "dry_run")
-        self.assertEqual(settings_after.json()["mail_delivery_mode"], "live")
+
+    def test_system_settings_endpoint_is_removed(self) -> None:
+        response = self.client.get("/api/system-settings")
+
+        self.assertEqual(response.status_code, 404)
 
     def test_llm_model_catalog_endpoint(self) -> None:
         llm_id = self._create_llm()
@@ -796,9 +793,19 @@ class ApiEndpointTests(unittest.TestCase):
         os.environ["DATABASE_URL"] = stale_env["DATABASE_URL"]
 
         with TestClient(create_app()) as client:
-            response = client.get("/api/system-settings")
+            response = client.get("/api/ping")
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.json()["mail_delivery_mode"], "dry_run")
+            self.assertEqual(response.json()["status"], "ok")
+
+        connection = sqlite3.connect(stale_db_path)
+        try:
+            version = connection.execute(
+                "SELECT version_num FROM alembic_version",
+            ).fetchone()[0]
+        finally:
+            connection.close()
+
+        self.assertEqual(version, "9c3d5b4a7f21")
 
         if get_engine.cache_info().currsize:
             asyncio.run(dispose_engine())

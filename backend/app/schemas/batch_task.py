@@ -43,8 +43,6 @@ class BatchTaskCardRead(BaseModel):
     sent_count: int
     failed_count: int
     replied_count: int
-    dry_run_count: int
-    live_count: int
     created_at: datetime
     updated_at: datetime
 

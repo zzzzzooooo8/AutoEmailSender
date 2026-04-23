@@ -7,6 +7,8 @@ from app.models.identity_profile import IdentityProfile
 from app.models.identity_material import IdentityMaterial, IdentityMaterialType
 from app.models.llm_profile import LLMProfile
 from app.models.professor import Professor
+from app.models.test_compose_message import TestComposeMessage
+from app.models.test_compose_session import TestComposeSession
 
 __all__ = [
     "AppSetting",
@@ -23,4 +25,6 @@ __all__ = [
     "LLMProfile",
     "MailDeliveryMode",
     "Professor",
+    "TestComposeMessage",
+    "TestComposeSession",
 ]

@@ -52,7 +52,6 @@ class WorkspaceTaskSummaryRead(BaseModel):
     primary_material_id: int | None
     primary_material: IdentityMaterialRead | None
     selected_material_ids: list[int] | None
-    delivery_mode: str | None
     approved_at: datetime | None
     scheduled_at: datetime | None
     last_send_attempt_at: datetime | None
@@ -72,7 +71,6 @@ class WorkspaceTaskSummaryRead(BaseModel):
 class WorkspaceMessageRead(BaseModel):
     id: int
     direction: str
-    delivery_mode: str | None
     subject: str | None
     content: str
     content_html: str | None
@@ -89,7 +87,6 @@ class WorkspaceThreadRead(BaseModel):
     professor: WorkspaceProfessorRead
     identity: WorkspaceIdentityRead
     llm_profile: WorkspaceLLMRead
-    mail_delivery_mode: str
     material_options: list[IdentityMaterialRead]
     current_task: WorkspaceTaskSummaryRead
     messages: list[WorkspaceMessageRead]

@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "d91f2a4b8c7e"
+HEAD_REVISION = "9c3d5b4a7f21"
 LEGACY_RUNTIME_REVISION = "7a1d5e42c9bd"
 
 
@@ -53,6 +53,8 @@ class DatabaseSchemaTests(unittest.TestCase):
                 "batch_tasks",
                 "email_logs",
                 "app_settings",
+                "test_compose_sessions",
+                "test_compose_messages",
             }.issubset(table_names),
         )
         self.assertNotIn("attachment_assets", table_names)
@@ -81,7 +83,7 @@ class DatabaseSchemaTests(unittest.TestCase):
         self.assertIn("archived_at", professor_columns)
         self.assertIn("provider_payload", log_columns)
         self.assertIn("reply_headers", log_columns)
-        self.assertIn("mail_delivery_mode", settings_columns)
+        self.assertNotIn("mail_delivery_mode", settings_columns)
         self.assertNotIn("signature", identity_columns)
 
     def test_old_revision_can_upgrade_to_head(self) -> None:
@@ -137,9 +139,6 @@ class DatabaseSchemaTests(unittest.TestCase):
             (email_task_id, identity_id, llm_profile_id, professor_id, "sent", "hello"),
         )
 
-        mail_delivery_mode = self.connection.execute(
-            "SELECT mail_delivery_mode FROM app_settings WHERE id = 1",
-        ).fetchone()[0]
         status, retry_count, is_read, is_replied = self.connection.execute(
             """
             SELECT status, retry_count, is_read, is_replied
@@ -149,7 +148,6 @@ class DatabaseSchemaTests(unittest.TestCase):
             (email_task_id,),
         ).fetchone()
 
-        self.assertEqual(mail_delivery_mode, "dry_run")
         self.assertEqual(status, "discovered")
         self.assertEqual(retry_count, 0)
         self.assertEqual(is_read, 0)

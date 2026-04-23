@@ -26,7 +26,6 @@ from app.schemas.workspace import (
 )
 from app.services import llm_runtime
 from app.services.outreach_templates import resolve_outreach_template_config
-from app.services.system_settings import get_or_create_app_settings
 
 
 async def build_workspace_thread(
@@ -40,7 +39,6 @@ async def build_workspace_thread(
     identity = await _get_identity(session, identity_id)
     llm_profile = await _get_llm_profile(session, llm_profile_id)
     current_task = await _get_latest_email_task(session, professor_id, identity_id, llm_profile_id)
-    app_settings = await get_or_create_app_settings(session)
     current_task_outreach = (
         _resolve_task_outreach_config(identity, current_task)
         if current_task is not None
@@ -114,7 +112,6 @@ async def build_workspace_thread(
             provider=llm_profile.provider,
             model_name=llm_profile.model_name,
         ),
-        mail_delivery_mode=app_settings.mail_delivery_mode,
         material_options=[
             serialize_material(material, identity.current_primary_material_id)
             for material in sorted(identity.materials, key=lambda item: item.created_at, reverse=True)
@@ -145,7 +142,6 @@ async def build_workspace_thread(
                 else None
             ),
             selected_material_ids=current_task.selected_material_ids if current_task else None,
-            delivery_mode=current_task.delivery_mode if current_task else None,
             approved_at=current_task.approved_at if current_task else None,
             scheduled_at=current_task.scheduled_at if current_task else None,
             last_send_attempt_at=current_task.last_send_attempt_at if current_task else None,
@@ -294,7 +290,6 @@ def _serialize_workspace_message(log: EmailLog) -> WorkspaceMessageRead:
     return WorkspaceMessageRead(
         id=log.id,
         direction=log.direction,
-        delivery_mode=log.delivery_mode,
         subject=log.subject,
         content=log.content,
         content_html=log.content_html,

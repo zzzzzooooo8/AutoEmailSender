@@ -79,7 +79,6 @@ class EmailTask(Base):
         DateTime(timezone=True),
         nullable=True,
     )
-    delivery_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
     fit_points: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     risk_points: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     match_keywords: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
