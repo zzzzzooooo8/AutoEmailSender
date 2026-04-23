@@ -190,6 +190,21 @@ describe("ProfilePage onboarding", () => {
     ).toBeInTheDocument();
   });
 
+  it("uses the tiptap email editor for the default template body", async () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "打开默认值编辑" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "默认发信模式与默认模板" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "加粗" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "插入表格" })).toBeInTheDocument();
+    expect(screen.queryByText("默认模板正文（纯文本）")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("默认模板正文（HTML，可保留格式）"),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows a test compose entry after the final save section", () => {
     renderPage();
 
