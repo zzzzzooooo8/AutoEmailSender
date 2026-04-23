@@ -63,6 +63,8 @@ vi.mock("@/components/organisms/WorkspaceComposerDock", () => ({
     nextStepDescription: string;
     draftReady: boolean;
     content: string;
+    contentHtml: string;
+    onContentChange: (value: { html: string; text: string }) => void;
     onSendNow: () => void;
     onScheduleSend: () => void;
   }) => {

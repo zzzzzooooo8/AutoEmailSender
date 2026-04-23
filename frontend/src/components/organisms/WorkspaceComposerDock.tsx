@@ -10,6 +10,7 @@ import {
   Send,
   TimerReset,
 } from 'lucide-react';
+import { RichEmailEditor, type RichEmailValue } from '@/components/molecules/RichEmailEditor';
 import { getTaskModeCopy } from '@/features/create-task/client/taskCopy';
 import {
   MATERIAL_TYPE_LABELS,
@@ -28,7 +29,7 @@ type WorkspaceComposerDockProps = {
   nextStepDescription: string;
   subject: string;
   content: string;
-  hasRichHtml: boolean;
+  contentHtml: string;
   selectedMaterialIds: number[];
   scheduledAt: string;
   acting: boolean;
@@ -40,7 +41,7 @@ type WorkspaceComposerDockProps = {
   composerExpanded: boolean;
   onToggleExpanded: () => void;
   onSubjectChange: (value: string) => void;
-  onContentChange: (value: string) => void;
+  onContentChange: (value: RichEmailValue) => void;
   onSelectedMaterialIdsChange: (ids: number[]) => void;
   onScheduledAtChange: (value: string) => void;
   onSelectPrimaryMaterial: (materialId: number) => void;
@@ -105,7 +106,7 @@ export const WorkspaceComposerDock = ({
   nextStepDescription,
   subject,
   content,
-  hasRichHtml,
+  contentHtml,
   selectedMaterialIds,
   scheduledAt,
   acting,
@@ -187,21 +188,11 @@ export const WorkspaceComposerDock = ({
                   />
                 </label>
 
-                <label className="block">
-                  <div className="mb-2 text-sm font-medium text-stone-800">邮件正文</div>
-                  <textarea
-                    value={content}
-                    onChange={(event) => onContentChange(event.target.value)}
-                    className="min-h-[320px] w-full rounded-[28px] border border-stone-200 bg-white px-4 py-4 text-sm leading-7 text-stone-700 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
-                    placeholder="在这里继续修改草稿，或者直接手写。"
-                  />
-                </label>
-
-                {hasRichHtml ? (
-                  <div className="rounded-2xl border border-dashed border-stone-200 bg-stone-50 px-4 py-3 text-xs leading-6 text-stone-500">
-                    当前这版会保留 HTML 格式发送；如果你手动改正文，系统会自动切回普通文本并重新生成基础 HTML。
-                  </div>
-                ) : null}
+                <RichEmailEditor
+                  label="邮件正文"
+                  html={contentHtml}
+                  onChange={onContentChange}
+                />
               </div>
 
               <div className="space-y-4">

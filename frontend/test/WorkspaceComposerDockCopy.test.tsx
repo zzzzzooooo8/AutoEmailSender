@@ -92,7 +92,7 @@ describe("WorkspaceComposerDock copy", () => {
         draftReady={false}
         subject=""
         content=""
-        hasRichHtml={false}
+        contentHtml=""
         selectedMaterialIds={[]}
         scheduledAt=""
         acting={false}
@@ -142,7 +142,7 @@ describe("WorkspaceComposerDock copy", () => {
         draftReady={true}
         subject=""
         content=""
-        hasRichHtml={true}
+        contentHtml="<p>老师您好</p>"
         selectedMaterialIds={[]}
         scheduledAt="2026-04-22T18:30"
         acting={false}
@@ -171,5 +171,46 @@ describe("WorkspaceComposerDock copy", () => {
 
     expect(screen.getByRole("button", { name: "立即发送" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "定时发送" })).toBeEnabled();
+  });
+
+  it("renders a rich email editor for the draft body", () => {
+    render(
+      <WorkspaceComposerDock
+        thread={thread}
+        currentTask={currentTask}
+        currentTaskMode="llm"
+        draftReady={true}
+        subject="测试主题"
+        content="老师您好"
+        contentHtml="<p>老师您好</p>"
+        selectedMaterialIds={[]}
+        scheduledAt=""
+        acting={false}
+        primaryMaterialOptions={[material]}
+        canChangePrimaryMaterial={true}
+        canChangeMode={true}
+        canCalculateMatch={true}
+        canGenerateDraft={true}
+        composerExpanded={true}
+        nextStepTitle="下一步：人工检查后发送"
+        nextStepDescription="草稿已经准备好，检查主题、正文和附件后，再决定立即发送还是定时发送。"
+        onToggleExpanded={vi.fn()}
+        onSubjectChange={vi.fn()}
+        onContentChange={vi.fn()}
+        onSelectedMaterialIdsChange={vi.fn()}
+        onScheduledAtChange={vi.fn()}
+        onSelectPrimaryMaterial={vi.fn()}
+        onSendNow={vi.fn()}
+        onScheduleSend={vi.fn()}
+        onCancelSchedule={vi.fn()}
+        onCalculateMatch={vi.fn()}
+        onGenerateDraft={vi.fn()}
+        onChangeMode={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("textbox", { name: "邮件正文" })).toHaveTextContent("老师您好");
+    expect(screen.getByRole("button", { name: "加粗" })).toBeInTheDocument();
+    expect(screen.queryByText("系统会自动切回普通文本")).not.toBeInTheDocument();
   });
 });

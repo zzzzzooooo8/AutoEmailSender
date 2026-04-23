@@ -19,6 +19,7 @@ import {
 } from '@/lib/api/emailTasksApi';
 import { ensureWorkspaceTask, getWorkspaceThread } from '@/lib/api/workspacesApi';
 import { parseApiDateTime } from '@/lib/dateTime';
+import { textToEmailHtml } from '@/lib/richEmail';
 import { useConfirmDialog } from '@/lib/useConfirmDialog';
 import {
   PROFESSOR_STATUS_LABELS,
@@ -357,9 +358,9 @@ export const WorkspacePage = () => {
     [notifyError, syncComposer, workspaceRequestKey],
   );
 
-  const handleContentChange = useCallback((value: string) => {
-    setContent(value);
-    setContentHtml(null);
+  const handleContentChange = useCallback((value: { html: string; text: string }) => {
+    setContent(value.text);
+    setContentHtml(value.html);
   }, []);
 
   const handleSendNow = useCallback(() => {
@@ -617,7 +618,7 @@ export const WorkspacePage = () => {
                   nextStepDescription={nextStepDescription}
                   subject={subject}
                   content={content}
-                  hasRichHtml={Boolean(contentHtml)}
+                  contentHtml={contentHtml || textToEmailHtml(content)}
                   selectedMaterialIds={selectedMaterialIds}
                   scheduledAt={scheduledAt}
                   acting={acting}
