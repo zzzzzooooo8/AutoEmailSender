@@ -1,0 +1,60 @@
+import DOMPurify from "dompurify";
+
+const ALLOWED_TAGS = [
+  "a",
+  "b",
+  "br",
+  "em",
+  "i",
+  "li",
+  "ol",
+  "p",
+  "span",
+  "strong",
+  "u",
+  "ul",
+];
+
+const ALLOWED_ATTR = ["href", "target"];
+
+export const normalizeEmailHtml = (value: string): string =>
+  DOMPurify.sanitize(value.trim(), {
+    ALLOWED_TAGS,
+    ALLOWED_ATTR,
+    ALLOW_DATA_ATTR: false,
+    FORBID_TAGS: ["script", "style"],
+  }).trim();
+
+export const deriveTextFromEmailHtml = (value: string): string => {
+  const container = document.createElement("div");
+  container.innerHTML = normalizeEmailHtml(value);
+  const lines: string[] = [];
+
+  container.querySelectorAll("p, li").forEach((element) => {
+    const text = element.textContent?.replace(/\s+/g, " ").trim();
+    if (!text) {
+      return;
+    }
+    lines.push(element.tagName.toLowerCase() === "li" ? `- ${text}` : text);
+  });
+
+  if (lines.length > 0) {
+    return lines.join("\n");
+  }
+  return container.textContent?.replace(/\s+/g, " ").trim() ?? "";
+};
+
+export const textToEmailHtml = (value: string): string =>
+  value
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => `<p>${escapeHtml(line)}</p>`)
+    .join("");
+
+const escapeHtml = (value: string): string =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
