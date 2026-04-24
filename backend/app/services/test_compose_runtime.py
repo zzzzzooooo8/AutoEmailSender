@@ -124,6 +124,12 @@ async def send_test_compose_message(
 
     await _validate_selected_material_ids(session, identity_id, selected_material_ids)
 
+    draft_subject = (payload.subject or "").strip() or None
+    if payload.body_html:
+        draft_rendered = normalize_email_html(payload.body_html)
+    else:
+        draft_rendered = text_to_email_html(payload.body_text)
+
     context = build_test_compose_template_context(identity)
     subject = render_template_with_context(payload.subject, context).strip()
     rendered_body_text = render_template_with_context(payload.body_text, context)
@@ -137,9 +143,9 @@ async def send_test_compose_message(
     if not subject or not body_text:
         raise ValueError("测试邮件需要主题和正文")
 
-    compose_session.subject = subject
-    compose_session.body_text = body_text
-    compose_session.body_html = body_html
+    compose_session.subject = draft_subject
+    compose_session.body_text = draft_rendered.text
+    compose_session.body_html = draft_rendered.html
     compose_session.selected_material_ids = selected_material_ids
     compose_session.updated_at = datetime.now(UTC)
 

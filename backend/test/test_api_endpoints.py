@@ -1398,6 +1398,13 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertIn("测试收件人您好", history["content"])
         self.assertNotIn("{{sender_name}}", history["content_html"])
 
+        draft = response.json()["draft"]
+        self.assertEqual(draft["subject"], "发送给{{name}}")
+        self.assertIn("{{name}}您好", draft["body_text"])
+        self.assertIn("{{sender_name}}", draft["body_text"])
+        self.assertIn("{{name}}您好", draft["body_html"])
+        self.assertIn("{{sender_name}}", draft["body_html"])
+
     def test_batch_task_outreach_snapshot_is_independent_from_identity_defaults(self) -> None:
         identity_id = self._create_identity(with_imap=False)
         llm_id = self._create_llm()
