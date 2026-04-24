@@ -128,7 +128,7 @@ describe("CreateTaskPage copy", () => {
     expect(screen.getByText("直接套用模板")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "创建任务后，下一步通常是进入工作区生成草稿、人工检查，再决定立即发送或定时发送。",
+        "创建后进入工作区生成草稿并确认发送。",
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText("模板润色")).not.toBeInTheDocument();
@@ -138,7 +138,7 @@ describe("CreateTaskPage copy", () => {
   it("asks for confirmation before creating a real batch task", async () => {
     renderPage();
 
-    await screen.findByText("本次发信模式");
+    await screen.findByText("发信模式");
     fireEvent.click(screen.getByText("创建任务").closest("button")!);
 
     await waitFor(() => {

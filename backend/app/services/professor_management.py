@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Alignment, Font, PatternFill
 
 from app.schemas.professor import ProfessorUpsertPayload
 
@@ -22,6 +23,35 @@ PROFESSOR_TEMPLATE_COLUMNS = [
     "recent_papers",
     "profile_url",
     "source_url",
+]
+
+PROFESSOR_TEMPLATE_HELP_LINES = [
+    "# 导师导入模板",
+    "# 从字段名下一行开始填写；说明行和示例行可以保留，系统导入时会自动忽略",
+    "# 必填字段：name, email",
+    "# name：导师姓名，必填。示例：张明远",
+    "# email：导师邮箱，必填，必须是邮箱格式。示例：zhang@example.edu",
+    "# title：导师职称。示例：教授",
+    "# university：学校名称。示例：示例大学",
+    "# school：学院名称。示例：人工智能学院",
+    "# department：院系或系所。示例：计算机科学系",
+    "# research_direction：研究方向，多个方向用中文分号 ； 分隔。示例：大语言模型；智能体；信息抽取",
+    "# recent_papers：近期论文，多篇用 | 分隔。示例：Paper A|Paper B",
+    "# profile_url：导师主页链接。示例：https://example.edu/zhang",
+    "# source_url：数据来源链接。示例：https://example.edu/faculty",
+]
+
+PROFESSOR_TEMPLATE_EXAMPLE_ROW = [
+    "示例：张明远",
+    "zhang@example.edu",
+    "教授",
+    "示例大学",
+    "人工智能学院",
+    "计算机科学系",
+    "大语言模型；智能体；信息抽取",
+    "Paper A|Paper B",
+    "https://example.edu/zhang",
+    "https://example.edu/faculty",
 ]
 
 SUPPORTED_IMPORT_EXTENSIONS = {".csv", ".xlsx"}
@@ -58,7 +88,10 @@ def build_professor_template(format_name: str) -> tuple[bytes, str, str]:
     if normalized == "csv":
         buffer = io.StringIO()
         writer = csv.writer(buffer)
+        for line in PROFESSOR_TEMPLATE_HELP_LINES:
+            writer.writerow([line])
         writer.writerow(PROFESSOR_TEMPLATE_COLUMNS)
+        writer.writerow(PROFESSOR_TEMPLATE_EXAMPLE_ROW)
         content = buffer.getvalue().encode("utf-8-sig")
         return content, "text/csv; charset=utf-8", "professors_import_template.csv"
 
@@ -66,10 +99,32 @@ def build_professor_template(format_name: str) -> tuple[bytes, str, str]:
         workbook = Workbook()
         sheet = workbook.active
         sheet.title = "Professors"
+        help_fill = PatternFill("solid", fgColor="F5F5F4")
+        header_fill = PatternFill("solid", fgColor="E7E5E4")
+
+        for line in PROFESSOR_TEMPLATE_HELP_LINES:
+            sheet.append([line])
+            row_index = sheet.max_row
+            sheet.merge_cells(
+                start_row=row_index,
+                start_column=1,
+                end_row=row_index,
+                end_column=len(PROFESSOR_TEMPLATE_COLUMNS),
+            )
+            cell = sheet.cell(row=row_index, column=1)
+            cell.alignment = Alignment(wrap_text=True)
+            cell.fill = help_fill
+
         sheet.append(PROFESSOR_TEMPLATE_COLUMNS)
+        header_row = sheet.max_row
         for index, column in enumerate(PROFESSOR_TEMPLATE_COLUMNS, start=1):
-            sheet.cell(row=1, column=index).value = column
+            cell = sheet.cell(row=header_row, column=index)
+            cell.value = column
+            cell.font = Font(bold=True)
+            cell.fill = header_fill
             sheet.column_dimensions[chr(64 + index)].width = 22
+        sheet.append(PROFESSOR_TEMPLATE_EXAMPLE_ROW)
+        sheet.freeze_panes = f"A{header_row + 1}"
 
         buffer = io.BytesIO()
         workbook.save(buffer)
@@ -92,6 +147,8 @@ def parse_professor_import_file(filename: str, content: bytes) -> ParsedProfesso
     deduplicated: dict[str, dict[str, Any]] = {}
     failed_count = 0
     for row in rows:
+        if _should_skip_import_row(row):
+            continue
         normalized = _normalize_import_row(row)
         if normalized is None:
             failed_count += 1
@@ -118,32 +175,43 @@ def _parse_csv_rows(content: bytes) -> list[dict[str, Any]]:
     except UnicodeDecodeError as error:
         raise ValueError("CSV 文件请使用 UTF-8 编码") from error
 
-    reader = csv.DictReader(io.StringIO(decoded))
-    _validate_columns(reader.fieldnames)
-    return [dict(row) for row in reader]
+    reader = csv.reader(io.StringIO(decoded))
+    return _parse_tabular_rows(list(reader))
 
 
 def _parse_xlsx_rows(content: bytes) -> list[dict[str, Any]]:
     workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
     sheet = workbook.active
-    row_iter = sheet.iter_rows(values_only=True)
-    try:
-        headers = next(row_iter)
-    except StopIteration:
+    return _parse_tabular_rows(list(sheet.iter_rows(values_only=True)))
+
+
+def _parse_tabular_rows(rows: list[list[Any] | tuple[Any, ...]]) -> list[dict[str, Any]]:
+    if not rows:
         raise ValueError("导入文件为空")
 
-    header_names = [str(cell).strip() if cell is not None else "" for cell in headers]
+    header_index = _find_header_row_index(rows)
+    header_names = [str(cell).strip() if cell is not None else "" for cell in rows[header_index]]
     _validate_columns(header_names)
 
-    rows: list[dict[str, Any]] = []
-    for row in row_iter:
-        rows.append(
+    parsed_rows: list[dict[str, Any]] = []
+    for row in rows[header_index + 1 :]:
+        if _is_help_row(row):
+            continue
+        parsed_rows.append(
             {
                 header_names[index]: row[index] if index < len(row) else None
                 for index in range(len(header_names))
             }
         )
-    return rows
+    return parsed_rows
+
+
+def _find_header_row_index(rows: list[list[Any] | tuple[Any, ...]]) -> int:
+    for index, row in enumerate(rows):
+        normalized = [str(cell).strip() if cell is not None else "" for cell in row]
+        if all(column in normalized for column in PROFESSOR_TEMPLATE_COLUMNS):
+            return index
+    raise ValueError(f"导入文件缺少必要列：{', '.join(PROFESSOR_TEMPLATE_COLUMNS)}")
 
 
 def _validate_columns(columns: list[str] | tuple[str, ...] | None) -> None:
@@ -178,6 +246,19 @@ def _normalize_import_row(row: dict[str, Any]) -> dict[str, Any] | None:
         "profile_url": raw_values["profile_url"],
         "source_url": raw_values["source_url"],
     }
+
+
+def _should_skip_import_row(row: dict[str, Any]) -> bool:
+    raw_values = {key: _clean_cell_value(row.get(key)) for key in PROFESSOR_TEMPLATE_COLUMNS}
+    if not any(raw_values.values()):
+        return True
+    name = raw_values["name"] or ""
+    return name.startswith("#") or name.startswith("示例：")
+
+
+def _is_help_row(row: list[Any] | tuple[Any, ...]) -> bool:
+    first_cell = _clean_cell_value(row[0]) if row else None
+    return bool(first_cell and first_cell.startswith("#"))
 
 
 def _clean_cell_value(value: Any) -> str | None:

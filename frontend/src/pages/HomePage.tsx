@@ -140,8 +140,8 @@ export const HomePage = () => {
   const handleCreateTask = async () => {
     if (selectedIds.size === 0) {
       await confirm({
-        title: '还没有选择导师',
-        description: '请先勾选本次要触达的导师，再进入批量任务创建页。',
+        title: '未选择导师',
+        description: '选择本次要联系的导师。',
         confirmLabel: '知道了',
         cancelLabel: null,
       });
@@ -198,7 +198,7 @@ export const HomePage = () => {
     if (!hasPrimaryMaterial) {
       notifyWarning(
         '缺少默认材料',
-        '当前身份还没有默认材料，暂时无法计算匹配。请先到个人页设置默认材料。',
+        '请到个人页设置默认材料。',
       );
       return;
     }
@@ -218,8 +218,8 @@ export const HomePage = () => {
   const handleGenerateSelected = async () => {
     if (selectedIds.size === 0) {
       await confirm({
-        title: '还没有选择导师',
-        description: '请先勾选要批量计算匹配的导师。',
+        title: '未选择导师',
+        description: '选择要批量计算匹配的导师。',
         confirmLabel: '知道了',
         cancelLabel: null,
       });
@@ -229,7 +229,7 @@ export const HomePage = () => {
     if (!hasPrimaryMaterial) {
       notifyWarning(
         '缺少默认材料',
-        '当前身份还没有默认材料，暂时无法批量计算匹配。请先到个人页设置默认材料。',
+        '请到个人页设置默认材料。',
       );
       return;
     }
@@ -267,10 +267,10 @@ export const HomePage = () => {
       <>
         <main className="mx-auto max-w-6xl px-6 py-8">
           <OnboardingChecklistCard
-            title="开始使用前，还差这几步"
+            title="完成首次配置"
             description={onboardingState.description}
             nextActionHref={onboardingState.nextActionHref}
-            nextActionLabel="继续完成准备"
+            nextActionLabel="继续配置"
             items={[
               { label: '创建发件身份', done: Boolean(selectedIdentity) },
               { label: '配置 AI 模型', done: Boolean(selectedLlmProfile) },
@@ -377,11 +377,11 @@ export const HomePage = () => {
           <div className="mt-4 space-y-2">
             {!hasPrimaryMaterial ? (
               <p className="text-sm text-amber-700">
-                当前身份还没有默认材料，所以暂时不能计算匹配；你仍然可以直接进入工作区手动写信。
+                未设置默认材料，暂不能计算匹配；仍可进入工作区手动写信。
               </p>
             ) : (
               <p className="text-sm text-stone-500">
-                当前首页只做匹配分析，不会顺带生成草稿；草稿生成请到工作区单独执行。
+                首页只计算匹配；草稿请在工作区生成。
               </p>
             )}
           </div>
@@ -417,7 +417,7 @@ export const HomePage = () => {
             </div>
           ) : filteredProfessors.length === 0 ? (
             <div className="px-6 py-14 text-center text-sm text-stone-500">
-              <div>当前还没有可用导师，可以先去导师管理页导入或手动新增。</div>
+              <div>暂无可用导师。可在导师管理页导入或新增。</div>
               <Link to="/professors" data-interactive="button" className="ui-btn-primary mt-5">
                 去导师管理
               </Link>

@@ -83,6 +83,7 @@ describe("TestComposePage", () => {
     );
 
     expect(await screen.findByDisplayValue("测试主题")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "主题占位符菜单" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "邮件正文" })).toHaveTextContent("测试正文");
     expect(screen.getByRole("button", { name: "插入表格" })).toBeInTheDocument();
     expect(screen.getAllByText("sender@example.com").length).toBeGreaterThan(0);
@@ -90,7 +91,7 @@ describe("TestComposePage", () => {
     expect(
       screen.getByText((_, element) => element?.textContent === "模型 / 测试模型"),
     ).toBeInTheDocument();
-    expect(screen.getByText("{{name}} 会在测试邮件中替换为「测试收件人」")).toBeInTheDocument();
+    expect(screen.getByText("{{name}} 测试时显示为「测试收件人」")).toBeInTheDocument();
     expect(screen.getByText("发件人姓名：王同学")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "测试写信操作" })).toBeInTheDocument();
   });

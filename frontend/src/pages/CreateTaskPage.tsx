@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useRef } from 'react';
 import { Loader2 } from 'lucide-react';
 import { NativeSelectField } from '@/components/atoms/NativeSelectField';
+import { SubjectTemplateInput } from '@/components/molecules/SubjectTemplateInput';
 import { useNotification } from '@/context/NotificationContext';
 import { createBatchTask } from '@/lib/api/batchTasksApi';
 import { listProfessors } from '@/lib/api/professorsApi';
@@ -175,10 +176,10 @@ export const CreateTaskPage = () => {
       validationErrors.push('定时发送需要填写发送时间窗口和窗口内发送数量');
     }
     if (taskMode === 'template' && !templateReady) {
-      validationErrors.push('固定模板模式至少需要填写纯文本正文或 HTML 正文');
+      validationErrors.push('直接套用模板需要填写纯文本正文或 HTML 正文');
     }
     if (taskMode === 'llm' && !body.trim()) {
-      validationErrors.push('模板润色模式至少需要填写一份套磁信模板正文');
+      validationErrors.push('AI 辅助写信需要填写套磁信模板正文');
     }
 
     if (validationErrors.length > 0) {
@@ -197,8 +198,8 @@ export const CreateTaskPage = () => {
       title: scheduleType === 'scheduled' ? '确认创建定时批量发送任务？' : '确认创建真实发送任务？',
       description:
         scheduleType === 'scheduled'
-          ? '这会创建一个自动定时真实发送的批量任务。'
-          : '后续进入工作区审批后，发送将是真实发给导师。',
+          ? '将创建自动定时发送任务。'
+          : '创建后需在工作区审核并发送。',
       confirmLabel: '继续创建',
       cancelLabel: '再检查一下',
       tone: 'danger',
@@ -250,9 +251,9 @@ export const CreateTaskPage = () => {
     return (
       <main className="mx-auto max-w-4xl px-6 py-10">
         <div className="rounded-3xl border border-dashed border-stone-300 bg-[#fcfbf8] p-10 text-center">
-          <h1 className="text-2xl font-semibold text-stone-900">先补齐上下文</h1>
+          <h1 className="text-2xl font-semibold text-stone-900">选择身份和模型</h1>
           <p className="mt-3 text-sm text-stone-600">
-            创建任务前，需要先在顶部选择身份与模型。
+            创建任务需要身份和模型。
           </p>
         </div>
       </main>
@@ -263,9 +264,9 @@ export const CreateTaskPage = () => {
     return (
       <main className="mx-auto max-w-4xl px-6 py-10">
         <div className="rounded-3xl border border-dashed border-stone-300 bg-[#fcfbf8] p-10 text-center">
-          <h1 className="text-2xl font-semibold text-stone-900">还没有选中导师</h1>
+          <h1 className="text-2xl font-semibold text-stone-900">未选择导师</h1>
           <p className="mt-3 text-sm text-stone-600">
-            请先回到首页勾选目标导师，再进入批量任务创建页。
+            返回首页选择目标导师。
           </p>
           <Link to="/" data-interactive="button" className="ui-btn-primary mt-6">
             返回首页
@@ -281,7 +282,7 @@ export const CreateTaskPage = () => {
         <div className="rounded-3xl border border-stone-200 bg-[#fcfbf8] p-6 shadow-sm">
           <h1 className="text-3xl font-semibold text-stone-900">创建批量任务</h1>
           <p className="mt-2 text-sm text-stone-600">
-            当前身份：{selectedIdentity.name}，本次将覆盖 {selectedProfessorIds.length} 位导师。
+            身份：{selectedIdentity.name} · 导师：{selectedProfessorIds.length} 位
           </p>
         </div>
 
@@ -306,13 +307,13 @@ export const CreateTaskPage = () => {
               <div className="rounded-[28px] border border-stone-200 bg-[linear-gradient(180deg,rgba(255,248,240,0.72),rgba(255,255,255,0.96))] p-4 shadow-sm">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <div className="text-sm font-semibold text-stone-900">本次发信模式</div>
+                    <div className="text-sm font-semibold text-stone-900">发信模式</div>
                     <p className="mt-1 text-xs leading-6 text-stone-500">
-                      身份页只提供默认值；这里决定这次任务真正使用的模式，并会快照进每位导师的任务里。
+                      选择本次任务的写信方式。
                     </p>
                   </div>
                   <span className="rounded-full border border-primary/15 bg-primary/8 px-3 py-1 text-[11px] font-semibold text-primary">
-                    任务级配置
+                    本次任务
                   </span>
                 </div>
                 <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -339,10 +340,10 @@ export const CreateTaskPage = () => {
                   })}
                 </div>
                 <div className="mt-3 text-xs leading-6 text-stone-500">
-                  当前会一并快照模板内容；之后就算你改身份默认值，已创建任务也不会跟着漂移。
+                  本页设置只影响本次任务。
                 </div>
                 <div className="mt-3 rounded-2xl border border-primary/15 bg-primary/5 px-4 py-3 text-sm leading-6 text-stone-700">
-                  创建任务后，下一步通常是进入工作区生成草稿、人工检查，再决定立即发送或定时发送。
+                  创建后进入工作区生成草稿并确认发送。
                 </div>
               </div>
 
@@ -372,8 +373,8 @@ export const CreateTaskPage = () => {
 
               <p className="text-sm leading-6 text-stone-500">
                 {scheduleType === 'scheduled'
-                  ? '定时发送：只在下面设置的时间窗口内发送，并按你填写的数量控制每个窗口的节奏。'
-                  : '立即发送：任务准备好后就可以直接进入发送流。'}
+                  ? '定时发送：在指定时间窗口内按数量发送。'
+                  : '立即发送：任务创建后即可进入发送流程。'}
               </p>
 
               {scheduleType === 'scheduled' && (
@@ -404,25 +405,22 @@ export const CreateTaskPage = () => {
                   <div>
                     <div className="text-sm font-semibold text-stone-900">套磁信模板（必填）</div>
                     <p className="mt-1 text-xs leading-6 text-stone-500">
-                      AI 只会在这份模板基础上做小幅润色，只改称呼、匹配理由、个性化一段、结尾和主题，不会重写整体结构。
+                      AI 基于这份模板生成个性化草稿。
                     </p>
                   </div>
-                  <label className="block">
-                    <div className="mb-2 text-sm font-medium text-stone-800">模板主题（可选）</div>
-                    <input
-                      value={subject}
-                      onChange={(event) => setSubject(event.target.value)}
-                      placeholder="例如：申请与{{name}}老师交流科研方向"
-                      className="form-input"
-                    />
-                  </label>
+                  <SubjectTemplateInput
+                    label="模板主题（可选）"
+                    value={subject}
+                    onChange={setSubject}
+                    placeholder="例如：申请与{{name}}老师交流科研方向"
+                  />
 
                   <label className="block">
                     <div className="mb-2 text-sm font-medium text-stone-800">模板正文</div>
                     <textarea
                       value={body}
                       onChange={(event) => setBody(event.target.value)}
-                      placeholder="请粘贴你自己的套磁信模板，AI 会尽量保持整体结构和话术风格。"
+                      placeholder="粘贴套磁信模板。"
                       className="min-h-40 w-full rounded-2xl border border-stone-200 px-4 py-3 text-sm text-stone-700 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
                     />
                   </label>
@@ -430,20 +428,17 @@ export const CreateTaskPage = () => {
               ) : (
                 <div className="space-y-5 rounded-3xl border border-primary/15 bg-[linear-gradient(180deg,rgba(154,52,18,0.04),rgba(255,255,255,0.95))] p-4">
                   <div>
-                    <div className="text-sm font-semibold text-stone-900">本次固定模板快照</div>
+                    <div className="text-sm font-semibold text-stone-900">直接套用模板</div>
                     <p className="mt-1 text-xs leading-6 text-stone-500">
-                      默认会带出身份页的默认模板。你现在改的是这次批量任务，不会反向改身份默认值。
+                      本次任务使用的模板内容。
                     </p>
                   </div>
-                  <label className="block">
-                    <div className="mb-2 text-sm font-medium text-stone-800">模板主题</div>
-                    <input
-                      value={templateSubject}
-                      onChange={(event) => setTemplateSubject(event.target.value)}
-                      placeholder="例如：申请与{{name}}老师交流科研方向"
-                      className="form-input"
-                    />
-                  </label>
+                  <SubjectTemplateInput
+                    label="模板主题"
+                    value={templateSubject}
+                    onChange={setTemplateSubject}
+                    placeholder="例如：申请与{{name}}老师交流科研方向"
+                  />
                   <label className="block">
                     <div className="mb-2 text-sm font-medium text-stone-800">模板正文（纯文本）</div>
                     <textarea
@@ -466,11 +461,11 @@ export const CreateTaskPage = () => {
               )}
 
               <div className="rounded-3xl border border-stone-200 bg-stone-50 p-4">
-                <div className="text-sm font-medium text-stone-900">用于匹配的默认材料（可选）</div>
-                <p className="mt-1 text-xs text-stone-500">留空也能创建任务，之后可在工作区手动选择并执行匹配。</p>
+                <div className="text-sm font-medium text-stone-900">分析材料（可选）</div>
+                <p className="mt-1 text-xs text-stone-500">用于匹配分析，可稍后在工作区选择。</p>
                 {primaryMaterialOptions.length === 0 ? (
                   <p className="mt-3 text-sm text-stone-500">
-                    当前没有可用于匹配的材料，但仍然可以先创建任务并手动写信发送。
+                    暂无可分析材料，仍可创建任务并手动写信。
                   </p>
                 ) : (
                   <div className="mt-3 space-y-2">
@@ -510,10 +505,10 @@ export const CreateTaskPage = () => {
               </div>
 
               <div className="rounded-3xl border border-stone-200 bg-stone-50 p-4">
-                <div className="text-sm font-medium text-stone-900">随信材料</div>
-                <p className="mt-1 text-xs text-stone-500">这些材料会作为附件随邮件一起发送。</p>
+                <div className="text-sm font-medium text-stone-900">随信附件</div>
+                <p className="mt-1 text-xs text-stone-500">随邮件一起发送。</p>
                 {selectedIdentity.materials.length === 0 ? (
-                  <p className="mt-3 text-sm text-stone-500">当前身份还没有可选材料。</p>
+                  <p className="mt-3 text-sm text-stone-500">暂无可选材料。</p>
                 ) : (
                   <div className="mt-3 space-y-2">
                     {selectedIdentity.materials.map((material) => {
@@ -565,7 +560,7 @@ export const CreateTaskPage = () => {
           </section>
 
           <aside className="rounded-3xl border border-stone-200 bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-stone-900">本次触达对象</h2>
+            <h2 className="text-lg font-semibold text-stone-900">目标导师</h2>
             <div className="mt-4 space-y-3">
               {professors.map((professor) => (
                 <div key={professor.id} className="rounded-2xl border border-stone-100 bg-stone-50 px-4 py-3">

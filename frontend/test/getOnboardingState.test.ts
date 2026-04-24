@@ -14,8 +14,8 @@ describe("getOnboardingState", () => {
       },
       {
         stage: "identity",
-        title: "先创建身份",
-        description: "先补齐发件身份，才能继续配置后续流程。",
+        title: "创建身份",
+        description: "配置发件身份。",
         completed: false,
         nextActionHref: "/profile",
       },
@@ -31,8 +31,8 @@ describe("getOnboardingState", () => {
       },
       {
         stage: "llm",
-        title: "先选择模型",
-        description: "先配置一个可用的模型，后面才能生成草稿。",
+        title: "选择模型",
+        description: "配置可用模型。",
         completed: false,
         nextActionHref: "/profile",
       },
@@ -48,8 +48,8 @@ describe("getOnboardingState", () => {
       },
       {
         stage: "materials",
-        title: "先准备主材料",
-        description: "先上传一份可分析的主材料，方便后续生成邮件内容。",
+        title: "准备材料",
+        description: "上传主材料，用于匹配和写信。",
         completed: false,
         nextActionHref: "/profile",
       },
@@ -65,8 +65,8 @@ describe("getOnboardingState", () => {
       },
       {
         stage: "professors",
-        title: "先补充导师",
-        description: "先添加导师，才能开始进入工作区和批量任务流程。",
+        title: "补充导师",
+        description: "添加导师后可进入任务流程。",
         completed: false,
         nextActionHref: "/professors",
       },
@@ -82,8 +82,8 @@ describe("getOnboardingState", () => {
       },
       {
         stage: "first_task",
-        title: "创建第一封邮件任务",
-        description: "现在可以创建第一封邮件任务，看看整体流程是否顺畅。",
+        title: "创建首个任务",
+        description: "选择导师并创建邮件任务。",
         completed: false,
         nextActionHref: "/create-task",
       },
@@ -100,7 +100,7 @@ describe("getOnboardingState", () => {
       {
         stage: "ready",
         title: "已准备就绪",
-        description: "身份、模型、材料和导师都已配置完成，可以直接开始使用。",
+        description: "配置完成，可以开始使用。",
         completed: true,
         nextActionHref: "/workspace",
       },
@@ -120,7 +120,7 @@ describe("getOnboardingState", () => {
       }),
     ).toMatchObject({
       stage: "llm",
-      title: "先选择模型",
+      title: "选择模型",
       completed: false,
       nextActionHref: "/profile",
     });

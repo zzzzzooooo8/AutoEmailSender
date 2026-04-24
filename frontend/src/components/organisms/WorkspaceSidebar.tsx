@@ -80,7 +80,7 @@ const ArchiveCard = ({ thread }: WorkspaceSidebarProps) => {
       </section>
 
       <div className="rounded-[24px] border border-dashed border-stone-200 bg-white/80 px-4 py-4 text-sm leading-6 text-stone-500">
-        先看左侧真实往来记录，只有需要继续联系时，再展开底部写信区。
+        需要继续联系时，展开底部写信区。
       </div>
     </div>
   );

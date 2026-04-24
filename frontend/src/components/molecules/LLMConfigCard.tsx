@@ -85,7 +85,7 @@ export const LLMConfigCard: React.FC<LLMConfigCardProps> = ({ config, onUpdate }
       {open && (
         <div className="px-5 pb-5">
           <p className="text-xs text-stone-400 mb-4">
-            配置 AI 模型 API Key，用于智能邮件内容生成与分析。当前支持 OpenAI 和 DeepSeek。
+            配置 AI 模型 API Key，用于生成邮件和分析匹配。
           </p>
 
           <div className="flex flex-col gap-4">

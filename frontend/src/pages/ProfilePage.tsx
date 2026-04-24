@@ -24,6 +24,7 @@ import { useNotification } from "@/context/NotificationContext";
 import { useSelectionContext } from "@/context/SelectionContext";
 import { NativeSelectField } from "@/components/atoms/NativeSelectField";
 import { EmailTemplateEditor } from "@/components/molecules/EmailTemplateEditor";
+import { SubjectTemplateInput } from "@/components/molecules/SubjectTemplateInput";
 import { formatApiDateTime } from "@/lib/dateTime";
 import { textToEmailHtml } from "@/lib/richEmail";
 import {
@@ -890,14 +891,14 @@ const OutreachTemplateSummaryCard = ({
               默认发信模式与默认模板
             </div>
             <div className="mt-1 text-xs leading-6 text-stone-500">
-              这里设置新任务默认采用的生成路径，以及共用的一套模板字段。当前默认模式：
+              设置新任务默认使用的写信方式和模板。当前默认模式：
               {form.outreach_generation_mode === "template"
-                ? "固定模板"
-                : "模板润色"}
+                ? "直接套用模板"
+                : "AI 辅助写信"}
               {" · 可直接导入模板文件"}
             </div>
             <div className="mt-1 text-xs leading-6 text-stone-500">
-              导入模板文件只会自动带入正文，不会自动生成主题。
+              导入文件只带入正文，主题需单独填写。
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -969,8 +970,8 @@ const OutreachTemplateModal = ({
                 默认发信模式与默认模板
               </h3>
               <p className="mt-1 max-w-3xl text-sm leading-6 text-stone-500">
-                在这里设置新任务默认带出的模式、主题和富文本正文。
-                正文会自动派生纯文本内容；这些内容只会影响后续新任务，不会反向改掉已经创建好的任务。
+                设置新任务默认带出的模式、主题和正文。
+                只影响新任务，不影响已创建任务。
               </p>
             </div>
             <button
@@ -990,7 +991,7 @@ const OutreachTemplateModal = ({
               <div className="text-sm font-medium text-stone-900">当前默认值摘要</div>
               <div className="mt-1 flex flex-wrap gap-2 text-xs text-stone-500">
                 <span className="rounded-full border border-stone-200 bg-white/90 px-3 py-1">
-                  模式：{form.outreach_generation_mode === 'template' ? '固定模板' : '模板润色'}
+                  模式：{form.outreach_generation_mode === 'template' ? '直接套用模板' : 'AI 辅助写信'}
                 </span>
                 <span className="rounded-full border border-stone-200 bg-white/90 px-3 py-1">
                   主题（必填）：{form.outreach_template_subject.trim() ? '已填写' : '未填写'}
@@ -1031,13 +1032,13 @@ const OutreachTemplateModal = ({
               {[
                 {
                   value: 'llm' as const,
-                  title: '模板润色',
-                  description: '新任务必须先有套磁信模板，AI 只会基于模板做小幅定制化润色。',
+                  title: 'AI 辅助写信',
+                  description: 'AI 基于模板生成个性化草稿。',
                 },
                 {
                   value: 'template' as const,
-                  title: '固定模板',
-                  description: '新任务默认渲染你提供的主题和正文模板，适合稳定话术和批量统一发送。',
+                  title: '直接套用模板',
+                  description: '按模板生成邮件，适合统一话术。',
                 },
               ].map((option) => {
                 const active = form.outreach_generation_mode === option.value;
@@ -1079,17 +1080,16 @@ const OutreachTemplateModal = ({
             </div>
 
             <div className="grid gap-4">
-              <label className="block">
-                {renderFieldLabel('默认模板主题', true)}
-                <input
-                  value={form.outreach_template_subject}
-                  onChange={(event) => onSubjectChange(event.target.value)}
-                  className={inputClassName}
-                  placeholder="例如：申请与 {{name}} 老师交流科研方向"
-                />
-              </label>
+              <SubjectTemplateInput
+                label="默认模板主题"
+                required
+                value={form.outreach_template_subject}
+                onChange={onSubjectChange}
+                inputClassName={`${inputClassName} pr-28`}
+                placeholder="例如：申请与 {{name}} 老师交流科研方向"
+              />
               <p className="text-xs leading-6 text-stone-500">
-                导入模板文件时只会自动带入正文内容，不会自动生成主题；如果主题仍为空，请继续填写后再保存身份。
+                导入文件只带入正文，主题需单独填写。
               </p>
               <EmailTemplateEditor
                 label="默认模板正文"
@@ -1100,8 +1100,8 @@ const OutreachTemplateModal = ({
 
             <div className="rounded-2xl border border-dashed border-stone-200 bg-white/85 px-4 py-3 text-xs leading-6 text-stone-500">
               {form.outreach_generation_mode === 'template'
-                ? '固定模板模式会作为新任务的默认值；任务创建后会把当时模板快照进去，不会再跟随身份默认值漂移。'
-                : '模板润色模式会把这里的模板当作母版；AI 只允许小幅改动称呼、匹配理由、个性化一段、结尾和主题，不会重写整体结构。'}
+                ? '作为新任务默认值；已创建任务不受后续修改影响。'
+                : 'AI 只在模板基础上调整称呼、匹配理由和主题。'}
             </div>
           </div>
         </div>
@@ -1109,7 +1109,7 @@ const OutreachTemplateModal = ({
         <div className="border-t border-stone-200/80 bg-white/80 px-6 py-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="text-xs leading-6 text-stone-500">
-              这里的修改会暂存到当前身份表单中。关闭弹窗后，记得点击页面底部的“保存身份”。
+              保存身份后生效。
             </div>
             <button
               type="button"
@@ -1212,7 +1212,7 @@ const MaterialLibraryModal = ({
                   上传新材料
                 </div>
                 <div className="mt-1 text-xs text-stone-500">
-                  先选类型，再上传文件
+                  选择类型并上传文件
                 </div>
               </div>
               <MaterialTypePicker
@@ -1260,7 +1260,7 @@ const MaterialLibraryModal = ({
 
           {materials.length === 0 ? (
             <div className="rounded-[28px] border border-dashed border-stone-200 bg-white/75 px-6 py-12 text-center text-sm text-stone-500">
-              还没有材料，先上传一份即可。
+              暂无材料。上传一份即可。
             </div>
           ) : visibleMaterials.length === 0 ? (
             <div className="rounded-[28px] border border-dashed border-stone-200 bg-white/75 px-6 py-12 text-center text-sm text-stone-500">
@@ -2096,7 +2096,7 @@ export const ProfilePage = () => {
                   首次配置建议
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-stone-600">
-                  建议顺序：先完成发件身份，再准备材料与模板，配置模型后，用测试写信确认整条发送链路。
+                  按顺序完成身份、材料、模型和测试写信。
                 </p>
               </div>
               <span className="rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs text-stone-600">
@@ -2122,7 +2122,7 @@ export const ProfilePage = () => {
                   发件身份
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-stone-600">
-                  先把发件邮箱、SMTP 和 IMAP 一起配好，完成第一步发件身份准备。
+                  配置发件邮箱、SMTP 和 IMAP。
                 </p>
               </div>
               <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs text-stone-600">
@@ -2311,11 +2311,11 @@ export const ProfilePage = () => {
                   材料与模板
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-stone-600">
-                  第二步补齐默认模板和常用材料，后续导入导师后就能直接开始准备任务。
+                  准备默认模板和常用材料。
                 </p>
               </div>
               <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs text-stone-600">
-                任务前置内容
+                任务准备
               </span>
             </div>
 
@@ -2340,7 +2340,7 @@ export const ProfilePage = () => {
             )}
             {!editingIdentity ? (
               <div className="mt-6 rounded-2xl border border-dashed border-stone-200 bg-stone-50/80 px-4 py-4 text-sm leading-6 text-stone-500">
-                先创建并保存一个发件身份，再回来上传材料和设置默认材料。
+                创建并保存发件身份后，可上传材料。
               </div>
             ) : null}
           </section>
@@ -2352,7 +2352,7 @@ export const ProfilePage = () => {
                   模型配置
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-stone-600">
-                  第三步补齐 AI 模型，后续创建任务时就能直接选择并测试可用模型。
+                  配置可用模型并测试连接。
                 </p>
               </div>
               <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs text-stone-600">
@@ -2670,11 +2670,11 @@ export const ProfilePage = () => {
                   保存与测试写信
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-stone-600">
-                  保存当前身份与模型配置后，再进入测试写信确认发送链路。
+                  保存配置后，发送一封测试邮件。
                 </p>
               </div>
               <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs text-stone-600">
-                流程收尾
+                完成前检查
               </span>
             </div>
 
@@ -2685,7 +2685,7 @@ export const ProfilePage = () => {
                   保存配置
                 </div>
                 <p className="mt-2 text-sm leading-6 text-stone-600">
-                  先保存当前身份与模型配置，确保后续测试使用的是最新邮箱、模板、材料和模型。
+                  保存身份和模型，测试会使用最新配置。
                 </p>
                 <div className="mt-4 flex flex-wrap gap-3">
                   {identityActionButtons}
@@ -2698,10 +2698,10 @@ export const ProfilePage = () => {
                   发送测试邮件
                 </div>
                 <p className="mt-2 text-sm leading-6 text-stone-600">
-                  第四步给自己发一封测试邮件，确认模板、附件、模型生成和 SMTP 发送都正常。
+                  给自己发一封测试邮件，检查模板、附件、模型和 SMTP。
                 </p>
                 <p className="mt-2 text-sm leading-6 text-stone-500">
-                  这个入口不会进入导师任务流，只会把测试邮件发到当前身份自己的邮箱。
+                  仅发送到当前身份邮箱，不写入导师任务。
                 </p>
                 <div className="mt-4">
                   <Link to="/test-compose" className="ui-btn-primary">
@@ -2713,7 +2713,7 @@ export const ProfilePage = () => {
             </div>
 
             <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50/80 px-4 py-4 text-sm leading-6 text-emerald-800">
-              完成这部分后，下一步去「导师管理」导入第一批导师，再回首页开始创建任务。
+              接着去「导师管理」导入导师，再回首页创建任务。
             </div>
           </section>
         </div>

@@ -13,7 +13,7 @@ from app.services.outreach_templates import import_outreach_template_file
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "9c3d5b4a7f21"
+HEAD_REVISION = "2f6a9d8c1e20"
 LEGACY_RUNTIME_REVISION = "7a1d5e42c9bd"
 
 
@@ -352,15 +352,19 @@ class DatabaseSchemaTests(unittest.TestCase):
             """
             INSERT INTO identity_profiles (
                 name,
+                profile_name,
+                sender_name,
                 email_address,
                 smtp_host,
                 smtp_username,
                 smtp_password
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "默认身份",
+                "默认身份",
+                "默认发件人",
                 "identity-default@example.com",
                 "smtp.example.com",
                 "identity-default@example.com",

@@ -734,10 +734,10 @@ export const ProfessorsPage = () => {
               <Users className="h-6 w-6" />
             </div>
             <h2 className="mt-4 text-xl font-semibold text-stone-900">
-              当前列表还没有导师
+              暂无导师
             </h2>
             <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-stone-500">
-              可以先下载模板批量导入，也可以手动新增一位导师。等数据进来以后，再回到首页做筛选和建任务会更顺。
+              可下载模板批量导入，也可手动新增。
             </p>
             <div className="mt-6 flex flex-wrap justify-center gap-3">
               <button
@@ -1006,7 +1006,7 @@ export const ProfessorsPage = () => {
                 }))
               }
               className={inputClassName}
-              placeholder="示例：张教授"
+              placeholder="示例：张明远"
             />
           </label>
           <label className="block">
@@ -1163,7 +1163,7 @@ export const ProfessorsPage = () => {
       <ModalShell
         open={importModalOpen}
         title="导入导师文件"
-        description="先下载模板，按列填写后再导入回系统。导入时会按邮箱覆盖原导师记录，如果原记录已在回收站，会自动恢复。"
+        description="下载模板并按列填写。导入时按邮箱覆盖记录，回收站记录会自动恢复。"
         onClose={() => {
           if (importingFile) {
             return;
@@ -1177,8 +1177,7 @@ export const ProfessorsPage = () => {
               先下载模板
             </div>
             <p className="mt-2 text-sm leading-6 text-stone-500">
-              支持 csv 和 xlsx。模板列固定，recent_papers 一列里用 |
-              分隔多篇论文标题。
+              支持 csv 和 xlsx。下载后按模板里的说明填写即可。
             </p>
             <div className="mt-4 flex flex-wrap gap-3">
               <button
@@ -1198,24 +1197,18 @@ export const ProfessorsPage = () => {
                 下载 CSV 模板
               </button>
             </div>
-            <div className="mt-5 flex flex-wrap gap-2 text-xs text-stone-500">
-              {[
-                "name",
-                "email",
-                "title",
-                "university",
-                "school",
-                "department",
-                "research_direction",
-              ].map((item) => (
-                <span
-                  key={item}
-                  className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1"
-                >
-                  {item}
-                </span>
-              ))}
-            </div>
+            <ul className="mt-5 space-y-2 text-sm leading-6 text-stone-600">
+              <li>模板内已包含字段说明和示例行，下载后可直接照着填写。</li>
+              <li>说明行和示例行可以保留，导入时会自动忽略。</li>
+              <li>
+                <span className="font-mono text-xs">research_direction</span>{" "}
+                多个方向用中文分号；分隔。
+              </li>
+              <li>
+                <span className="font-mono text-xs">recent_papers</span>{" "}
+                多篇论文用 | 分隔；同邮箱会覆盖更新。
+              </li>
+            </ul>
           </div>
 
           <div className="rounded-[28px] border border-stone-200 bg-white p-5 shadow-sm">
@@ -1223,7 +1216,7 @@ export const ProfessorsPage = () => {
               上传并导入
             </div>
             <p className="mt-2 text-sm leading-6 text-stone-500">
-              必填列是 name 和 email。格式错误的行会跳过，不会中断整批导入。
+              必填列是 name 和 email。格式错误的行会跳过；同邮箱记录会覆盖更新，回收站记录会自动恢复。
             </p>
             <label
               onDragOver={(event) => event.preventDefault()}

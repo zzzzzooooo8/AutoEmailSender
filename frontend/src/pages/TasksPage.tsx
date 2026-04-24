@@ -131,8 +131,8 @@ export const TasksPage = () => {
     return (
       <main className="mx-auto max-w-4xl px-6 py-10">
         <div className="rounded-3xl border border-dashed border-stone-300 bg-[#fcfbf8] p-10 text-center">
-          <h1 className="text-2xl font-semibold text-stone-900">先选择身份和模型</h1>
-          <p className="mt-3 text-sm text-stone-600">任务页只显示当前上下文。</p>
+          <h1 className="text-2xl font-semibold text-stone-900">选择身份和模型</h1>
+          <p className="mt-3 text-sm text-stone-600">任务页使用顶部选择的身份和模型。</p>
         </div>
         {confirmDialog}
       </main>
@@ -160,7 +160,7 @@ export const TasksPage = () => {
         </div>
       ) : tasks.length === 0 ? (
         <div className="mt-6 rounded-3xl border border-dashed border-stone-300 bg-white px-6 py-14 text-center text-sm text-stone-500 shadow-sm">
-          暂无任务，先去首页创建。
+          暂无任务。可从首页创建。
         </div>
       ) : (
         <div className="mt-6 grid gap-6 md:grid-cols-2">

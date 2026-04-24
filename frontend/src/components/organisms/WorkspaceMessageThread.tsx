@@ -63,9 +63,9 @@ export const WorkspaceMessageThread = ({
         <div className="sticky top-0 z-10 rounded-[24px] border border-stone-200/80 bg-white/92 px-4 py-3 shadow-sm backdrop-blur-xl">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <div className="text-sm font-semibold text-stone-900">真实通信记录</div>
+              <div className="text-sm font-semibold text-stone-900">通信记录</div>
               <div className="mt-1 text-xs leading-5 text-stone-500">
-                这里只看已经发出去的邮件和老师的真实回复。
+                显示已发送邮件和导师回复。
               </div>
             </div>
             <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1 text-xs font-medium text-stone-600">
@@ -76,9 +76,9 @@ export const WorkspaceMessageThread = ({
 
         {realMessages.length === 0 ? (
           <div className="rounded-[30px] border border-dashed border-stone-300 bg-white/94 px-6 py-14 text-center shadow-sm">
-            <div className="text-lg font-semibold text-stone-900">还没有真实往来</div>
+            <div className="text-lg font-semibold text-stone-900">暂无通信记录</div>
             <div className="mt-2 text-sm leading-7 text-stone-500">
-              你发出邮件后，或者老师回复后，这里就会像聊天记录一样往下累计。
+              发出邮件或收到回复后，会显示在这里。
             </div>
           </div>
         ) : (

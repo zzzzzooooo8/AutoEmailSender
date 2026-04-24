@@ -10,7 +10,7 @@ describe("getWorkspaceNextStep", () => {
         hasPrimaryMaterial: false,
       }),
     ).toEqual({
-      title: "下一步：先选择用于分析的材料",
+      title: "选择分析材料",
     });
   });
 
@@ -22,7 +22,7 @@ describe("getWorkspaceNextStep", () => {
         hasPrimaryMaterial: true,
       }),
     ).toEqual({
-      title: "下一步：生成一版邮件草稿",
+      title: "生成邮件草稿",
     });
   });
 
@@ -34,7 +34,7 @@ describe("getWorkspaceNextStep", () => {
         hasPrimaryMaterial: true,
       }),
     ).toEqual({
-      title: "下一步：确认是否保留定时发送",
+      title: "确认发送时间",
     });
   });
 
@@ -46,7 +46,7 @@ describe("getWorkspaceNextStep", () => {
         hasPrimaryMaterial: true,
       }),
     ).toEqual({
-      title: "下一步：人工检查后发送",
+      title: "检查后发送",
     });
   });
 
@@ -58,7 +58,7 @@ describe("getWorkspaceNextStep", () => {
         hasPrimaryMaterial: true,
       }),
     ).toEqual({
-      title: "下一步：生成一版邮件草稿",
+      title: "生成邮件草稿",
     });
   });
 
@@ -70,7 +70,7 @@ describe("getWorkspaceNextStep", () => {
         hasPrimaryMaterial: false,
       }),
     ).toEqual({
-      title: "下一步：先选择用于分析的材料",
+      title: "选择分析材料",
     });
   });
 
@@ -82,7 +82,7 @@ describe("getWorkspaceNextStep", () => {
         hasDraft: false,
         hasPrimaryMaterial: false,
       },
-      "下一步：查看发送结果",
+      "查看发送结果",
     ],
     [
       "reply_detected",
@@ -91,7 +91,7 @@ describe("getWorkspaceNextStep", () => {
         hasDraft: false,
         hasPrimaryMaterial: false,
       },
-      "下一步：处理导师回复",
+      "处理导师回复",
     ],
     [
       "send_failed",
@@ -100,7 +100,7 @@ describe("getWorkspaceNextStep", () => {
         hasDraft: false,
         hasPrimaryMaterial: false,
       },
-      "下一步：查看失败原因并重试",
+      "查看失败原因并重试",
     ],
     [
       "skipped",
@@ -109,14 +109,14 @@ describe("getWorkspaceNextStep", () => {
         hasDraft: false,
         hasPrimaryMaterial: false,
       },
-      "下一步：查看跳过原因",
+      "查看跳过原因",
     ],
   ])(
     "keeps terminal status %s from falling back to precondition prompts",
     (_, input, title) => {
       expect(getWorkspaceNextStep(input)).toEqual({ title });
-      expect(getWorkspaceNextStep(input).title).not.toBe("下一步：先选择用于分析的材料");
-      expect(getWorkspaceNextStep(input).title).not.toBe("下一步：生成一版邮件草稿");
+      expect(getWorkspaceNextStep(input).title).not.toBe("选择分析材料");
+      expect(getWorkspaceNextStep(input).title).not.toBe("生成邮件草稿");
     },
   );
 });

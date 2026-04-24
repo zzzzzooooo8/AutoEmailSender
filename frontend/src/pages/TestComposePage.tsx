@@ -3,6 +3,7 @@ import { Loader2, RefreshCcw, Save, Send } from "lucide-react";
 import { useNotification } from "@/context/NotificationContext";
 import { useSelectionContext } from "@/context/SelectionContext";
 import { EmailTemplateEditor } from "@/components/molecules/EmailTemplateEditor";
+import { SubjectTemplateInput } from "@/components/molecules/SubjectTemplateInput";
 import {
   generateTestComposeDraft,
   getTestComposeThread,
@@ -60,7 +61,7 @@ export const TestComposePage = () => {
         const nextThread = await action();
         syncDraft(nextThread);
         if (successTitle) {
-          notifySuccess(successTitle, "已更新测试写信内容。");
+          notifySuccess(successTitle, "测试写信内容已更新。");
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : "测试写信操作失败";
@@ -81,8 +82,8 @@ export const TestComposePage = () => {
     return (
       <main className="mx-auto max-w-4xl px-6 py-10">
         <div className="rounded-3xl border border-dashed border-stone-300 bg-[#fcfbf8] p-10 text-center">
-          <h1 className="text-2xl font-semibold text-stone-900">先选择身份和模型</h1>
-          <p className="mt-3 text-sm text-stone-600">测试写信页会使用你当前选择的身份和模型。</p>
+          <h1 className="text-2xl font-semibold text-stone-900">选择身份和模型</h1>
+          <p className="mt-3 text-sm text-stone-600">使用顶部选择的身份和模型。</p>
         </div>
       </main>
     );
@@ -134,12 +135,12 @@ export const TestComposePage = () => {
               </div>
               <h1 className="mt-2 text-3xl font-semibold text-stone-950">测试写信</h1>
               <p className="mt-2 text-sm leading-6 text-stone-600">
-                这封邮件会真实发送到当前身份自己的邮箱，用来检查模板、附件与 SMTP 效果。
+                发送到自己的邮箱，用于检查模板、附件和发信设置。
               </p>
             </div>
             <div className="grid min-w-full gap-2 text-sm sm:min-w-[520px] sm:grid-cols-3">
               <div className="rounded-2xl border border-stone-200 bg-white px-4 py-3 shadow-sm">
-                <div className="text-xs text-stone-500">当前身份</div>
+                <div className="text-xs text-stone-500">身份</div>
                 <div className="mt-1 truncate font-medium text-stone-900">
                   {identityProfileName}
                 </div>
@@ -174,14 +175,12 @@ export const TestComposePage = () => {
               </div>
 
               <div className="space-y-4">
-                <label className="block">
-                  <div className="mb-2 text-sm font-medium text-stone-800">邮件主题</div>
-                  <input
-                    value={subject}
-                    onChange={(event) => setSubject(event.target.value)}
-                    className="form-input"
-                  />
-                </label>
+                <SubjectTemplateInput
+                  label="邮件主题"
+                  value={subject}
+                  onChange={setSubject}
+                  placeholder="测试邮件主题"
+                />
                 <EmailTemplateEditor
                   label="邮件正文"
                   html={bodyHtml}
@@ -195,7 +194,7 @@ export const TestComposePage = () => {
 
             <aside className="space-y-4">
               <section className="rounded-3xl border border-stone-200 bg-white p-5 shadow-sm">
-                <h2 className="text-base font-semibold text-stone-900">发送上下文</h2>
+                <h2 className="text-base font-semibold text-stone-900">发送信息</h2>
                 <div className="mt-4 space-y-3 text-sm text-stone-600">
                   <div className="flex items-center justify-between gap-3">
                     <span>身份</span>
@@ -217,7 +216,7 @@ export const TestComposePage = () => {
                   </div>
                 </div>
                 <div className="mt-4 rounded-2xl border border-primary/15 bg-primary/5 px-4 py-3 text-xs leading-6 text-stone-600">
-                  <div>{"{{name}} 会在测试邮件中替换为「测试收件人」"}</div>
+                  <div>{"{{name}} 测试时显示为「测试收件人」"}</div>
                   <div>发件人姓名：{identitySenderName}</div>
                 </div>
               </section>
@@ -232,7 +231,7 @@ export const TestComposePage = () => {
                 <div className="mt-4 space-y-2">
                   {thread.material_options.length === 0 ? (
                     <div className="rounded-2xl border border-dashed border-stone-300 bg-stone-50 px-4 py-4 text-sm text-stone-500">
-                      当前身份还没有可发送的材料。
+                      暂无可发送材料。
                     </div>
                   ) : (
                     thread.material_options.map((material) => {
@@ -300,7 +299,7 @@ export const TestComposePage = () => {
             className="sticky bottom-4 mt-5 flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-stone-200 bg-white/95 px-4 py-3 shadow-[0_18px_40px_-28px_rgba(41,37,36,0.45)] backdrop-blur"
           >
             <div className="text-sm text-stone-500">
-              当前草稿会发送到 <span className="font-medium text-stone-800">{thread.identity.email_address}</span>
+              将发送到 <span className="font-medium text-stone-800">{thread.identity.email_address}</span>
             </div>
             <div className="flex flex-wrap gap-2">
               <button

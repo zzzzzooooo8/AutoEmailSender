@@ -15,7 +15,7 @@ describe("EmailTemplateEditor", () => {
     expect(screen.getByRole("textbox", { name: "默认模板正文" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "加粗" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "插入表格" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "HTML 预览" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "HTML 预览" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "字体菜单" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "字号菜单" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "行距菜单" })).toHaveTextContent("行距");
@@ -95,19 +95,20 @@ describe("EmailTemplateEditor", () => {
     );
   });
 
-  it("preserves existing table html in the preview", () => {
+  it("renders the placeholder menu in a fixed portal to avoid clipped workspace panels", () => {
     render(
       <EmailTemplateEditor
         label="邮件正文"
-        html='<table style="font-family:SimSun"><tbody><tr><td>老师您好</td></tr></tbody></table>'
+        html="<p>老师您好</p>"
         onChange={vi.fn()}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "HTML 预览" }));
+    fireEvent.click(screen.getByRole("button", { name: "占位符菜单" }));
 
-    const previewContainer = screen.getByRole("button", { name: "HTML 预览" }).closest("div")?.parentElement?.parentElement;
-    expect(previewContainer?.innerHTML).toContain("<table");
-    expect(previewContainer?.innerHTML).toContain("font-family: SimSun");
+    const menu = screen.getByTestId("email-template-placeholder-menu");
+    expect(menu.parentElement).toBe(document.body);
+    expect(menu).toHaveClass("fixed");
+    expect(menu).toHaveClass("z-[80]");
   });
 });

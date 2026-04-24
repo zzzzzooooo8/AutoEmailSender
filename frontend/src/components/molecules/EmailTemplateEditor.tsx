@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
@@ -16,6 +16,7 @@ import {
   Underline as UnderlineIcon,
 } from "lucide-react";
 import { deriveTextFromEmailHtml } from "@/lib/richEmail";
+import { FloatingMenuPortal } from "@/components/molecules/FloatingMenuPortal";
 import { FontFamily } from "@/components/molecules/tiptap/FontFamily";
 import { FontSize } from "@/components/molecules/tiptap/FontSize";
 import { LineHeight } from "@/components/molecules/tiptap/LineHeight";
@@ -79,26 +80,12 @@ const ToolbarMenu = ({
   onToggle,
   onClose,
 }: ToolbarMenuProps) => {
-  const menuRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!active) {
-      return;
-    }
-
-    const handlePointerDown = (event: MouseEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) {
-        onClose();
-      }
-    };
-
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, [active, onClose]);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
 
   return (
-    <div ref={menuRef} className="relative">
+    <div className="relative">
       <button
+        ref={buttonRef}
         type="button"
         aria-label={ariaLabel}
         aria-expanded={active}
@@ -109,27 +96,31 @@ const ToolbarMenu = ({
         <ChevronDown className="h-4 w-4 shrink-0 text-stone-400" />
       </button>
 
-      {active ? (
-        <div className="absolute left-0 top-[calc(100%+0.5rem)] z-20 min-w-[180px] overflow-hidden rounded-2xl border border-stone-200 bg-white p-2 shadow-[0_18px_40px_-24px_rgba(41,37,36,0.28)]">
-          {options.map((option) => {
-            const selected = normalizeValue(selectedValue) === normalizeValue(option.value);
-            return (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => {
-                  onSelect(option.value);
-                  onClose();
-                }}
-                className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm text-stone-700 transition hover:bg-stone-50"
-              >
-                <span>{option.label}</span>
-                {selected ? <Check className="h-4 w-4 text-primary" /> : null}
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
+      <FloatingMenuPortal
+        open={active}
+        anchorRef={buttonRef}
+        minWidth={180}
+        testId={ariaLabel === "占位符菜单" ? "email-template-placeholder-menu" : undefined}
+        onClose={onClose}
+      >
+        {options.map((option) => {
+          const selected = normalizeValue(selectedValue) === normalizeValue(option.value);
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => {
+                onSelect(option.value);
+                onClose();
+              }}
+              className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm text-stone-700 transition hover:bg-stone-50"
+            >
+              <span>{option.label}</span>
+              {selected ? <Check className="h-4 w-4 text-primary" /> : null}
+            </button>
+          );
+        })}
+      </FloatingMenuPortal>
     </div>
   );
 };
@@ -139,7 +130,6 @@ export const EmailTemplateEditor = ({
   html,
   onChange,
 }: EmailTemplateEditorProps) => {
-  const [previewOpen, setPreviewOpen] = useState(false);
   const [openMenu, setOpenMenu] = useState<MenuKey | null>(null);
   const editor = useEditor({
     extensions: [
@@ -187,11 +177,6 @@ export const EmailTemplateEditor = ({
       editor.commands.setContent(preparedHtml, false);
     }
   }, [editor, html]);
-
-  const contentHtml = useMemo(
-    () => serializeTemplatePlaceholderHtml(editor?.getHTML() ?? html),
-    [editor, html],
-  );
 
   if (!editor) {
     return null;
@@ -357,14 +342,6 @@ export const EmailTemplateEditor = ({
         >
           <Table2 className="h-4 w-4" />
         </button>
-        <button
-          type="button"
-          aria-label="HTML 预览"
-          onClick={() => setPreviewOpen((current) => !current)}
-          className="rounded-xl px-3 py-2 text-xs text-stone-600 hover:bg-white"
-        >
-          HTML 预览
-        </button>
       </div>
 
       {tableActive ? (
@@ -449,12 +426,6 @@ export const EmailTemplateEditor = ({
       ) : null}
 
       <EditorContent editor={editor} />
-
-      {previewOpen ? (
-        <div className="mt-4 rounded-2xl border border-stone-200 bg-stone-50 p-4">
-          <div dangerouslySetInnerHTML={{ __html: contentHtml }} />
-        </div>
-      ) : null}
     </div>
   );
 };

@@ -54,6 +54,26 @@ describe("ProfessorsPage notifications", () => {
     expect(message.closest('[data-testid="notification-card"]')).not.toBeNull();
   });
 
+  it("explains that import templates include guidance and ignored examples", async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(listProfessorsForManagement).toHaveBeenCalled();
+    });
+
+    fireEvent.click(
+      within(getWorkbenchRegion()).getByRole("button", {
+        name: "导入文件",
+      }),
+    );
+
+    expect(screen.getByText(/模板内已包含字段说明和示例行/)).toBeInTheDocument();
+    expect(screen.getByText(/示例行可以保留，导入时会自动忽略/)).toBeInTheDocument();
+    expect(screen.getByText(/recent_papers/)).toBeInTheDocument();
+    expect(screen.getByText(/research_direction/)).toBeInTheDocument();
+    expect(screen.getByText(/中文分号/)).toBeInTheDocument();
+  });
+
   it("keeps the import result detail card while showing a success notification after import", async () => {
     importProfessorsFromFile.mockResolvedValue({
       message: "已完成导师导入",

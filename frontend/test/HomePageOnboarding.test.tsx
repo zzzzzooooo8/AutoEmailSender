@@ -163,7 +163,7 @@ describe("HomePage onboarding", () => {
 
     expect(screen.getByText("正在加载导师列表...")).toBeInTheDocument();
     expect(
-      screen.queryByRole("heading", { name: "开始使用前，还差这几步" }),
+      screen.queryByRole("heading", { name: "完成首次配置" }),
     ).not.toBeInTheDocument();
 
     deferred.resolve([professor]);
@@ -173,7 +173,7 @@ describe("HomePage onboarding", () => {
     renderPage();
 
     const heading = await screen.findByRole("heading", {
-      name: "开始使用前，还差这几步",
+      name: "完成首次配置",
     });
 
     expect(heading).toBeInTheDocument();
@@ -182,7 +182,7 @@ describe("HomePage onboarding", () => {
     expect(screen.getByText("配置 AI 模型")).toBeInTheDocument();
     expect(screen.getByText("准备材料和模板")).toBeInTheDocument();
     expect(screen.getByText("导入导师")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "继续完成准备" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "继续配置" })).toHaveAttribute(
       "href",
       "/profile",
     );
@@ -202,9 +202,9 @@ describe("HomePage onboarding", () => {
     renderPage();
 
     expect(
-      await screen.findByRole("heading", { name: "开始使用前，还差这几步" }),
+      await screen.findByRole("heading", { name: "完成首次配置" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "继续完成准备" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "继续配置" })).toHaveAttribute(
       "href",
       "/professors",
     );
@@ -229,7 +229,7 @@ describe("HomePage onboarding", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(/模式：/)).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("heading", { name: "开始使用前，还差这几步" }),
+      screen.queryByRole("heading", { name: "完成首次配置" }),
     ).not.toBeInTheDocument();
   });
 });

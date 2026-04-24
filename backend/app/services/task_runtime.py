@@ -28,8 +28,10 @@ from app.services.materials import (
 )
 from app.services.outreach_templates import (
     OUTREACH_GENERATION_MODE_TEMPLATE,
+    build_template_context,
     get_outreach_template_defaults_validation_error,
     render_outreach_template,
+    render_template_with_context,
     resolve_outreach_template_config,
 )
 from app.services.rich_text import normalize_email_html, text_to_email_html
@@ -469,9 +471,17 @@ async def dispatch_email_task(
         if task.batch_task and task.batch_task.status != BatchTaskStatus.RUNNING.value:
             return task.professor_id, task.identity_id, task.llm_profile_id
 
-        subject = task.approved_subject or task.generated_subject
-        body_text = task.approved_body_text or task.generated_content_text
-        body_html = task.approved_body_html or task.generated_content_html
+        subject_template = task.approved_subject or task.generated_subject
+        body_text_template = task.approved_body_text or task.generated_content_text
+        body_html_template = task.approved_body_html or task.generated_content_html
+        context = build_template_context(task.identity, task.professor)
+        subject = render_template_with_context(subject_template, context).strip()
+        body_text = render_template_with_context(body_text_template, context).strip()
+        body_html = (
+            render_template_with_context(body_html_template, context)
+            if body_html_template
+            else None
+        )
         if not subject or not body_text:
             task.status = EmailTaskStatus.SEND_FAILED.value
             task.last_error = "任务缺少可发送的主题或正文"

@@ -33,7 +33,6 @@ from app.services.outreach_templates import (
     build_test_compose_template_context,
     get_identity_sender_name,
     get_outreach_template_defaults_validation_error,
-    render_outreach_template,
     render_template_with_context,
     resolve_outreach_template_config,
 )
@@ -62,7 +61,6 @@ async def generate_test_compose_draft(
     identity = await _get_identity(session, identity_id)
     llm_profile = await _get_llm_profile(session, llm_profile_id)
     compose_session = await _get_or_create_test_compose_session(session, identity_id, llm_profile_id, identity)
-    pseudo_professor = _build_self_recipient_professor(identity)
     outreach_config = resolve_outreach_template_config(identity)
 
     template_subject = (outreach_config.subject_template or "").strip() or None
@@ -72,21 +70,15 @@ async def generate_test_compose_draft(
         raise ValueError(detail)
 
     if outreach_config.generation_mode == OUTREACH_GENERATION_MODE_TEMPLATE:
-        rendered = render_outreach_template(
-            identity,
-            pseudo_professor,
-            subject_template=template_subject,
-            body_text_template=template_body,
-            body_html_template=outreach_config.body_html_template,
-        )
-        compose_session.subject = rendered.subject
-        compose_session.body_text = rendered.body_text
-        compose_session.body_html = rendered.body_html
+        compose_session.subject = template_subject
+        compose_session.body_text = template_body or ""
+        compose_session.body_html = (outreach_config.body_html_template or "").strip() or None
     else:
         primary_material = identity.current_primary_material
         if primary_material is None:
             raise ValueError("请先选择用于匹配的默认材料")
         ensure_material_extracted_text(primary_material)
+        pseudo_professor = _build_self_recipient_professor(identity)
         generation = await llm_runtime.generate_draft_content(
             identity=identity,
             primary_material=primary_material,

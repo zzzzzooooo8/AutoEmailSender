@@ -11,6 +11,7 @@ import {
   TimerReset,
 } from 'lucide-react';
 import { EmailTemplateEditor } from '@/components/molecules/EmailTemplateEditor';
+import { SubjectTemplateInput } from '@/components/molecules/SubjectTemplateInput';
 type RichEmailValue = { html: string; text: string };
 import { getTaskModeCopy } from '@/features/create-task/client/taskCopy';
 import {
@@ -146,12 +147,12 @@ export const WorkspaceComposerDock = ({
     currentTaskMode === 'template'
       ? hasTemplateConfigured
         ? null
-        : '固定模板还没准备好，先回身份页补模板。'
+        : '请先在身份页补充模板。'
       : !hasTemplateConfigured
-        ? '还没有套磁信模板，先回身份页补模板。'
+        ? '请先在身份页补充套磁信模板。'
         : currentTask.primary_material_id
           ? null
-          : '还没有默认材料，先选一份可匹配的材料。';
+          : '请选择用于匹配的材料。';
 
   return (
     <div className="border-t border-stone-200/80 bg-[linear-gradient(180deg,rgba(255,252,246,0.94),rgba(255,248,240,0.98))] px-4 py-4 backdrop-blur-xl sm:px-6">
@@ -162,7 +163,7 @@ export const WorkspaceComposerDock = ({
               <div>
                 <div className="text-sm font-semibold text-stone-900">写信区</div>
                 <div className="mt-1 text-xs leading-5 text-stone-500">
-                  在这里整理草稿。上面的真实通信记录会一直保留，不会被打断。
+                  编辑草稿、附件和发送时间。
                 </div>
               </div>
 
@@ -178,15 +179,12 @@ export const WorkspaceComposerDock = ({
 
             <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
               <div className="space-y-4">
-                <label className="block">
-                  <div className="mb-2 text-sm font-medium text-stone-800">邮件主题</div>
-                  <input
-                    value={subject}
-                    onChange={(event) => onSubjectChange(event.target.value)}
-                    className="form-input"
-                    placeholder="给老师的邮件主题"
-                  />
-                </label>
+                <SubjectTemplateInput
+                  label="邮件主题"
+                  value={subject}
+                  onChange={onSubjectChange}
+                  placeholder="给老师的邮件主题"
+                />
 
                 <EmailTemplateEditor
                   label="邮件正文"
@@ -198,7 +196,7 @@ export const WorkspaceComposerDock = ({
               <div className="space-y-4">
                 <Panel
                   title="草稿方式"
-                  description="这里只放次要设置，不占主视线。"
+                  description="选择写信方式。"
                 >
                   <div className="grid grid-cols-2 gap-2">
                     {MODE_OPTIONS.map((option) => {
@@ -225,7 +223,7 @@ export const WorkspaceComposerDock = ({
 
                 <Panel
                   title="生成辅助"
-                  description="需要时再用，不放在页面最显眼的位置。"
+                  description="用于匹配分析和草稿生成。"
                 >
                   <div className="flex flex-wrap gap-2">
                     <button
@@ -235,7 +233,7 @@ export const WorkspaceComposerDock = ({
                       className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <RefreshCcw className="h-4 w-4" />
-                      分析这位导师是否值得联系
+                      分析匹配度
                     </button>
                     <button
                       type="button"
@@ -244,7 +242,7 @@ export const WorkspaceComposerDock = ({
                       className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <RefreshCcw className="h-4 w-4" />
-                      生成一版邮件草稿
+                      生成草稿
                     </button>
                   </div>
                   {limitationHint ? (
@@ -300,7 +298,7 @@ export const WorkspaceComposerDock = ({
 
                 <Panel title="随信附件">
                   {thread.material_options.length === 0 ? (
-                    <div className="text-sm text-stone-500">当前身份还没有可发送的材料。</div>
+                    <div className="text-sm text-stone-500">暂无可发送材料。</div>
                   ) : (
                     <div className="max-h-48 space-y-2 overflow-y-auto pr-1">
                       {thread.material_options.map((material) => {
@@ -399,8 +397,8 @@ export const WorkspaceComposerDock = ({
               </div>
               <div className="mt-1 text-xs leading-5 text-stone-500">
                 {draftReady
-                  ? '草稿已经准备好。点开后继续修改，再决定发送。'
-                  : '编辑区默认收起，需要时再展开，不打断上面的沟通记录。'}
+                  ? '草稿已生成，可继续编辑。'
+                  : '展开后编辑草稿和发送设置。'}
               </div>
               <div className="mt-3 rounded-2xl border border-primary/15 bg-primary/5 px-4 py-3">
                 <div className="text-sm font-semibold text-stone-900">{nextStepTitle}</div>
@@ -431,7 +429,7 @@ export const WorkspaceComposerDock = ({
                 className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <RefreshCcw className="h-4 w-4" />
-                分析这位导师是否值得联系
+                分析匹配度
               </button>
               <button
                 type="button"
@@ -440,7 +438,7 @@ export const WorkspaceComposerDock = ({
                 className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <RefreshCcw className="h-4 w-4" />
-                生成一版邮件草稿
+                生成草稿
               </button>
               <button
                 type="button"

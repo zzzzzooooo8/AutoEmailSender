@@ -172,7 +172,7 @@ describe("ProfilePage onboarding", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "建议顺序：先完成发件身份，再准备材料与模板，配置模型后，用测试写信确认整条发送链路。",
+        "按顺序完成身份、材料、模型和测试写信。",
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("1. 发件身份")).toBeInTheDocument();
@@ -181,7 +181,7 @@ describe("ProfilePage onboarding", () => {
     expect(screen.getByText("4. 测试写信")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "完成这部分后，下一步去「导师管理」导入第一批导师，再回首页开始创建任务。",
+        "接着去「导师管理」导入导师，再回首页创建任务。",
       ),
     ).toBeInTheDocument();
   });
@@ -247,7 +247,7 @@ describe("ProfilePage onboarding", () => {
     expect(screen.getByText("发送测试邮件")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "第四步给自己发一封测试邮件，确认模板、附件、模型生成和 SMTP 发送都正常。",
+        "给自己发一封测试邮件，检查模板、附件、模型和 SMTP。",
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText("第四步：测试写信")).not.toBeInTheDocument();

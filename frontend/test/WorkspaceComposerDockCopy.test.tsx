@@ -102,8 +102,8 @@ describe("WorkspaceComposerDock copy", () => {
         canCalculateMatch={true}
         canGenerateDraft={true}
         composerExpanded={false}
-        nextStepTitle="下一步：生成一版邮件草稿"
-        nextStepDescription="先让系统起一版草稿，再人工检查是否保留这位导师。"
+        nextStepTitle="生成邮件草稿"
+        nextStepDescription="生成草稿后再人工检查。"
         onToggleExpanded={vi.fn()}
         onSubjectChange={vi.fn()}
         onContentChange={vi.fn()}
@@ -119,15 +119,13 @@ describe("WorkspaceComposerDock copy", () => {
       />,
     );
 
-    expect(screen.getByText("下一步：生成一版邮件草稿")).toBeInTheDocument();
+    expect(screen.getByText("生成邮件草稿")).toBeInTheDocument();
+    expect(screen.getByText("生成草稿后再人工检查。")).toBeInTheDocument();
     expect(
-      screen.getByText("先让系统起一版草稿，再人工检查是否保留这位导师。"),
+      screen.getByRole("button", { name: "分析匹配度" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "分析这位导师是否值得联系" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "生成一版邮件草稿" }),
+      screen.getByRole("button", { name: "生成草稿" }),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "先看匹配" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "生成新草稿" })).not.toBeInTheDocument();
@@ -152,8 +150,8 @@ describe("WorkspaceComposerDock copy", () => {
         canCalculateMatch={true}
         canGenerateDraft={true}
         composerExpanded={true}
-        nextStepTitle="下一步：人工检查后发送"
-        nextStepDescription="草稿已经准备好，检查主题、正文和附件后，再决定立即发送还是定时发送。"
+        nextStepTitle="检查后发送"
+        nextStepDescription="检查主题、正文和附件后发送。"
         onToggleExpanded={vi.fn()}
         onSubjectChange={vi.fn()}
         onContentChange={vi.fn()}
@@ -192,8 +190,8 @@ describe("WorkspaceComposerDock copy", () => {
         canCalculateMatch={true}
         canGenerateDraft={true}
         composerExpanded={true}
-        nextStepTitle="下一步：人工检查后发送"
-        nextStepDescription="草稿已经准备好，检查主题、正文和附件后，再决定立即发送还是定时发送。"
+        nextStepTitle="检查后发送"
+        nextStepDescription="检查主题、正文和附件后发送。"
         onToggleExpanded={vi.fn()}
         onSubjectChange={vi.fn()}
         onContentChange={vi.fn()}
@@ -210,7 +208,9 @@ describe("WorkspaceComposerDock copy", () => {
     );
 
     expect(screen.getByRole("textbox", { name: "邮件正文" })).toHaveTextContent("老师您好");
+    expect(screen.getByRole("textbox", { name: "邮件主题" })).toHaveValue("测试主题");
+    expect(screen.getByRole("button", { name: "主题占位符菜单" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "插入表格" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "HTML 预览" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "HTML 预览" })).not.toBeInTheDocument();
   });
 });

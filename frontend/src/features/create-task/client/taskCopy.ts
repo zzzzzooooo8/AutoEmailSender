@@ -8,11 +8,11 @@ export interface TaskModeCopy {
 const TASK_MODE_COPY: Record<OutreachGenerationMode, TaskModeCopy> = {
   template: {
     title: "直接套用模板",
-    description: "直接按模板内容发给导师，适合统一表达。",
+    description: "按模板生成邮件，适合统一话术。",
   },
   llm: {
     title: "AI 辅助写信",
-    description: "以你的模板为基础，自动生成更贴近导师背景的一版草稿。",
+    description: "基于模板生成个性化草稿。",
   },
 };
 

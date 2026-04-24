@@ -215,12 +215,10 @@ describe("WorkspacePage next-step", () => {
 
     renderPage();
 
-    expect(await screen.findByText("下一步：人工检查后发送")).toBeInTheDocument();
-    expect(
-      screen.getByText("草稿已经准备好，检查主题、正文和附件后，再决定立即发送还是定时发送。"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("检查后发送")).toBeInTheDocument();
+    expect(screen.getByText("检查主题、正文和附件后发送。")).toBeInTheDocument();
     expect(screen.getByText("draft-ready")).toBeInTheDocument();
-    expect(screen.queryByText("下一步：生成一版邮件草稿")).not.toBeInTheDocument();
+    expect(screen.queryByText("生成邮件草稿")).not.toBeInTheDocument();
   });
 
   it("shows readable draft content in the workspace for an HTML-only draft", async () => {
@@ -247,12 +245,10 @@ describe("WorkspacePage next-step", () => {
 
     renderPage();
 
-    expect(await screen.findByText("下一步：生成一版邮件草稿")).toBeInTheDocument();
-    expect(
-      screen.getByText("先让系统起一版草稿，再人工检查是否保留这位导师。"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("生成邮件草稿")).toBeInTheDocument();
+    expect(screen.getByText("生成草稿后再人工检查。")).toBeInTheDocument();
     expect(screen.getByText("draft-empty")).toBeInTheDocument();
-    expect(screen.queryByText("下一步：人工检查后发送")).not.toBeInTheDocument();
+    expect(screen.queryByText("检查后发送")).not.toBeInTheDocument();
   });
 
   it("prompts to select material first when no primary material is set", async () => {
@@ -264,10 +260,8 @@ describe("WorkspacePage next-step", () => {
 
     renderPage();
 
-    expect(await screen.findByText("下一步：先选择用于分析的材料")).toBeInTheDocument();
-    expect(
-      screen.getByText("先选一份材料，系统才能继续分析这位导师是否值得联系。"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("选择分析材料")).toBeInTheDocument();
+    expect(screen.getByText("选择材料后可分析匹配度。")).toBeInTheDocument();
     expect(screen.getByText("draft-empty")).toBeInTheDocument();
   });
 
@@ -281,11 +275,9 @@ describe("WorkspacePage next-step", () => {
 
     renderPage();
 
-    expect(await screen.findByText("下一步：查看发送结果")).toBeInTheDocument();
-    expect(
-      screen.getByText("邮件已经发出，接下来重点看发送结果，以及导师是否进入真实往来。"),
-    ).toBeInTheDocument();
-    expect(screen.queryByText("下一步：先选择用于分析的材料")).not.toBeInTheDocument();
+    expect(await screen.findByText("查看发送结果")).toBeInTheDocument();
+    expect(screen.getByText("关注发送结果和导师回复。")).toBeInTheDocument();
+    expect(screen.queryByText("选择分析材料")).not.toBeInTheDocument();
   });
 
   it("fills a non-empty body_text when sending an HTML-only draft", async () => {
@@ -297,7 +289,7 @@ describe("WorkspacePage next-step", () => {
 
     renderPage();
 
-    await screen.findByText("下一步：人工检查后发送");
+    await screen.findByText("检查后发送");
 
     fireEvent.click(screen.getByRole("button", { name: "mock-send-now" }));
 
@@ -332,7 +324,7 @@ describe("WorkspacePage next-step", () => {
 
     renderPage();
 
-    await screen.findByText("下一步：人工检查后发送");
+    await screen.findByText("检查后发送");
 
     fireEvent.click(screen.getByRole("button", { name: "mock-schedule-send" }));
 

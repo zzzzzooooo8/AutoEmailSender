@@ -393,11 +393,25 @@ class ApiEndpointTests(unittest.TestCase):
         xlsx_template = self.client.get("/api/professors/template", params={"format": "xlsx"})
         self.assertEqual(csv_template.status_code, 200)
         self.assertIn("professors_import_template.csv", csv_template.headers["content-disposition"])
+        self.assertIn("# 导师导入模板", csv_template.text)
+        self.assertIn("# name：导师姓名，必填。示例：张明远", csv_template.text)
+        self.assertIn("# title：导师职称。示例：教授", csv_template.text)
+        self.assertIn("# university：学校名称。示例：示例大学", csv_template.text)
+        self.assertIn("# school：学院名称。示例：人工智能学院", csv_template.text)
+        self.assertIn("# department：院系或系所。示例：计算机科学系", csv_template.text)
+        self.assertIn("# research_direction：研究方向，多个方向用中文分号 ； 分隔。示例：大语言模型；智能体；信息抽取", csv_template.text)
         self.assertIn("name,email,title", csv_template.text)
+        self.assertIn("示例：张明远,zhang@example.edu,教授,示例大学,人工智能学院,计算机科学系,大语言模型；智能体；信息抽取", csv_template.text)
         self.assertEqual(xlsx_template.status_code, 200)
         self.assertIn("professors_import_template.xlsx", xlsx_template.headers["content-disposition"])
         workbook_from_template = load_workbook(io.BytesIO(xlsx_template.content))
-        template_headers = [cell.value for cell in next(workbook_from_template.active.iter_rows(max_row=1))]
+        template_sheet = workbook_from_template.active
+        template_values = list(template_sheet.iter_rows(values_only=True))
+        self.assertEqual(template_values[0][0], "# 导师导入模板")
+        self.assertEqual(template_values[3][0], "# name：导师姓名，必填。示例：张明远")
+        self.assertEqual(template_values[5][0], "# title：导师职称。示例：教授")
+        self.assertEqual(template_values[6][0], "# university：学校名称。示例：示例大学")
+        template_headers = list(template_values[13])
         self.assertEqual(
             template_headers,
             [
@@ -412,6 +426,11 @@ class ApiEndpointTests(unittest.TestCase):
                 "profile_url",
                 "source_url",
             ],
+        )
+        self.assertEqual(template_values[14][0], "示例：张明远")
+        self.assertEqual(
+            list(template_values[14][2:7]),
+            ["教授", "示例大学", "人工智能学院", "计算机科学系", "大语言模型；智能体；信息抽取"],
         )
 
         created_professor = self.client.post(
@@ -433,11 +452,15 @@ class ApiEndpointTests(unittest.TestCase):
         self.client.post(f"/api/professors/{professor_id}/archive")
 
         csv_content = (
+            "# 导师导入模板\n"
+            "# 从字段名下一行开始填写；说明行和示例行可以保留，系统导入时会自动忽略\n"
+            "# 必填字段：name, email\n"
             "name,email,title,university,school,department,research_direction,recent_papers,profile_url,source_url\n"
+            "示例：张明远,zhang@example.edu,教授,示例大学,人工智能学院,计算机科学系,大语言模型；智能体；信息抽取,Paper A|Paper B,https://example.edu/zhang,https://example.edu/faculty\n"
             "李教授,li@example.edu,Associate Professor,New University,School of AI,AI,Updated direction,Paper 1|Paper 2,https://example.edu/li,https://example.edu/faculty\n"
             "王老师,wang@example.edu,Assistant Professor,Another University,School,Dept,Direction,Paper 3,,\n"
             "坏数据,not-an-email,Professor,Bad University,School,Dept,Direction,Paper X,,\n"
-        ).encode("utf-8")
+        ).encode("utf-8-sig")
         csv_import = self.client.post(
             "/api/professors/import-file",
             files={"file": ("professors.csv", io.BytesIO(csv_content), "text/csv")},
@@ -456,6 +479,9 @@ class ApiEndpointTests(unittest.TestCase):
 
         workbook = Workbook()
         sheet = workbook.active
+        sheet.append(["# 导师导入模板"])
+        sheet.append(["# 从字段名下一行开始填写；说明行和示例行可以保留，系统导入时会自动忽略"])
+        sheet.append(["# 必填字段：name, email"])
         sheet.append(
             [
                 "name",
@@ -468,6 +494,20 @@ class ApiEndpointTests(unittest.TestCase):
                 "recent_papers",
                 "profile_url",
                 "source_url",
+            ]
+        )
+        sheet.append(
+            [
+                "示例：张明远",
+                "zhang@example.edu",
+                "教授",
+                "示例大学",
+                "人工智能学院",
+                "计算机科学系",
+                "大语言模型；智能体；信息抽取",
+                "Paper A|Paper B",
+                "https://example.edu/zhang",
+                "https://example.edu/faculty",
             ]
         )
         sheet.append(
@@ -658,6 +698,54 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(payload["current_task"]["status"], "review_required")
         self.assertEqual(payload["current_task"]["generated_subject"], "申请与模板导师老师交流")
         self.assertIn("模板导师老师您好", payload["current_task"]["generated_content_text"])
+
+    def test_manual_send_renders_subject_and_body_placeholders(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "主题导师",
+                "email": "subject@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Agents",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+        ensure_response = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(ensure_response.status_code, 200, msg=ensure_response.text)
+        task_id = ensure_response.json()["current_task"]["id"]
+
+        with patch(
+            "app.services.task_runtime.mail_runtime.send_email",
+            AsyncMock(return_value=self._build_send_result(message_id="<subject-render@example.com>", provider_payload={})),
+        ) as mocked_send:
+            response = self.client.post(
+                f"/api/email-tasks/{task_id}/approve-and-send",
+                json={
+                    "subject": "申请与{{name}}老师交流",
+                    "body_text": "{{name}}老师您好，我是{{sender_name}}。",
+                    "body_html": "<p>{{name}}老师您好，我是{{sender_name}}。</p>",
+                    "selected_material_ids": [],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        kwargs = mocked_send.await_args.kwargs
+        self.assertEqual(kwargs["subject"], "申请与主题导师老师交流")
+        self.assertIn("主题导师老师您好", kwargs["body_text"])
+        self.assertNotIn("{{name}}", kwargs["body_html"])
+        self.assertEqual(response.json()["current_task"]["approved_subject"], "申请与{{name}}老师交流")
 
     def test_identity_llm_mode_requires_subject_and_plain_text_body_when_template_is_empty(self) -> None:
         response = self.client.post(
@@ -1355,6 +1443,31 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(send_payload["history"][0]["status"], "sent")
         self.assertEqual(send_payload["history"][0]["rfc_message_id"], "<self-test@example.com>")
         mocked_send.assert_awaited_once()
+
+    def test_test_compose_template_generation_preserves_placeholders_in_draft(self) -> None:
+        response = self.client.post(
+            "/api/identities",
+            json=self._build_identity_payload(
+                with_imap=False,
+                outreach_generation_mode="template",
+                outreach_template_subject="测试给{{name}}",
+                outreach_template_body_text="{{name}}您好，我是{{sender_name}}。",
+                outreach_template_body_html="<p>{{name}}您好，我是{{sender_name}}。</p>",
+            ),
+        )
+        self.assertEqual(response.status_code, 201, msg=response.text)
+        identity_id = response.json()["id"]
+        llm_id = self._create_llm()
+
+        draft_response = self.client.post(f"/api/test-compose/{identity_id}/{llm_id}/generate-draft")
+
+        self.assertEqual(draft_response.status_code, 200, msg=draft_response.text)
+        draft = draft_response.json()["draft"]
+        self.assertEqual(draft["subject"], "测试给{{name}}")
+        self.assertIn("{{name}}您好", draft["body_text"])
+        self.assertIn("{{sender_name}}", draft["body_text"])
+        self.assertIn("{{name}}您好", draft["body_html"])
+        self.assertIn("{{sender_name}}", draft["body_html"])
 
     def test_test_compose_send_renders_placeholders_before_sending(self) -> None:
         identity_id = self._create_identity(with_imap=False)
