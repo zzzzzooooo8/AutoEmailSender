@@ -851,7 +851,7 @@ class ApiEndpointTests(unittest.TestCase):
         finally:
             connection.close()
 
-        self.assertEqual(version, "9c3d5b4a7f21")
+        self.assertEqual(version, "2f6a9d8c1e20")
 
         if get_engine.cache_info().currsize:
             asyncio.run(dispose_engine())
