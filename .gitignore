@@ -15,3 +15,5 @@ frontend/dist/
 .worktrees/
 docs/superpowers/plans/
 .codex
+.agents
+skills-lock.json
