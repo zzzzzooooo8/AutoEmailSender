@@ -204,3 +204,91 @@ select.form-input,
 .ui-select-shell:focus-within .ui-select-chevron {
   @apply text-primary;
 }
+
+.email-editor-content {
+  @apply selection:bg-primary/15;
+}
+
+.email-editor-content :where(p) {
+  margin: 0 0 0.75rem;
+}
+
+.email-editor-content :where(p:last-child) {
+  margin-bottom: 0;
+}
+
+.email-editor-content .tableWrapper {
+  margin: 1rem 0;
+  overflow-x: auto;
+  padding: 0.125rem;
+}
+
+.email-editor-content :where(table) {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  background: white;
+}
+
+.email-editor-content :where(th, td) {
+  min-width: 5rem;
+  border: 1px solid rgb(214 211 209);
+  padding: 0.55rem 0.65rem;
+  vertical-align: top;
+}
+
+.email-editor-content :where(th) {
+  background: rgb(250 250 249);
+  font-weight: 600;
+}
+
+.email-editor-content :where(th, td) > * {
+  margin: 0;
+}
+
+.email-editor-content .selectedCell {
+  position: relative;
+}
+
+.email-editor-content .selectedCell::after {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: rgb(153 27 27 / 0.12);
+  content: "";
+}
+
+.email-editor-content .column-resize-handle {
+  pointer-events: none;
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  top: 0;
+  width: 4px;
+  background-color: rgb(153 27 27 / 0.35);
+}
+
+.email-editor-content.resize-cursor {
+  cursor: ew-resize;
+  cursor: col-resize;
+}
+
+.email-placeholder-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.45em;
+  border: 1px solid rgb(254 202 202);
+  border-radius: 999px;
+  background: rgb(254 242 242);
+  color: rgb(153 27 27);
+  padding: 0 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.45;
+  vertical-align: baseline;
+}
+
+.ProseMirror-selectednode.email-placeholder-chip {
+  box-shadow: 0 0 0 2px rgb(153 27 27 / 0.2);
+}

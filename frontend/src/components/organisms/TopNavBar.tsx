@@ -26,10 +26,13 @@ export const TopNavBar = () => {
     { label: "个人页", href: "/profile" },
   ];
 
-  const identityOptions = identities.map((identity) => ({
-    value: identity.id,
-    label: `${identity.name}${identity.is_default ? "（默认）" : ""}`,
-  }));
+  const identityOptions = identities.map((identity) => {
+    const profileName = identity.profile_name || identity.name;
+    return {
+      value: identity.id,
+      label: `${profileName}${identity.is_default ? "（默认）" : ""}`,
+    };
+  });
   const llmOptions = llmProfiles.map((profile) => ({
     value: profile.id,
     label: `${profile.name}${profile.is_default ? "（默认）" : ""}`,

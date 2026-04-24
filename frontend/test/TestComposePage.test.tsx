@@ -31,7 +31,9 @@ describe("TestComposePage", () => {
   const thread = {
     identity: {
       id: 1,
-      name: "测试身份",
+      name: "测试配置",
+      profile_name: "测试配置",
+      sender_name: "王同学",
       email_address: "sender@example.com",
     },
     llm_profile: {
@@ -83,8 +85,14 @@ describe("TestComposePage", () => {
     expect(await screen.findByDisplayValue("测试主题")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "邮件正文" })).toHaveTextContent("测试正文");
     expect(screen.getByRole("button", { name: "插入表格" })).toBeInTheDocument();
-    expect(screen.getByText("sender@example.com")).toBeInTheDocument();
-    expect(screen.getByText("模型：测试模型")).toBeInTheDocument();
+    expect(screen.getAllByText("sender@example.com").length).toBeGreaterThan(0);
+    expect(screen.getByText("测试收件邮箱")).toBeInTheDocument();
+    expect(
+      screen.getByText((_, element) => element?.textContent === "模型 / 测试模型"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("{{name}} 会在测试邮件中替换为「测试收件人」")).toBeInTheDocument();
+    expect(screen.getByText("发件人姓名：王同学")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "测试写信操作" })).toBeInTheDocument();
   });
 
   it("saves rich text draft html and derived text", async () => {

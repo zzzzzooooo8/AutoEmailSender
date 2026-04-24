@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProfilePage } from "@/pages/ProfilePage";
+import { updateIdentity } from "@/lib/api/identities";
 import type { IdentityDTO, LLMProfileDTO } from "@/types";
 
 const mockedUseSelectionContext = vi.hoisted(() => vi.fn());
@@ -23,6 +24,34 @@ vi.mock("@/lib/useConfirmDialog", () => ({
     confirm: vi.fn(),
     dialog: null,
   }),
+}));
+
+vi.mock("@/components/molecules/EmailTemplateEditor", () => ({
+  EmailTemplateEditor: ({
+    label,
+    onChange,
+  }: {
+    label: string;
+    html: string;
+    onChange: (value: { html: string; text: string }) => void;
+  }) => (
+    <div>
+      <div role="textbox" aria-label={label}>
+        模拟富文本编辑器
+      </div>
+      <button
+        type="button"
+        onClick={() =>
+          onChange({
+            html: "<p>富文本更新</p>",
+            text: "富文本更新",
+          })
+        }
+      >
+        模拟编辑默认模板正文
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock("@/lib/api/identities", () => ({
@@ -54,7 +83,9 @@ vi.mock("@/lib/api/llmProfiles", () => ({
 
 const selectedIdentity: IdentityDTO = {
   id: 1,
-  name: "测试身份",
+  name: "旧身份名称",
+  profile_name: "博士申请配置",
+  sender_name: "王同学",
   email_address: "sender@example.com",
   smtp_host: "smtp.example.com",
   smtp_port: 465,
@@ -113,6 +144,12 @@ const expectToAppearBefore = (first: HTMLElement, second: HTMLElement) => {
 
 describe("ProfilePage onboarding", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(updateIdentity).mockResolvedValue({
+      ...selectedIdentity,
+      outreach_template_body_text: "富文本更新",
+      outreach_template_body_html: "<p>富文本更新</p>",
+    });
     mockedUseSelectionContext.mockReturnValue({
       identities: [selectedIdentity],
       llmProfiles: [selectedLlmProfile],
@@ -164,6 +201,13 @@ describe("ProfilePage onboarding", () => {
     expectToAppearBefore(modelSection, finishSection);
   });
 
+  it("shows separate profile name and sender name fields", async () => {
+    renderPage();
+
+    expect(await screen.findByLabelText("配置名称")).toHaveValue("博士申请配置");
+    expect(screen.getByLabelText("发件人姓名")).toHaveValue("王同学");
+  });
+
   it("renders the material entry and connection testing area for an existing identity", () => {
     renderPage();
 
@@ -209,5 +253,31 @@ describe("ProfilePage onboarding", () => {
     expect(screen.queryByText("第四步：测试写信")).not.toBeInTheDocument();
     expectToAppearBefore(finishSection, entryLink);
     expect(entryLink).toHaveAttribute("href", "/test-compose");
+  });
+
+  it("uses the shared rich text editor for the default outreach template modal", async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "打开默认值编辑" }));
+
+    expect(
+      await screen.findByRole("textbox", { name: "默认模板正文" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("默认模板正文（纯文本）")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("默认模板正文（HTML，可保留格式）"),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "模拟编辑默认模板正文" }));
+    fireEvent.click(screen.getByRole("button", { name: "完成编辑" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存身份" }));
+
+    expect(updateIdentity).toHaveBeenCalledWith(
+      selectedIdentity.id,
+      expect.objectContaining({
+        outreach_template_body_text: "富文本更新",
+        outreach_template_body_html: "<p>富文本更新</p>",
+      }),
+    );
   });
 });

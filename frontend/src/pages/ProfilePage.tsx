@@ -23,8 +23,9 @@ import {
 import { useNotification } from "@/context/NotificationContext";
 import { useSelectionContext } from "@/context/SelectionContext";
 import { NativeSelectField } from "@/components/atoms/NativeSelectField";
-import { HtmlTemplateEditorField } from "@/components/molecules/HtmlTemplateEditorField";
+import { EmailTemplateEditor } from "@/components/molecules/EmailTemplateEditor";
 import { formatApiDateTime } from "@/lib/dateTime";
+import { textToEmailHtml } from "@/lib/richEmail";
 import {
   createIdentity,
   deleteIdentity,
@@ -65,6 +66,8 @@ import { useConfirmDialog } from "@/lib/useConfirmDialog";
 
 type IdentityFormState = {
   name: string;
+  profile_name: string;
+  sender_name: string;
   email_address: string;
   smtp_host: string;
   smtp_port: string;
@@ -115,7 +118,7 @@ const TEMPLATE_PLACEHOLDERS = [
   ["{{school}}", "导师学院"],
   ["{{department}}", "导师院系"],
   ["{{research_direction}}", "导师研究方向"],
-  ["{{sender_name}}", "你的身份名称"],
+  ["{{sender_name}}", "你的发件人姓名"],
   ["{{sender_email}}", "你的发件邮箱"],
 ] as const;
 
@@ -128,6 +131,8 @@ const PROFILE_SETUP_STAGES = [
 
 const createEmptyIdentityForm = (): IdentityFormState => ({
   name: "",
+  profile_name: "",
+  sender_name: "",
   email_address: "",
   smtp_host: "",
   smtp_port: "465",
@@ -184,48 +189,59 @@ const getTemplateValidationMessage = ({
   const hasBodyText = Boolean(outreach_template_body_text.trim());
 
   if (!hasSubject && !hasBodyText) {
-    return "请先填写默认套磁信主题和纯文本正文";
+    return "请先填写默认套磁信主题和正文";
   }
   if (!hasSubject) {
     return "请先填写默认套磁信主题";
   }
   if (!hasBodyText) {
-    return "请先填写默认套磁信纯文本正文";
+    return "请先填写默认套磁信正文";
   }
   return null;
 };
 
-const toIdentityForm = (identity: IdentityDTO): IdentityFormState => ({
-  name: identity.name,
-  email_address: identity.email_address,
-  smtp_host: identity.smtp_host,
-  smtp_port: String(identity.smtp_port),
-  smtp_password: identity.smtp_password,
-  imap_host: identity.imap_host ?? inferImapHost(identity.smtp_host),
-  imap_port: identity.imap_port === null ? "" : String(identity.imap_port),
-  default_language: identity.default_language,
-  outreach_generation_mode: identity.outreach_generation_mode,
-  outreach_template_subject: identity.outreach_template_subject ?? "",
-  outreach_template_body_text: identity.outreach_template_body_text ?? "",
-  outreach_template_body_html: identity.outreach_template_body_html ?? "",
-  match_threshold:
-    identity.match_threshold === null ? "" : String(identity.match_threshold),
-  daily_send_limit:
-    identity.daily_send_limit === null ? "" : String(identity.daily_send_limit),
-  send_interval_min:
-    identity.send_interval_min === null
-      ? ""
-      : String(identity.send_interval_min),
-  send_interval_max:
-    identity.send_interval_max === null
-      ? ""
-      : String(identity.send_interval_max),
-  same_domain_cooldown_minutes:
-    identity.same_domain_cooldown_minutes === null
-      ? ""
-      : String(identity.same_domain_cooldown_minutes),
-  is_default: identity.is_default,
-});
+const getIdentityProfileName = (identity: IdentityDTO) =>
+  identity.profile_name || identity.name;
+
+const getIdentitySenderName = (identity: IdentityDTO) =>
+  identity.sender_name || getIdentityProfileName(identity);
+
+const toIdentityForm = (identity: IdentityDTO): IdentityFormState => {
+  const profileName = getIdentityProfileName(identity);
+  return {
+    name: profileName,
+    profile_name: profileName,
+    sender_name: getIdentitySenderName(identity),
+    email_address: identity.email_address,
+    smtp_host: identity.smtp_host,
+    smtp_port: String(identity.smtp_port),
+    smtp_password: identity.smtp_password,
+    imap_host: identity.imap_host ?? inferImapHost(identity.smtp_host),
+    imap_port: identity.imap_port === null ? "" : String(identity.imap_port),
+    default_language: identity.default_language,
+    outreach_generation_mode: identity.outreach_generation_mode,
+    outreach_template_subject: identity.outreach_template_subject ?? "",
+    outreach_template_body_text: identity.outreach_template_body_text ?? "",
+    outreach_template_body_html: identity.outreach_template_body_html ?? "",
+    match_threshold:
+      identity.match_threshold === null ? "" : String(identity.match_threshold),
+    daily_send_limit:
+      identity.daily_send_limit === null ? "" : String(identity.daily_send_limit),
+    send_interval_min:
+      identity.send_interval_min === null
+        ? ""
+        : String(identity.send_interval_min),
+    send_interval_max:
+      identity.send_interval_max === null
+        ? ""
+        : String(identity.send_interval_max),
+    same_domain_cooldown_minutes:
+      identity.same_domain_cooldown_minutes === null
+        ? ""
+        : String(identity.same_domain_cooldown_minutes),
+    is_default: identity.is_default,
+  };
+};
 
 const toLLMForm = (profile: LLMProfileDTO): LLMFormState => ({
   name: profile.name,
@@ -235,37 +251,42 @@ const toLLMForm = (profile: LLMProfileDTO): LLMFormState => ({
   is_default: profile.is_default,
 });
 
-const toIdentityPayload = (form: IdentityFormState): IdentityPayload => ({
-  name: form.name.trim(),
-  email_address: form.email_address.trim(),
-  smtp_host: form.smtp_host.trim(),
-  smtp_port: Number(form.smtp_port || "465"),
-  smtp_username: form.email_address.trim(),
-  smtp_password: form.smtp_password,
-  imap_host: (form.imap_host.trim() || inferImapHost(form.smtp_host)).trim(),
-  imap_port: Number(form.imap_port || "993"),
-  imap_username: form.email_address.trim(),
-  imap_password: form.smtp_password,
-  default_language: form.default_language.trim() || "zh-CN",
-  outreach_generation_mode: form.outreach_generation_mode,
-  outreach_template_subject: form.outreach_template_subject.trim() || null,
-  outreach_template_body_text: form.outreach_template_body_text.trim() || null,
-  outreach_template_body_html: form.outreach_template_body_html.trim() || null,
-  match_threshold: form.match_threshold ? Number(form.match_threshold) : null,
-  daily_send_limit: form.daily_send_limit
-    ? Number(form.daily_send_limit)
-    : null,
-  send_interval_min: form.send_interval_min
-    ? Number(form.send_interval_min)
-    : null,
-  send_interval_max: form.send_interval_max
-    ? Number(form.send_interval_max)
-    : null,
-  same_domain_cooldown_minutes: form.same_domain_cooldown_minutes
-    ? Number(form.same_domain_cooldown_minutes)
-    : null,
-  is_default: form.is_default,
-});
+const toIdentityPayload = (form: IdentityFormState): IdentityPayload => {
+  const profileName = form.profile_name.trim();
+  return {
+    name: profileName,
+    profile_name: profileName,
+    sender_name: form.sender_name.trim(),
+    email_address: form.email_address.trim(),
+    smtp_host: form.smtp_host.trim(),
+    smtp_port: Number(form.smtp_port || "465"),
+    smtp_username: form.email_address.trim(),
+    smtp_password: form.smtp_password,
+    imap_host: (form.imap_host.trim() || inferImapHost(form.smtp_host)).trim(),
+    imap_port: Number(form.imap_port || "993"),
+    imap_username: form.email_address.trim(),
+    imap_password: form.smtp_password,
+    default_language: form.default_language.trim() || "zh-CN",
+    outreach_generation_mode: form.outreach_generation_mode,
+    outreach_template_subject: form.outreach_template_subject.trim() || null,
+    outreach_template_body_text: form.outreach_template_body_text.trim() || null,
+    outreach_template_body_html: form.outreach_template_body_html.trim() || null,
+    match_threshold: form.match_threshold ? Number(form.match_threshold) : null,
+    daily_send_limit: form.daily_send_limit
+      ? Number(form.daily_send_limit)
+      : null,
+    send_interval_min: form.send_interval_min
+      ? Number(form.send_interval_min)
+      : null,
+    send_interval_max: form.send_interval_max
+      ? Number(form.send_interval_max)
+      : null,
+    same_domain_cooldown_minutes: form.same_domain_cooldown_minutes
+      ? Number(form.same_domain_cooldown_minutes)
+      : null,
+    is_default: form.is_default,
+  };
+};
 
 const toLLMPayload = (form: LLMFormState): LLMProfilePayload => ({
   name: form.name.trim(),
@@ -855,8 +876,10 @@ const OutreachTemplateSummaryCard = ({
   onOpen: () => void;
 }) => {
   const hasSubject = Boolean(form.outreach_template_subject.trim());
-  const hasTextTemplate = Boolean(form.outreach_template_body_text.trim());
-  const hasHtmlTemplate = Boolean(form.outreach_template_body_html.trim());
+  const hasTemplateBody = Boolean(
+    form.outreach_template_body_text.trim() ||
+      form.outreach_template_body_html.trim(),
+  );
 
   return (
     <div className="rounded-[28px] border border-stone-200 bg-[linear-gradient(135deg,#fffdfa,#fff7ee_58%,#fff2e4)] p-5 shadow-sm shadow-stone-200/70">
@@ -882,14 +905,7 @@ const OutreachTemplateSummaryCard = ({
               {hasSubject ? "主题（必填）已填写" : "主题（必填）未填写"}
             </span>
             <span className="rounded-full border border-stone-200/80 bg-white/90 px-3 py-1 text-xs text-stone-600">
-              {hasTextTemplate
-                ? "纯文本正文（必填）已填写"
-                : "纯文本正文（必填）未填写"}
-            </span>
-            <span className="rounded-full border border-stone-200/80 bg-white/90 px-3 py-1 text-xs text-stone-600">
-              {hasHtmlTemplate
-                ? "HTML 正文（可选）已填写"
-                : "HTML 正文（可选）未填写"}
+              {hasTemplateBody ? "正文（必填）已填写" : "正文（必填）未填写"}
             </span>
           </div>
         </div>
@@ -915,8 +931,7 @@ const OutreachTemplateModal = ({
   onImport,
   onModeChange,
   onSubjectChange,
-  onBodyTextChange,
-  onBodyHtmlChange,
+  onBodyChange,
 }: {
   open: boolean;
   importingTemplateFile: boolean;
@@ -925,12 +940,15 @@ const OutreachTemplateModal = ({
   onImport: (file: File) => void;
   onModeChange: (value: OutreachGenerationMode) => void;
   onSubjectChange: (value: string) => void;
-  onBodyTextChange: (value: string) => void;
-  onBodyHtmlChange: (value: string) => void;
+  onBodyChange: (value: { html: string; text: string }) => void;
 }) => {
   if (!open) {
     return null;
   }
+
+  const templateEditorHtml =
+    form.outreach_template_body_html ||
+    textToEmailHtml(form.outreach_template_body_text);
 
   return (
     <div
@@ -951,8 +969,8 @@ const OutreachTemplateModal = ({
                 默认发信模式与默认模板
               </h3>
               <p className="mt-1 max-w-3xl text-sm leading-6 text-stone-500">
-                在这里设置新任务默认带出的模式，以及主题、纯文本正文和 HTML 正文。
-                主题和纯文本正文为必填，HTML 正文为可选；这些内容只会影响后续新任务，不会反向改掉已经创建好的任务。
+                在这里设置新任务默认带出的模式、主题和富文本正文。
+                正文会自动派生纯文本内容；这些内容只会影响后续新任务，不会反向改掉已经创建好的任务。
               </p>
             </div>
             <button
@@ -978,10 +996,7 @@ const OutreachTemplateModal = ({
                   主题（必填）：{form.outreach_template_subject.trim() ? '已填写' : '未填写'}
                 </span>
                 <span className="rounded-full border border-stone-200 bg-white/90 px-3 py-1">
-                  纯文本正文（必填）：{form.outreach_template_body_text.trim() ? '已填写' : '未填写'}
-                </span>
-                <span className="rounded-full border border-stone-200 bg-white/90 px-3 py-1">
-                  HTML 正文（可选）：{form.outreach_template_body_html.trim() ? '已填写' : '未填写'}
+                  正文（必填）：{form.outreach_template_body_text.trim() || form.outreach_template_body_html.trim() ? '已填写' : '未填写'}
                 </span>
               </div>
             </div>
@@ -1073,26 +1088,13 @@ const OutreachTemplateModal = ({
                   placeholder="例如：申请与 {{name}} 老师交流科研方向"
                 />
               </label>
-              <label className="block">
-                {renderFieldLabel('默认模板正文（纯文本）', true)}
-                <textarea
-                  value={form.outreach_template_body_text}
-                  onChange={(event) => onBodyTextChange(event.target.value)}
-                  className="min-h-44 w-full rounded-2xl border border-stone-200 bg-white px-3 py-3 text-sm text-stone-700 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
-                  placeholder={`支持直接粘贴文本。
-
-例如：{{name}}老师您好，
-我是{{sender_name}}，关注到您在{{research_direction}}方向的工作……`}
-                />
-              </label>
               <p className="text-xs leading-6 text-stone-500">
                 导入模板文件时只会自动带入正文内容，不会自动生成主题；如果主题仍为空，请继续填写后再保存身份。
               </p>
-              <HtmlTemplateEditorField
-                label="默认模板正文（HTML，可保留格式）"
-                value={form.outreach_template_body_html}
-                onChange={onBodyHtmlChange}
-                placeholder="<p>{{name}}老师您好，</p><p>我是{{sender_name}}，关注到您在{{research_direction}}方向的工作……</p>"
+              <EmailTemplateEditor
+                label="默认模板正文"
+                html={templateEditorHtml}
+                onChange={onBodyChange}
               />
             </div>
 
@@ -1803,8 +1805,11 @@ export const ProfilePage = () => {
   };
 
   const saveIdentity = async () => {
+    if (!identityForm.profile_name.trim() || !identityForm.sender_name.trim()) {
+      notifyFormErrors("请检查表单", ["请填写配置名称和发件人姓名"]);
+      return;
+    }
     if (
-      !identityForm.name.trim() ||
       !identityForm.email_address.trim() ||
       !identityForm.smtp_host.trim() ||
       !identityForm.smtp_password.trim() ||
@@ -1982,13 +1987,13 @@ export const ProfilePage = () => {
           ) : (
             <button
               type="button"
-              onClick={() => {
-                setSelectedIdentityId(editingIdentity.id);
-                notifySuccess(
-                  "已设为当前身份",
-                  `当前身份已切换为“${editingIdentity.name}”。`,
-                );
-              }}
+                  onClick={() => {
+                    setSelectedIdentityId(editingIdentity.id);
+                    notifySuccess(
+                      "已设为当前身份",
+                      `当前身份已切换为“${getIdentityProfileName(editingIdentity)}”。`,
+                    );
+                  }}
               className="ui-btn-secondary"
             >
               设为当前
@@ -2009,10 +2014,10 @@ export const ProfilePage = () => {
                       ...previous,
                       is_default: true,
                     }));
-                    notifySuccess(
-                      "已设为默认身份",
-                      `“${editingIdentity.name}”已设为默认身份。`,
-                    );
+                            notifySuccess(
+                              "已设为默认身份",
+                              `“${getIdentityProfileName(editingIdentity)}”已设为默认身份。`,
+                            );
                   })
                   .catch((defaultError) => {
                     notifyError(
@@ -2029,19 +2034,23 @@ export const ProfilePage = () => {
           <button
             type="button"
             onClick={() => {
-              void (async () => {
-                if (!(await confirmDeleteTwice(`身份“${editingIdentity.name}”`))) {
-                  return;
-                }
+                      void (async () => {
+                        if (
+                          !(await confirmDeleteTwice(
+                            `身份“${getIdentityProfileName(editingIdentity)}”`,
+                          ))
+                        ) {
+                          return;
+                        }
                 try {
                   await deleteIdentity(editingIdentity.id);
                   await refreshSelections();
                   setIdentityEditorId(null);
                   setIdentityForm(createEmptyIdentityForm());
-                  notifySuccess(
-                    "删除身份成功",
-                    `身份“${editingIdentity.name}”已删除。`,
-                  );
+                          notifySuccess(
+                            "删除身份成功",
+                            `身份“${getIdentityProfileName(editingIdentity)}”已删除。`,
+                          );
                 } catch (deleteError) {
                   notifyError(
                     "删除身份失败",
@@ -2065,7 +2074,7 @@ export const ProfilePage = () => {
         <h1 className="text-3xl font-semibold text-stone-900">个人页</h1>
         <div className="mt-4 flex flex-wrap gap-3 text-xs text-stone-600">
           <span className="rounded-full border border-stone-200 bg-white px-3 py-1.5">
-            身份：{selectedIdentity?.name ?? "未选择"}
+            身份：{selectedIdentity ? getIdentityProfileName(selectedIdentity) : "未选择"}
           </span>
           <span className="rounded-full border border-stone-200 bg-white px-3 py-1.5">
             模型：{selectedLlmProfile?.name ?? "未选择"}
@@ -2117,7 +2126,7 @@ export const ProfilePage = () => {
                 </p>
               </div>
               <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs text-stone-600">
-                默认身份：{defaultIdentity?.name ?? "未设置"}
+                默认身份：{defaultIdentity ? getIdentityProfileName(defaultIdentity) : "未设置"}
               </span>
             </div>
 
@@ -2128,7 +2137,10 @@ export const ProfilePage = () => {
                   helper={
                     identities.length > 0 ? "点选切换，或新建一套。" : undefined
                   }
-                  options={identities}
+                  options={identities.map((identity) => ({
+                    ...identity,
+                    name: getIdentityProfileName(identity),
+                  }))}
                   activeId={identityEditorId}
                   createLabel="新建身份配置"
                   creatingLabel={
@@ -2146,7 +2158,7 @@ export const ProfilePage = () => {
                       使用中
                     </div>
                     <div className="mt-2 text-sm font-medium text-stone-900">
-                      {selectedIdentity?.name ?? "未选择"}
+                      {selectedIdentity ? getIdentityProfileName(selectedIdentity) : "未选择"}
                     </div>
                   </div>
                   <div className="rounded-2xl border border-stone-200 bg-white px-4 py-3">
@@ -2155,7 +2167,7 @@ export const ProfilePage = () => {
                     </div>
                     <div className="mt-2 text-sm font-medium text-stone-900">
                       {editingIdentity
-                        ? `正在编辑 ${editingIdentity.name}`
+                        ? `正在编辑 ${getIdentityProfileName(editingIdentity)}`
                         : "正在新建身份配置"}
                     </div>
                   </div>
@@ -2168,15 +2180,32 @@ export const ProfilePage = () => {
                 {renderFieldLabel("配置名称", true)}
                 <input
                   ref={identityNameInputRef}
-                  value={identityForm.name}
+                  aria-label="配置名称"
+                  value={identityForm.profile_name}
                   onChange={(event) =>
                     setIdentityForm((previous) => ({
                       ...previous,
                       name: event.target.value,
+                      profile_name: event.target.value,
                     }))
                   }
                   className={inputClassName}
                   placeholder="示例：博士申请邮箱"
+                />
+              </label>
+              <label className="block">
+                {renderFieldLabel("发件人姓名", true)}
+                <input
+                  aria-label="发件人姓名"
+                  value={identityForm.sender_name}
+                  onChange={(event) =>
+                    setIdentityForm((previous) => ({
+                      ...previous,
+                      sender_name: event.target.value,
+                    }))
+                  }
+                  className={inputClassName}
+                  placeholder="示例：王同学"
                 />
               </label>
               <label className="block">
@@ -2707,16 +2736,11 @@ export const ProfilePage = () => {
             outreach_template_subject: value,
           }))
         }
-        onBodyTextChange={(value) =>
+        onBodyChange={({ html, text }) =>
           setIdentityForm((previous) => ({
             ...previous,
-            outreach_template_body_text: value,
-          }))
-        }
-        onBodyHtmlChange={(value) =>
-          setIdentityForm((previous) => ({
-            ...previous,
-            outreach_template_body_html: value,
+            outreach_template_body_text: text,
+            outreach_template_body_html: html,
           }))
         }
       />

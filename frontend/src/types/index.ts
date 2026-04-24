@@ -75,6 +75,8 @@ export interface IdentityMaterialDTO {
 export interface IdentityDTO {
   id: number;
   name: string;
+  profile_name: string;
+  sender_name: string;
   email_address: string;
   smtp_host: string;
   smtp_port: number;
@@ -104,6 +106,8 @@ export interface IdentityDTO {
 
 export interface IdentityPayload {
   name: string;
+  profile_name: string;
+  sender_name: string;
   email_address: string;
   smtp_host: string;
   smtp_port: number;
@@ -364,6 +368,8 @@ export interface WorkspaceProfessorDTO {
 export interface WorkspaceIdentityDTO {
   id: number;
   name: string;
+  profile_name: string;
+  sender_name: string;
   email_address: string;
 }
 

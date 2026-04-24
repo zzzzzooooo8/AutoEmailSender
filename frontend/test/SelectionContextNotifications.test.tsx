@@ -59,6 +59,8 @@ describe("SelectionContext notifications", () => {
       {
         id: 1,
         name: "测试身份",
+        profile_name: "测试身份",
+        sender_name: "测试身份",
         email_address: "sender@example.com",
         smtp_host: "smtp.example.com",
         smtp_port: 465,
