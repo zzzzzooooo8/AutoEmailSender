@@ -134,6 +134,33 @@ class OutreachTemplateImportTests(unittest.TestCase):
         self.assertIn("border-collapse:collapse", rendered.body_html)
         self.assertIn("李老师", rendered.body_text)
 
+    def test_template_context_uses_sender_name_field(self) -> None:
+        from app.models import IdentityProfile, Professor
+        from app.services.outreach_templates import render_outreach_template
+
+        identity = IdentityProfile(
+            name="内部配置",
+            profile_name="博士申请配置",
+            sender_name="王同学",
+            email_address="sender@example.com",
+            smtp_host="smtp.example.com",
+            smtp_username="sender@example.com",
+            smtp_password="secret",
+        )
+        professor = Professor(name="李老师", email="li@example.edu")
+
+        rendered = render_outreach_template(
+            identity,
+            professor,
+            subject_template="申请与{{name}}老师交流",
+            body_text_template="{{name}}老师您好，我是{{sender_name}}。",
+            body_html_template="<p>{{name}}老师您好，我是{{sender_name}}。</p>",
+        )
+
+        self.assertEqual(rendered.subject, "申请与李老师老师交流")
+        self.assertIn("我是王同学", rendered.body_text)
+        self.assertIn("我是王同学", rendered.body_html)
+
 
 if __name__ == "__main__":
     unittest.main()

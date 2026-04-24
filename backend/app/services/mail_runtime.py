@@ -146,8 +146,10 @@ def build_email_message(
     body_html: str | None,
     attachments: list[MailAttachment],
 ) -> EmailMessage:
+    from app.services.outreach_templates import get_identity_sender_name
+
     message = EmailMessage()
-    message["From"] = formataddr((identity.name, identity.email_address))
+    message["From"] = formataddr((get_identity_sender_name(identity), identity.email_address))
     message["To"] = professor.email or ""
     message["Subject"] = subject
     message["Message-ID"] = make_msgid(domain=identity.email_address.split("@")[-1])

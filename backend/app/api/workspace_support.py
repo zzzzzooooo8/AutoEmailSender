@@ -25,7 +25,7 @@ from app.schemas.workspace import (
     WorkspaceThreadRead,
 )
 from app.services import llm_runtime
-from app.services.outreach_templates import resolve_outreach_template_config
+from app.services.outreach_templates import get_identity_sender_name, resolve_outreach_template_config
 
 
 async def build_workspace_thread(
@@ -103,7 +103,9 @@ async def build_workspace_thread(
         ),
         identity=WorkspaceIdentityRead(
             id=identity.id,
-            name=identity.name,
+            name=identity.profile_name or identity.name,
+            profile_name=identity.profile_name or identity.name,
+            sender_name=get_identity_sender_name(identity),
             email_address=identity.email_address,
         ),
         llm_profile=WorkspaceLLMRead(

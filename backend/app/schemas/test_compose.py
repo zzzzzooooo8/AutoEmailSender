@@ -10,6 +10,8 @@ from app.schemas.identity import IdentityMaterialRead
 class TestComposeIdentityRead(BaseModel):
     id: int
     name: str
+    profile_name: str
+    sender_name: str
     email_address: str
 
 

@@ -18,6 +18,7 @@ from app.services.rich_text import normalize_email_html, text_to_email_html
 
 OUTREACH_GENERATION_MODE_LLM = "llm"
 OUTREACH_GENERATION_MODE_TEMPLATE = "template"
+TEST_RECIPIENT_NAME = "测试收件人"
 SUPPORTED_TEMPLATE_IMPORT_SUFFIXES = {".docx", ".html", ".htm", ".txt", ".md"}
 PLACEHOLDER_HELP_TEXT = {
     "name": "导师姓名",
@@ -27,7 +28,7 @@ PLACEHOLDER_HELP_TEXT = {
     "school": "导师学院",
     "department": "导师院系",
     "research_direction": "导师研究方向",
-    "sender_name": "你的身份名称",
+    "sender_name": "你的发件人姓名",
     "sender_email": "你的发件邮箱",
 }
 EMAIL_TEMPLATE_FONT_STACK = (
@@ -86,7 +87,30 @@ def build_template_context(identity: IdentityProfile, professor: Professor) -> d
         "school": professor.school or "",
         "department": professor.department or "",
         "research_direction": professor.research_direction or "",
-        "sender_name": identity.name or "",
+        "sender_name": get_identity_sender_name(identity),
+        "sender_email": identity.email_address or "",
+    }
+
+
+def get_identity_sender_name(identity: IdentityProfile) -> str:
+    return (
+        getattr(identity, "sender_name", None)
+        or getattr(identity, "profile_name", None)
+        or identity.name
+        or ""
+    )
+
+
+def build_test_compose_template_context(identity: IdentityProfile) -> dict[str, str]:
+    return {
+        "name": TEST_RECIPIENT_NAME,
+        "email": identity.email_address or "",
+        "title": TEST_RECIPIENT_NAME,
+        "university": "测试学校",
+        "school": "测试学院",
+        "department": "测试院系",
+        "research_direction": "测试研究方向",
+        "sender_name": get_identity_sender_name(identity),
         "sender_email": identity.email_address or "",
     }
 
@@ -184,6 +208,10 @@ def render_template_string(template: str, context: dict[str, str]) -> str:
         return context.get(key, "")
 
     return re.sub(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}", replace, template)
+
+
+def render_template_with_context(value: str | None, context: dict[str, str]) -> str:
+    return render_template_string(value or "", context)
 
 
 def import_outreach_template_file(file_name: str, content: bytes) -> ImportedOutreachTemplate:

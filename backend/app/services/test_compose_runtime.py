@@ -29,8 +29,12 @@ from app.services.mail_runtime import MailAttachment
 from app.services.materials import build_material_download_name, ensure_material_extracted_text
 from app.services.outreach_templates import (
     OUTREACH_GENERATION_MODE_TEMPLATE,
+    TEST_RECIPIENT_NAME,
+    build_test_compose_template_context,
+    get_identity_sender_name,
     get_outreach_template_defaults_validation_error,
     render_outreach_template,
+    render_template_with_context,
     resolve_outreach_template_config,
 )
 from app.services.rich_text import normalize_email_html, text_to_email_html
@@ -120,11 +124,14 @@ async def send_test_compose_message(
 
     await _validate_selected_material_ids(session, identity_id, selected_material_ids)
 
-    subject = (payload.subject or "").strip()
-    if payload.body_html:
-        rendered = normalize_email_html(payload.body_html)
+    context = build_test_compose_template_context(identity)
+    subject = render_template_with_context(payload.subject, context).strip()
+    rendered_body_text = render_template_with_context(payload.body_text, context)
+    rendered_body_html = render_template_with_context(payload.body_html, context)
+    if rendered_body_html.strip():
+        rendered = normalize_email_html(rendered_body_html)
     else:
-        rendered = text_to_email_html(payload.body_text)
+        rendered = text_to_email_html(rendered_body_text)
     body_text = rendered.text
     body_html = rendered.html
     if not subject or not body_text:
@@ -141,7 +148,7 @@ async def send_test_compose_message(
     try:
         result = await mail_runtime.send_email_to_recipient(
             identity=identity,
-            recipient_name=identity.name,
+            recipient_name=TEST_RECIPIENT_NAME,
             recipient_email=identity.email_address,
             subject=subject,
             body_text=body_text,
@@ -328,13 +335,13 @@ async def _resolve_selected_materials(
 
 def _build_self_recipient_professor(identity: IdentityProfile) -> Professor:
     return Professor(
-        name=identity.name or "自己",
+        name=TEST_RECIPIENT_NAME,
         email=identity.email_address,
-        title="测试收件人",
-        university="Self Test",
-        school="Self Test",
-        department="Self Test",
-        research_direction="Self Test",
+        title=TEST_RECIPIENT_NAME,
+        university="测试学校",
+        school="测试学院",
+        department="测试院系",
+        research_direction="测试研究方向",
         recent_papers=[],
     )
 
@@ -348,7 +355,9 @@ def _serialize_test_compose_thread(
     return TestComposeThreadRead(
         identity=TestComposeIdentityRead(
             id=identity.id,
-            name=identity.name,
+            name=identity.profile_name or identity.name,
+            profile_name=identity.profile_name or identity.name,
+            sender_name=get_identity_sender_name(identity),
             email_address=identity.email_address,
         ),
         llm_profile=TestComposeLLMRead(

@@ -20,6 +20,8 @@ class WorkspaceProfessorRead(BaseModel):
 class WorkspaceIdentityRead(BaseModel):
     id: int
     name: str
+    profile_name: str
+    sender_name: str
     email_address: str
 
 

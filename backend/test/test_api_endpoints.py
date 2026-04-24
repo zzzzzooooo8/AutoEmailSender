@@ -1356,6 +1356,48 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(send_payload["history"][0]["rfc_message_id"], "<self-test@example.com>")
         mocked_send.assert_awaited_once()
 
+    def test_test_compose_send_renders_placeholders_before_sending(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+
+        update_payload = self._build_identity_payload(
+            with_imap=False,
+            outreach_template_subject="测试给{{name}}",
+            outreach_template_body_text="{{name}}您好，我是{{sender_name}}。",
+            outreach_template_body_html="<p>{{name}}您好，我是{{sender_name}}。</p>",
+        )
+        update_payload["profile_name"] = "测试配置"
+        update_payload["sender_name"] = "王同学"
+        self.client.put(f"/api/identities/{identity_id}", json=update_payload)
+
+        with patch(
+            "app.services.test_compose_runtime.mail_runtime.send_email_to_recipient",
+            AsyncMock(return_value=self._build_send_result(message_id="<test-render@example.com>", provider_payload={})),
+        ) as mocked_send:
+            response = self.client.post(
+                f"/api/test-compose/{identity_id}/{llm_id}/send",
+                json={
+                    "subject": "发送给{{name}}",
+                    "body_text": "{{name}}您好，我是{{sender_name}}，研究方向：{{research_direction}}。",
+                    "body_html": "<p>{{name}}您好，我是{{sender_name}}，研究方向：{{research_direction}}。</p>",
+                    "selected_material_ids": [],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        kwargs = mocked_send.await_args.kwargs
+        self.assertEqual(kwargs["recipient_name"], "测试收件人")
+        self.assertEqual(kwargs["subject"], "发送给测试收件人")
+        self.assertIn("测试收件人您好", kwargs["body_text"])
+        self.assertIn("我是王同学", kwargs["body_text"])
+        self.assertIn("测试研究方向", kwargs["body_text"])
+        self.assertNotIn("{{name}}", kwargs["body_html"])
+
+        history = response.json()["history"][0]
+        self.assertEqual(history["subject"], "发送给测试收件人")
+        self.assertIn("测试收件人您好", history["content"])
+        self.assertNotIn("{{sender_name}}", history["content_html"])
+
     def test_batch_task_outreach_snapshot_is_independent_from_identity_defaults(self) -> None:
         identity_id = self._create_identity(with_imap=False)
         llm_id = self._create_llm()
