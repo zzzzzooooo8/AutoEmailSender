@@ -89,6 +89,52 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(created_identity["imap_username"], "sender@example.com")
         self.assertEqual(created_identity["imap_password"], "secret")
 
+    def test_identity_accepts_profile_name_and_sender_name_with_name_compatibility(self) -> None:
+        payload = self._build_identity_payload(
+            with_imap=False,
+            outreach_template_subject="申请与{{name}}老师交流",
+            outreach_template_body_text="老师您好，我是{{sender_name}}。",
+        )
+        payload["name"] = "兼容配置名称"
+        payload["profile_name"] = "博士申请配置"
+        payload["sender_name"] = "王同学"
+        payload["email_address"] = "sender-profile-name@example.com"
+        payload["smtp_username"] = "sender-profile-name@example.com"
+
+        response = self.client.post("/api/identities", json=payload)
+
+        self.assertEqual(response.status_code, 201, msg=response.text)
+        body = response.json()
+        self.assertEqual(body["name"], "博士申请配置")
+        self.assertEqual(body["profile_name"], "博士申请配置")
+        self.assertEqual(body["sender_name"], "王同学")
+
+        list_payload = self.client.get("/api/identities").json()
+        created = next(item for item in list_payload if item["id"] == body["id"])
+        self.assertEqual(created["name"], "博士申请配置")
+        self.assertEqual(created["profile_name"], "博士申请配置")
+        self.assertEqual(created["sender_name"], "王同学")
+
+    def test_identity_legacy_name_populates_profile_and_sender_name(self) -> None:
+        payload = self._build_identity_payload(
+            with_imap=False,
+            outreach_template_subject="申请与{{name}}老师交流",
+            outreach_template_body_text="老师您好，我是{{sender_name}}。",
+        )
+        payload["email_address"] = "legacy-name@example.com"
+        payload["smtp_username"] = "legacy-name@example.com"
+        payload.pop("profile_name", None)
+        payload.pop("sender_name", None)
+        payload["name"] = "旧身份名称"
+
+        response = self.client.post("/api/identities", json=payload)
+
+        self.assertEqual(response.status_code, 201, msg=response.text)
+        body = response.json()
+        self.assertEqual(body["name"], "旧身份名称")
+        self.assertEqual(body["profile_name"], "旧身份名称")
+        self.assertEqual(body["sender_name"], "旧身份名称")
+
     def test_system_settings_endpoint_is_removed(self) -> None:
         response = self.client.get("/api/system-settings")
 

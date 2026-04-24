@@ -6,6 +6,8 @@ from app.schemas.identity import IdentityMaterialRead, IdentityProfileRead
 
 def serialize_identity(identity: IdentityProfile) -> IdentityProfileRead:
     current_primary_material_id = identity.current_primary_material_id
+    profile_name = identity.profile_name or identity.name
+    sender_name = identity.sender_name or profile_name
     materials = sorted(
         identity.materials,
         key=lambda item: (item.id == current_primary_material_id, item.created_at),
@@ -13,7 +15,9 @@ def serialize_identity(identity: IdentityProfile) -> IdentityProfileRead:
     )
     return IdentityProfileRead(
         id=identity.id,
-        name=identity.name,
+        name=profile_name,
+        profile_name=profile_name,
+        sender_name=sender_name,
         email_address=identity.email_address,
         smtp_host=identity.smtp_host,
         smtp_port=identity.smtp_port,

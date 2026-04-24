@@ -33,7 +33,9 @@ class OutreachGenerationMode(StrEnum):
 
 
 class IdentityProfileBase(BaseModel):
-    name: str
+    name: str | None = None
+    profile_name: str | None = None
+    sender_name: str | None = None
     email_address: str
     smtp_host: str
     smtp_port: int = 465
@@ -68,6 +70,9 @@ class IdentityProfileRead(IdentityProfileBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    name: str
+    profile_name: str
+    sender_name: str
     current_primary_material_id: int | None
     current_primary_material: IdentityMaterialRead | None
     materials: list[IdentityMaterialRead]

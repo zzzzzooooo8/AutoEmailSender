@@ -20,6 +20,8 @@ class IdentityProfile(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
+    profile_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    sender_name: Mapped[str] = mapped_column(String(100), nullable=False)
     email_address: Mapped[str] = mapped_column(
         String(255),
         unique=True,

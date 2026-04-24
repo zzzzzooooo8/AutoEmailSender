@@ -227,6 +227,11 @@ def _normalize_identity_payload(
     }:
         outreach_generation_mode = OUTREACH_GENERATION_MODE_LLM
 
+    profile_name = _clean_required_text(data.get("profile_name") or data.get("name"))
+    sender_name = _clean_required_text(data.get("sender_name") or profile_name)
+    data["name"] = profile_name
+    data["profile_name"] = profile_name
+    data["sender_name"] = sender_name
     data["smtp_username"] = email_address
     data["imap_host"] = imap_host or _infer_imap_host(smtp_host)
     data["imap_port"] = data.get("imap_port") or 993
@@ -265,3 +270,10 @@ def _clean_nullable_text(value: object) -> str | None:
         return None
     cleaned = value.strip()
     return cleaned or None
+
+
+def _clean_required_text(value: object) -> str:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        raise HTTPException(status_code=400, detail="请填写配置名称和发件人姓名")
+    return cleaned
