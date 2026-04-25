@@ -13,7 +13,7 @@ from app.services.outreach_templates import import_outreach_template_file
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "2f6a9d8c1e20"
+HEAD_REVISION = "4c1a2b3d4e5f"
 LEGACY_RUNTIME_REVISION = "7a1d5e42c9bd"
 
 
@@ -163,6 +163,342 @@ class DatabaseSchemaTests(unittest.TestCase):
         self.assertEqual(retry_count, 0)
         self.assertEqual(is_read, 0)
         self.assertEqual(is_replied, 0)
+
+    def test_email_tasks_has_manual_source_and_cancellation_fields(self) -> None:
+        task_columns = self._get_columns("email_tasks")
+
+        self.assertIn("source", task_columns)
+        self.assertIn("parent_task_id", task_columns)
+        self.assertIn("cancellation_reason", task_columns)
+
+        identity_id = self._insert_identity()
+        llm_profile_id = self._insert_llm_profile()
+        professor_id = self._insert_professor("manual-source@example.edu")
+
+        self.connection.execute(
+            """
+            INSERT INTO email_tasks (
+                identity_id,
+                llm_profile_id,
+                professor_id,
+                primary_material_id,
+                selected_material_ids
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (identity_id, llm_profile_id, professor_id, None, json.dumps([])),
+        )
+
+        source, parent_task_id, cancellation_reason = self.connection.execute(
+            """
+            SELECT source, parent_task_id, cancellation_reason
+            FROM email_tasks
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+        ).fetchone()
+
+        self.assertEqual(source, "manual")
+        self.assertIsNone(parent_task_id)
+        self.assertIsNone(cancellation_reason)
+
+    def test_email_tasks_parent_task_id_is_unique_for_non_null_values(self) -> None:
+        indexes = self.connection.execute("PRAGMA index_list('email_tasks')").fetchall()
+        unique_indexes = [row for row in indexes if row[2] == 1]
+        indexed_columns = set()
+        for index in unique_indexes:
+            for column in self.connection.execute(f"PRAGMA index_info('{index[1]}')").fetchall():
+                indexed_columns.add(column[2])
+
+        self.assertIn("parent_task_id", indexed_columns)
+
+        identity_id = self._insert_identity()
+        llm_profile_id = self._insert_llm_profile()
+        professor_id = self._insert_professor("unique-parent@example.edu")
+
+        self.connection.execute(
+            """
+            INSERT INTO email_tasks (
+                identity_id,
+                llm_profile_id,
+                professor_id,
+                primary_material_id,
+                selected_material_ids
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (identity_id, llm_profile_id, professor_id, None, json.dumps([])),
+        )
+        parent_task_id = self.connection.execute(
+            "SELECT id FROM email_tasks ORDER BY id DESC LIMIT 1",
+        ).fetchone()[0]
+
+        self.connection.execute(
+            """
+            INSERT INTO email_tasks (
+                source,
+                parent_task_id,
+                identity_id,
+                llm_profile_id,
+                professor_id,
+                primary_material_id,
+                selected_material_ids
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("manual", parent_task_id, identity_id, llm_profile_id, professor_id, None, json.dumps([])),
+        )
+
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.connection.execute(
+                """
+                INSERT INTO email_tasks (
+                    source,
+                    parent_task_id,
+                    identity_id,
+                    llm_profile_id,
+                    professor_id,
+                    primary_material_id,
+                    selected_material_ids
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("manual", parent_task_id, identity_id, llm_profile_id, professor_id, None, json.dumps([])),
+            )
+
+    def test_contact_task_state_migration_backfill_and_downgrade_restore_legacy_statuses(self) -> None:
+        legacy_dir = tempfile.TemporaryDirectory()
+        try:
+            legacy_db_path = Path(legacy_dir.name) / "legacy_task_states.db"
+            legacy_env = os.environ.copy()
+            legacy_env["DATABASE_URL"] = f"sqlite+aiosqlite:///{legacy_db_path.as_posix()}"
+
+            self._run_alembic(legacy_env, "upgrade", "2f6a9d8c1e20")
+
+            legacy = sqlite3.connect(legacy_db_path)
+            legacy.execute("PRAGMA foreign_keys = ON")
+
+            identity_id = legacy.execute(
+                """
+                INSERT INTO identity_profiles (
+                    name,
+                    profile_name,
+                    sender_name,
+                    email_address,
+                    smtp_host,
+                    smtp_username,
+                    smtp_password
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "旧身份",
+                    "旧身份",
+                    "旧发件人",
+                    "legacy-task-state@example.com",
+                    "smtp.example.com",
+                    "legacy-task-state@example.com",
+                    "secret",
+                ),
+            ).lastrowid
+            llm_profile_id = legacy.execute(
+                """
+                INSERT INTO llm_profiles (name, provider, api_key, model_name)
+                VALUES (?, ?, ?, ?)
+                """,
+                ("默认模型", "openai", "sk-test-key", "gpt-4o-mini"),
+            ).lastrowid
+            professor_id = legacy.execute(
+                """
+                INSERT INTO professors (name, email, research_direction, crawl_status)
+                VALUES (?, ?, ?, ?)
+                """,
+                ("导师甲", "legacy-task-prof@example.edu", "agents", "discovered"),
+            ).lastrowid
+            running_batch_task_id = legacy.execute(
+                """
+                INSERT INTO batch_tasks (
+                    identity_id,
+                    llm_profile_id,
+                    name,
+                    target_count,
+                    primary_material_id,
+                    selected_material_ids
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (identity_id, llm_profile_id, "运行中批量任务", 1, None, json.dumps([])),
+            ).lastrowid
+            stopped_batch_task_id = legacy.execute(
+                """
+                INSERT INTO batch_tasks (
+                    identity_id,
+                    llm_profile_id,
+                    name,
+                    target_count,
+                    primary_material_id,
+                    selected_material_ids
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (identity_id, llm_profile_id, "已停止批量任务", 1, None, json.dumps([])),
+            ).lastrowid
+            legacy.execute(
+                "UPDATE batch_tasks SET status = ? WHERE id = ?",
+                ("stopped", stopped_batch_task_id),
+            )
+
+            legacy.execute(
+                """
+                INSERT INTO email_tasks (
+                    batch_task_id,
+                    identity_id,
+                    llm_profile_id,
+                    professor_id,
+                    primary_material_id,
+                    selected_material_ids,
+                    status
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (None, identity_id, llm_profile_id, professor_id, None, json.dumps([]), "skipped"),
+            )
+            manual_task_id = legacy.execute("SELECT last_insert_rowid()").fetchone()[0]
+            legacy.execute(
+                """
+                INSERT INTO email_tasks (
+                    batch_task_id,
+                    identity_id,
+                    llm_profile_id,
+                    professor_id,
+                    primary_material_id,
+                    selected_material_ids,
+                    status
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    running_batch_task_id,
+                    identity_id,
+                    llm_profile_id,
+                    professor_id,
+                    None,
+                    json.dumps([]),
+                    "skipped",
+                ),
+            )
+            running_batch_task_item_id = legacy.execute("SELECT last_insert_rowid()").fetchone()[0]
+            legacy.execute(
+                """
+                INSERT INTO email_tasks (
+                    batch_task_id,
+                    identity_id,
+                    llm_profile_id,
+                    professor_id,
+                    primary_material_id,
+                    selected_material_ids,
+                    status
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    stopped_batch_task_id,
+                    identity_id,
+                    llm_profile_id,
+                    professor_id,
+                    None,
+                    json.dumps([]),
+                    "skipped",
+                ),
+            )
+            stopped_batch_task_item_id = legacy.execute("SELECT last_insert_rowid()").fetchone()[0]
+            legacy.commit()
+            legacy.close()
+
+            self._run_alembic(legacy_env, "upgrade", "head")
+
+            upgraded = sqlite3.connect(legacy_db_path)
+            upgraded.execute("PRAGMA foreign_keys = ON")
+            upgraded_rows = upgraded.execute(
+                """
+                SELECT id, status, source, cancellation_reason
+                FROM email_tasks
+                ORDER BY id
+                """
+            ).fetchall()
+
+            self.assertEqual(
+                upgraded_rows,
+                [
+                    (manual_task_id, "matched", "manual", None),
+                    (running_batch_task_item_id, "matched", "batch", None),
+                    (stopped_batch_task_item_id, "canceled", "batch", "batch_stopped"),
+                ],
+            )
+
+            upgraded.execute(
+                """
+                INSERT INTO email_tasks (
+                    source,
+                    batch_task_id,
+                    identity_id,
+                    llm_profile_id,
+                    professor_id,
+                    primary_material_id,
+                    selected_material_ids,
+                    status,
+                    cancellation_reason
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "batch",
+                    stopped_batch_task_id,
+                    identity_id,
+                    llm_profile_id,
+                    professor_id,
+                    None,
+                    json.dumps([]),
+                    "canceled",
+                    "batch_stopped",
+                ),
+            )
+            post_upgrade_task_id = upgraded.execute("SELECT last_insert_rowid()").fetchone()[0]
+            upgraded.commit()
+            upgraded.close()
+
+            self._run_alembic(legacy_env, "downgrade", "2f6a9d8c1e20")
+
+            downgraded = sqlite3.connect(legacy_db_path)
+            downgraded.execute("PRAGMA foreign_keys = ON")
+            task_columns = {row[1] for row in downgraded.execute("PRAGMA table_info('email_tasks')").fetchall()}
+            downgraded_rows = downgraded.execute(
+                """
+                SELECT id, status
+                FROM email_tasks
+                ORDER BY id
+                """
+            ).fetchall()
+            version = downgraded.execute(
+                "SELECT version_num FROM alembic_version"
+            ).fetchone()[0]
+            downgraded.close()
+
+            self.assertNotIn("source", task_columns)
+            self.assertNotIn("parent_task_id", task_columns)
+            self.assertNotIn("cancellation_reason", task_columns)
+            self.assertEqual(version, "2f6a9d8c1e20")
+            self.assertEqual(
+                downgraded_rows,
+                [
+                    (manual_task_id, "skipped"),
+                    (running_batch_task_item_id, "skipped"),
+                    (stopped_batch_task_item_id, "skipped"),
+                    (post_upgrade_task_id, "skipped"),
+                ],
+            )
+        finally:
+            legacy_dir.cleanup()
 
     def test_legacy_resume_and_attachment_data_are_backfilled(self) -> None:
         legacy_dir = tempfile.TemporaryDirectory()

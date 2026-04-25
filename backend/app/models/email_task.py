@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -20,24 +20,44 @@ if TYPE_CHECKING:
 
 class EmailTaskStatus(StrEnum):
     DISCOVERED = "discovered"
-    SKIPPED = "skipped"
     MATCHED = "matched"
-    DRAFT_GENERATED = "draft_generated"
     REVIEW_REQUIRED = "review_required"
     APPROVED = "approved"
     SCHEDULED = "scheduled"
     SENT = "sent"
     SEND_FAILED = "send_failed"
     REPLY_DETECTED = "reply_detected"
+    CANCELED = "canceled"
+
+
+class EmailTaskSource(StrEnum):
+    MANUAL = "manual"
+    BATCH = "batch"
+
+
+class EmailTaskCancellationReason(StrEnum):
+    BATCH_STOPPED = "batch_stopped"
 
 
 class EmailTask(Base):
     __tablename__ = "email_tasks"
+    __table_args__ = (
+        UniqueConstraint("parent_task_id", name="uq_email_tasks_parent_task_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    source: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        server_default=text("'manual'"),
+    )
     batch_task_id: Mapped[int | None] = mapped_column(
         ForeignKey("batch_tasks.id"),
         index=True,
+        nullable=True,
+    )
+    parent_task_id: Mapped[int | None] = mapped_column(
+        ForeignKey("email_tasks.id"),
         nullable=True,
     )
     identity_id: Mapped[int] = mapped_column(
@@ -65,6 +85,7 @@ class EmailTask(Base):
         nullable=False,
         server_default=text("'discovered'"),
     )
+    cancellation_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
     match_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     match_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     generated_subject: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -128,6 +149,15 @@ class EmailTask(Base):
 
     batch_task: Mapped["BatchTask | None"] = relationship(
         back_populates="email_tasks",
+    )
+    parent_task: Mapped["EmailTask | None"] = relationship(
+        back_populates="child_tasks",
+        remote_side=lambda: [EmailTask.id],
+        foreign_keys=[parent_task_id],
+    )
+    child_tasks: Mapped[list["EmailTask"]] = relationship(
+        back_populates="parent_task",
+        foreign_keys=[parent_task_id],
     )
     identity: Mapped["IdentityProfile"] = relationship(
         back_populates="email_tasks",

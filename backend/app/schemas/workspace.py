@@ -34,8 +34,13 @@ class WorkspaceLLMRead(BaseModel):
 
 class WorkspaceTaskSummaryRead(BaseModel):
     id: int | None
+    source: str | None
     batch_task_id: int | None
+    parent_task_id: int | None
     status: str | None
+    cancellation_reason: str | None
+    can_continue_manually: bool
+    can_write_follow_up: bool
     outreach_generation_mode: str
     outreach_template_subject: str | None
     outreach_template_body_text: str | None

@@ -421,16 +421,18 @@ def _serialize_management_professor(professor: Professor) -> ProfessorManagement
 def _map_dashboard_status(task: EmailTask | None) -> str:
     if task is None:
         return "not_contacted"
-    if task.is_replied:
+    if task.is_replied or task.status == EmailTaskStatus.REPLY_DETECTED.value:
         return "replied"
-    if task.status == EmailTaskStatus.SEND_FAILED.value:
-        return "send_failed"
+    if task.status in {
+        EmailTaskStatus.APPROVED.value,
+        EmailTaskStatus.SCHEDULED.value,
+    }:
+        return "ready_to_send"
     if task.status == EmailTaskStatus.SENT.value:
-        return "sent"
-    if task.status in {EmailTaskStatus.SCHEDULED.value, EmailTaskStatus.APPROVED.value}:
-        return "scheduled"
-    if task.status == EmailTaskStatus.REVIEW_REQUIRED.value:
-        return "review_required"
-    if task.status == EmailTaskStatus.SKIPPED.value:
-        return "skipped"
-    return "matched"
+        return "contacted"
+    if task.status in {
+        EmailTaskStatus.SEND_FAILED.value,
+        EmailTaskStatus.CANCELED.value,
+    }:
+        return "needs_attention"
+    return "preparing"

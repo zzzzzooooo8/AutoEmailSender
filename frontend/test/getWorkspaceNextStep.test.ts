@@ -8,6 +8,9 @@ describe("getWorkspaceNextStep", () => {
         status: "matched",
         hasDraft: false,
         hasPrimaryMaterial: false,
+        cancellationReason: null,
+        canContinueManually: false,
+        canWriteFollowUp: false,
       }),
     ).toEqual({
       title: "选择分析材料",
@@ -20,6 +23,9 @@ describe("getWorkspaceNextStep", () => {
         status: "matched",
         hasDraft: false,
         hasPrimaryMaterial: true,
+        cancellationReason: null,
+        canContinueManually: false,
+        canWriteFollowUp: false,
       }),
     ).toEqual({
       title: "生成邮件草稿",
@@ -32,6 +38,9 @@ describe("getWorkspaceNextStep", () => {
         status: "scheduled",
         hasDraft: true,
         hasPrimaryMaterial: true,
+        cancellationReason: null,
+        canContinueManually: false,
+        canWriteFollowUp: false,
       }),
     ).toEqual({
       title: "确认发送时间",
@@ -44,6 +53,9 @@ describe("getWorkspaceNextStep", () => {
         status: "approved",
         hasDraft: true,
         hasPrimaryMaterial: true,
+        cancellationReason: null,
+        canContinueManually: false,
+        canWriteFollowUp: false,
       }),
     ).toEqual({
       title: "检查后发送",
@@ -56,6 +68,9 @@ describe("getWorkspaceNextStep", () => {
         status: "scheduled",
         hasDraft: false,
         hasPrimaryMaterial: true,
+        cancellationReason: null,
+        canContinueManually: false,
+        canWriteFollowUp: false,
       }),
     ).toEqual({
       title: "生成邮件草稿",
@@ -68,6 +83,9 @@ describe("getWorkspaceNextStep", () => {
         status: "scheduled",
         hasDraft: true,
         hasPrimaryMaterial: false,
+        cancellationReason: null,
+        canContinueManually: false,
+        canWriteFollowUp: false,
       }),
     ).toEqual({
       title: "选择分析材料",
@@ -76,40 +94,28 @@ describe("getWorkspaceNextStep", () => {
 
   it.each([
     [
-      "sent",
-      {
-        status: "sent",
-        hasDraft: false,
-        hasPrimaryMaterial: false,
-      },
-      "查看发送结果",
-    ],
-    [
-      "reply_detected",
-      {
-        status: "reply_detected",
-        hasDraft: false,
-        hasPrimaryMaterial: false,
-      },
-      "处理导师回复",
-    ],
-    [
       "send_failed",
       {
         status: "send_failed",
         hasDraft: false,
         hasPrimaryMaterial: false,
+        cancellationReason: null,
+        canContinueManually: false,
+        canWriteFollowUp: false,
       },
       "查看失败原因并重试",
     ],
     [
-      "skipped",
+      "canceled",
       {
-        status: "skipped",
+        status: "canceled",
         hasDraft: false,
         hasPrimaryMaterial: false,
+        cancellationReason: "batch_stopped",
+        canContinueManually: true,
+        canWriteFollowUp: false,
       },
-      "查看跳过原因",
+      "作为单独联系继续",
     ],
   ])(
     "keeps terminal status %s from falling back to precondition prompts",
@@ -119,4 +125,63 @@ describe("getWorkspaceNextStep", () => {
       expect(getWorkspaceNextStep(input).title).not.toBe("生成邮件草稿");
     },
   );
+
+  it.each([
+    {
+      name: "sent",
+      input: {
+        status: "sent" as const,
+        hasDraft: false,
+        hasPrimaryMaterial: false,
+        cancellationReason: null,
+        canContinueManually: false,
+        canWriteFollowUp: true,
+      },
+    },
+    {
+      name: "reply_detected",
+      input: {
+        status: "reply_detected" as const,
+        hasDraft: false,
+        hasPrimaryMaterial: false,
+        cancellationReason: null,
+        canContinueManually: false,
+        canWriteFollowUp: true,
+      },
+    },
+  ])("prefers follow-up guidance for %s tasks", ({ input }) => {
+    expect(getWorkspaceNextStep(input)).toEqual({
+      title: "写跟进邮件",
+    });
+  });
+
+  it("prefers follow-up guidance whenever canWriteFollowUp is true, even for non-terminal statuses", () => {
+    expect(
+      getWorkspaceNextStep({
+        status: "approved",
+        hasDraft: false,
+        hasPrimaryMaterial: false,
+        cancellationReason: null,
+        canContinueManually: false,
+        canWriteFollowUp: true,
+      }),
+    ).toEqual({
+      title: "写跟进邮件",
+    });
+  });
+
+  it("keeps canceled batch-stopped guidance ahead of missing-material prompts", () => {
+    expect(
+      getWorkspaceNextStep({
+        status: "approved",
+        hasDraft: false,
+        hasPrimaryMaterial: false,
+        cancellationReason: null,
+        canContinueManually: true,
+        canWriteFollowUp: false,
+      }),
+    ).toEqual({
+      title: "作为单独联系继续",
+    });
+  });
 });

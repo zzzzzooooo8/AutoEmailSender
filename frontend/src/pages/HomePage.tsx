@@ -6,11 +6,17 @@ import { OnboardingChecklistCard } from '@/components/molecules/OnboardingCheckl
 import { useNotification } from '@/context/NotificationContext';
 import { useSelectionContext } from '@/context/SelectionContext';
 import { getOnboardingState } from '@/features/onboarding/client/getOnboardingState';
+import {
+  filterProfessorsByDashboardStatus,
+  getProfessorDashboardStatusLabel,
+  PROFESSOR_DASHBOARD_STATUS_OPTIONS,
+  type ProfessorDashboardStatusFilter,
+} from '@/features/professor-status/dashboardStatus';
 import { calculateMatch } from '@/lib/api/emailTasksApi';
 import { useConfirmDialog } from '@/lib/useConfirmDialog';
 import { listProfessors } from '@/lib/api/professorsApi';
 import { ensureWorkspaceTask } from '@/lib/api/workspacesApi';
-import { PROFESSOR_STATUS_LABELS, type ProfessorDashboardItemDTO } from '@/types';
+import type { ProfessorDashboardItemDTO } from '@/types';
 
 const SESSION_KEY = 'selected_professor_ids';
 
@@ -24,7 +30,7 @@ export const HomePage = () => {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [keyword, setKeyword] = useState('');
   const [university, setUniversity] = useState('all');
-  const [status, setStatus] = useState<'all' | ProfessorDashboardItemDTO['status']>('all');
+  const [status, setStatus] = useState<ProfessorDashboardStatusFilter>('all');
   const [loading, setLoading] = useState(false);
   const [hasLoadedProfessors, setHasLoadedProfessors] = useState(false);
   const [bulkScoring, setBulkScoring] = useState(false);
@@ -109,7 +115,7 @@ export const HomePage = () => {
     void loadProfessors();
   }, [loadProfessors]);
 
-  const filteredProfessors = professors.filter((item) => {
+  const filteredProfessors = filterProfessorsByDashboardStatus(professors, status).filter((item) => {
     const query = keyword.trim().toLowerCase();
     const keywordMatched =
       !query ||
@@ -117,8 +123,7 @@ export const HomePage = () => {
         .filter(Boolean)
         .some((value) => value?.toLowerCase().includes(query));
     const universityMatched = university === 'all' || item.university === university;
-    const statusMatched = status === 'all' || item.status === status;
-    return keywordMatched && universityMatched && statusMatched;
+    return keywordMatched && universityMatched;
   });
 
   const universityOptions = Array.from(
@@ -366,7 +371,7 @@ export const HomePage = () => {
               shellClassName="border-0 bg-transparent px-0 py-0 shadow-none"
             >
               <option value="all">全部状态</option>
-              {Object.entries(PROFESSOR_STATUS_LABELS).map(([value, label]) => (
+              {PROFESSOR_DASHBOARD_STATUS_OPTIONS.map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
                 </option>
@@ -458,7 +463,7 @@ export const HomePage = () => {
                     <div className="rounded-2xl bg-stone-50 px-4 py-3 text-sm">
                       <div className="text-stone-500">当前状态</div>
                       <div className="mt-2 text-lg font-semibold text-stone-900">
-                        {PROFESSOR_STATUS_LABELS[professor.status]}
+                        {getProfessorDashboardStatusLabel(professor.status)}
                       </div>
                     </div>
                   </div>

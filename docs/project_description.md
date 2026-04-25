@@ -48,15 +48,25 @@
 ## 5. 任务状态机
 建议状态保持为：
 
-`discovered -> skipped / matched -> draft_generated -> review_required -> approved -> scheduled -> sent / send_failed -> reply_detected`
+`discovered -> matched -> review_required -> approved -> scheduled -> sent -> reply_detected`
 
 当前关键含义：
 - `discovered`：任务刚创建，尚未手动执行匹配和草稿生成
+- `matched`：已经完成匹配计算，并保存匹配分、解释、关键词等结果；不会因为分数高低被自动跳过
 - `review_required`：已经生成匹配结果与草稿，等待人工处理
 - `approved`：已批准，等待立即派发
 - `scheduled`：已批准并设置了未来发送时间
 - `sent`：邮件已经真实发出
+- `send_failed`：真实发送尝试失败，需要人工处理后再决定是否继续
 - `reply_detected`：已经检测到导师回复
+- `canceled`：明确取消态，主要用于批量停止后终止原批量子任务；后续如需继续联系，会新建手动子任务承接，而不是复用原任务
+
+补充约束：
+- `reply_detected` 只会出现在 `sent` 之后，不作为 `send_failed` 的后续状态
+- `send_failed` 是发送阶段的失败分支，不会继续流转到 `reply_detected`
+- 匹配分只用于筛选、排序和解释，不参与执行裁决
+- 系统不会再根据匹配分自动把任务转成“跳过”状态
+- 手动继续联系和 follow-up 都通过新建手动任务衔接，以保留父任务历史
 
 ## 6. 技术栈
 - 前端：React + Vite + TailwindCSS

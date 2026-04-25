@@ -4,6 +4,9 @@ export interface WorkspaceNextStepInput {
   status: WorkspaceTaskStatus;
   hasDraft: boolean;
   hasPrimaryMaterial: boolean;
+  cancellationReason?: string | null;
+  canContinueManually?: boolean;
+  canWriteFollowUp?: boolean;
 }
 
 export interface WorkspaceNextStep {
@@ -13,17 +16,16 @@ export interface WorkspaceNextStep {
 export const getWorkspaceNextStep = (
   input: WorkspaceNextStepInput,
 ): WorkspaceNextStep => {
-  switch (input.status) {
-    case "sent":
-      return { title: "查看发送结果" };
-    case "reply_detected":
-      return { title: "处理导师回复" };
-    case "send_failed":
-      return { title: "查看失败原因并重试" };
-    case "skipped":
-      return { title: "查看跳过原因" };
-    default:
-      break;
+  if (input.canContinueManually) {
+    return { title: "作为单独联系继续" };
+  }
+
+  if (input.canWriteFollowUp) {
+    return { title: "写跟进邮件" };
+  }
+
+  if (input.status === "send_failed") {
+    return { title: "查看失败原因并重试" };
   }
 
   if (!input.hasPrimaryMaterial) {

@@ -106,12 +106,15 @@ LLM 配置表。
 单导师执行单元。
 
 关键字段：
+- `source`
 - `batch_task_id`
+- `parent_task_id`
 - `identity_id`
 - `llm_profile_id`
 - `professor_id`
 - `primary_material_id`
 - `status`
+- `cancellation_reason`
 - `match_score` / `match_reason`
 - `generated_subject` / `generated_content_text` / `generated_content_html`
 - `selected_material_ids`
@@ -125,9 +128,16 @@ LLM 配置表。
 - `last_error`
 
 说明：
+- `source` 用于区分任务来源；当前实现包含 `manual` 和 `batch`
+- `parent_task_id` 用于串联“继续联系”或 follow-up 创建出来的手动子任务；同一个父任务最多只允许一个手动子任务
 - 同一 `identity_id + professor_id` 允许存在多条 `email_tasks`
 - `primary_material_id` 是任务级快照；之后即使身份默认材料变了，旧任务也不会被动跟随
 - 如果 `primary_material_id` 为空，任务仍可手动写信并发送，只是不能执行匹配和草稿生成
+- `cancellation_reason` 目前用于记录明确取消原因；批量停止时会把未完成子任务置为 `canceled`，并写入 `batch_stopped`
+- 执行状态主链为 `discovered -> matched -> review_required -> approved -> scheduled -> sent -> reply_detected`
+- `send_failed` 是发送阶段的失败分支，不会继续流转到 `reply_detected`
+- `canceled` 是显式取消态，不再把 `skipped` 当作当前执行状态
+- `match_score` 只用于筛选、排序和解释，不参与是否继续执行的自动裁决
 
 ## 8. `email_logs`
 工作区双向消息流水。

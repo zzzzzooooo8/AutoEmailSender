@@ -40,6 +40,9 @@ type WorkspaceComposerDockProps = {
   canChangeMode: boolean;
   canCalculateMatch: boolean;
   canGenerateDraft: boolean;
+  canContinueManually: boolean;
+  canStartFollowUp: boolean;
+  canSubmitDraft: boolean;
   composerExpanded: boolean;
   onToggleExpanded: () => void;
   onSubjectChange: (value: string) => void;
@@ -50,6 +53,8 @@ type WorkspaceComposerDockProps = {
   onSendNow: () => void;
   onScheduleSend: () => void;
   onCancelSchedule: () => void;
+  onContinueManually: () => void;
+  onStartFollowUp: () => void;
   onCalculateMatch: () => void;
   onGenerateDraft: () => void;
   onChangeMode: (value: OutreachGenerationMode) => void;
@@ -116,6 +121,9 @@ export const WorkspaceComposerDock = ({
   canChangeMode,
   canCalculateMatch,
   canGenerateDraft,
+  canContinueManually,
+  canStartFollowUp,
+  canSubmitDraft,
   composerExpanded,
   onToggleExpanded,
   onSubjectChange,
@@ -126,6 +134,8 @@ export const WorkspaceComposerDock = ({
   onSendNow,
   onScheduleSend,
   onCancelSchedule,
+  onContinueManually,
+  onStartFollowUp,
   onCalculateMatch,
   onGenerateDraft,
   onChangeMode,
@@ -353,37 +363,61 @@ export const WorkspaceComposerDock = ({
               </div>
 
               <div className="flex flex-wrap gap-3">
-                {currentTask.status === 'scheduled' ? (
+                {canContinueManually ? (
                   <button
                     type="button"
-                    onClick={onCancelSchedule}
+                    onClick={onContinueManually}
                     disabled={acting}
                     className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <TimerReset className="h-4 w-4" />
-                    取消定时
+                    作为单独联系继续
                   </button>
-                ) : (
+                ) : null}
+                {canStartFollowUp ? (
                   <button
                     type="button"
-                    onClick={onScheduleSend}
-                    disabled={acting || !draftReady || !scheduledAt}
+                    onClick={onStartFollowUp}
+                    disabled={acting}
                     className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <CalendarClock className="h-4 w-4" />
-                    定时发送
+                    写跟进邮件
                   </button>
-                )}
+                ) : null}
+                {canSubmitDraft ? (
+                  currentTask.status === 'scheduled' ? (
+                    <button
+                      type="button"
+                      onClick={onCancelSchedule}
+                      disabled={acting}
+                      className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <TimerReset className="h-4 w-4" />
+                      取消定时
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={onScheduleSend}
+                      disabled={acting || !draftReady || !scheduledAt}
+                      className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <CalendarClock className="h-4 w-4" />
+                      定时发送
+                    </button>
+                  )
+                ) : null}
 
-                <button
-                  type="button"
-                  onClick={onSendNow}
-                  disabled={acting || !draftReady}
-                  className="ui-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <Send className="h-4 w-4" />
-                  立即发送
-                </button>
+                {canSubmitDraft ? (
+                  <button
+                    type="button"
+                    onClick={onSendNow}
+                    disabled={acting || !draftReady}
+                    className="ui-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <Send className="h-4 w-4" />
+                    立即发送
+                  </button>
+                ) : null}
               </div>
             </div>
           </div>
@@ -422,6 +456,26 @@ export const WorkspaceComposerDock = ({
             </div>
 
             <div className="flex flex-wrap gap-2">
+              {canContinueManually ? (
+                <button
+                  type="button"
+                  onClick={onContinueManually}
+                  disabled={acting}
+                  className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  作为单独联系继续
+                </button>
+              ) : null}
+              {canStartFollowUp ? (
+                <button
+                  type="button"
+                  onClick={onStartFollowUp}
+                  disabled={acting}
+                  className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  写跟进邮件
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={onCalculateMatch}

@@ -38,6 +38,16 @@ export const cancelScheduledTask = (taskId: number) =>
     method: 'POST',
   });
 
+export const continueManually = (taskId: number) =>
+  apiFetch<WorkspaceThreadDTO>(`/api/email-tasks/${taskId}/continue-manually`, {
+    method: 'POST',
+  });
+
+export const startFollowUp = (taskId: number) =>
+  apiFetch<WorkspaceThreadDTO>(`/api/email-tasks/${taskId}/start-follow-up`, {
+    method: 'POST',
+  });
+
 export const updateTaskPrimaryMaterial = (taskId: number, primaryMaterialId: number) =>
   apiFetch<WorkspaceThreadDTO>(`/api/email-tasks/${taskId}/primary-material`, {
     method: 'POST',

@@ -206,6 +206,8 @@ describe("ProfilePage onboarding", () => {
 
     expect(await screen.findByLabelText("配置名称")).toHaveValue("博士申请配置");
     expect(screen.getByLabelText("发件人姓名")).toHaveValue("王同学");
+    expect(screen.queryByLabelText("匹配阈值")).not.toBeInTheDocument();
+    expect(screen.queryByText(/匹配阈值/)).not.toBeInTheDocument();
   });
 
   it("renders the material entry and connection testing area for an existing identity", () => {
@@ -279,5 +281,8 @@ describe("ProfilePage onboarding", () => {
         outreach_template_body_html: "<p>富文本更新</p>",
       }),
     );
+    expect(
+      vi.mocked(updateIdentity).mock.calls[0][1],
+    ).not.toHaveProperty("match_threshold");
   });
 });

@@ -13,7 +13,9 @@ import {
   approveAndSend,
   calculateMatch,
   cancelScheduledTask,
+  continueManually,
   generateDraft,
+  startFollowUp,
   updateTaskOutreachConfig,
   updateTaskPrimaryMaterial,
 } from '@/lib/api/emailTasksApi';
@@ -26,23 +28,23 @@ import {
   type IdentityMaterialDTO,
   type OutreachGenerationMode,
   type WorkspaceMessageDTO,
+  type WorkspaceTaskStatusLabelKey,
   type WorkspaceTaskSummaryDTO,
   type WorkspaceThreadDTO,
 } from '@/types';
 
 const PRIMARY_MATERIAL_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt', '.md'];
 
-const WORKSPACE_STATUS_LABELS: Record<string, string> = {
+const WORKSPACE_STATUS_LABELS: Record<WorkspaceTaskStatusLabelKey, string> = {
   discovered: '待处理',
   matched: '已算匹配',
-  draft_generated: '待确认',
   review_required: PROFESSOR_STATUS_LABELS.review_required,
   approved: '待发送',
   scheduled: PROFESSOR_STATUS_LABELS.scheduled,
   sent: PROFESSOR_STATUS_LABELS.sent,
   send_failed: PROFESSOR_STATUS_LABELS.send_failed,
-  reply_detected: PROFESSOR_STATUS_LABELS.replied,
-  skipped: PROFESSOR_STATUS_LABELS.skipped,
+  reply_detected: PROFESSOR_STATUS_LABELS.reply_detected,
+  canceled: '已取消',
 };
 
 const getDefaultScheduledAtValue = () => {
@@ -71,6 +73,15 @@ const getLatestDraftMessage = (messages: WorkspaceMessageDTO[]) => {
   return null;
 };
 
+const shouldBlockDirectDraftActions = (task: WorkspaceTaskSummaryDTO | null) =>
+  Boolean(
+    task?.can_continue_manually ||
+      task?.can_write_follow_up ||
+      task?.status === 'canceled' ||
+      task?.sent_at ||
+      task?.is_replied,
+  );
+
 const getStatusLabel = (currentTask: WorkspaceTaskSummaryDTO | null) => {
   if (!currentTask?.status) {
     return '尚未创建任务';
@@ -80,14 +91,12 @@ const getStatusLabel = (currentTask: WorkspaceTaskSummaryDTO | null) => {
 
 const getWorkspaceNextStepDescription = (title: string) => {
   switch (title) {
-    case '查看发送结果':
-      return '关注发送结果和导师回复。';
-    case '处理导师回复':
-      return '确认导师意图并及时跟进。';
+    case '作为单独联系继续':
+      return '从这条批量任务记录中拆出一条单独联系继续推进。';
+    case '写跟进邮件':
+      return '基于当前沟通记录起草下一封跟进邮件。';
     case '查看失败原因并重试':
       return '检查失败原因，修正后重试。';
-    case '查看跳过原因':
-      return '查看跳过原因，再决定是否补充材料。';
     case '选择分析材料':
       return '选择材料后可分析匹配度。';
     case '生成邮件草稿':
@@ -158,36 +167,37 @@ export const WorkspacePage = () => {
 
   const syncComposer = useCallback((data: WorkspaceThreadDTO) => {
     const currentTask = getCurrentTaskOrNull(data);
+    const blockedDraftActions = shouldBlockDirectDraftActions(currentTask);
     const latestDraftMessage = getLatestDraftMessage(data.messages);
-    const preferredDraftMessage =
-      currentTask?.status && !['sent', 'reply_detected'].includes(currentTask.status)
-        ? latestDraftMessage
-        : null;
-    const nextSubject =
-      currentTask?.approved_subject ??
-      currentTask?.generated_subject ??
-      preferredDraftMessage?.subject ??
-      '';
-    const nextContentHtml =
-      currentTask?.approved_body_html ??
-      currentTask?.generated_content_html ??
-      preferredDraftMessage?.content_html ??
-      null;
+    const preferredDraftMessage = blockedDraftActions ? null : latestDraftMessage;
+    const nextSubject = blockedDraftActions
+      ? ''
+      : currentTask?.approved_subject ??
+        currentTask?.generated_subject ??
+        preferredDraftMessage?.subject ??
+        '';
+    const nextContentHtml = blockedDraftActions
+      ? null
+      : currentTask?.approved_body_html ??
+        currentTask?.generated_content_html ??
+        preferredDraftMessage?.content_html ??
+        null;
     const nextContentText = deriveBodyTextFromDraft({
-      content:
-        currentTask?.approved_body_text ??
-        currentTask?.generated_content_text ??
-        preferredDraftMessage?.content ??
-        '',
+      content: blockedDraftActions
+        ? ''
+        : currentTask?.approved_body_text ??
+          currentTask?.generated_content_text ??
+          preferredDraftMessage?.content ??
+          '',
       contentHtml: nextContentHtml,
     });
 
     setSubject(nextSubject);
     setContent(nextContentText);
     setContentHtml(nextContentHtml);
-    setSelectedMaterialIds(currentTask?.selected_material_ids ?? []);
+    setSelectedMaterialIds(blockedDraftActions ? [] : currentTask?.selected_material_ids ?? []);
     setScheduledAt(
-      currentTask?.scheduled_at
+      !blockedDraftActions && currentTask?.scheduled_at
         ? (() => {
             const scheduled = parseApiDateTime(currentTask.scheduled_at);
             const local = new Date(
@@ -281,20 +291,26 @@ export const WorkspacePage = () => {
   const currentTaskId = currentTask?.id ?? null;
   const currentTaskMode = currentTask?.outreach_generation_mode ?? 'llm';
   const statusLabel = getStatusLabel(currentTask);
+  const blocksDirectDraftActions = shouldBlockDirectDraftActions(currentTask);
   const canChangePrimaryMaterial =
-    currentTask?.id != null && !['sent', 'reply_detected'].includes(currentTask.status ?? '');
+    currentTask?.id != null && !blocksDirectDraftActions;
   const canChangeMode =
-    currentTask?.id != null && !['sent', 'reply_detected'].includes(currentTask.status ?? '');
-  const canCalculateMatch = Boolean(currentTaskId) && Boolean(currentTask?.primary_material_id);
+    currentTask?.id != null && !blocksDirectDraftActions;
+  const canCalculateMatch =
+    Boolean(currentTaskId) &&
+    Boolean(currentTask?.primary_material_id) &&
+    !blocksDirectDraftActions;
   const hasTemplateConfigured = Boolean(
     currentTask?.outreach_template_body_text?.trim() ||
       currentTask?.outreach_template_body_html?.trim(),
   );
   const canGenerateDraft =
     Boolean(currentTaskId) &&
+    !blocksDirectDraftActions &&
     (currentTaskMode === 'template'
       ? hasTemplateConfigured
       : hasTemplateConfigured && Boolean(currentTask?.primary_material_id));
+  const canSubmitDraft = Boolean(currentTaskId) && !blocksDirectDraftActions;
   const primaryMaterialOptions = useMemo(
     () => (thread?.material_options ?? []).filter(isPrimaryMaterialCandidate),
     [thread?.material_options],
@@ -310,6 +326,9 @@ export const WorkspacePage = () => {
         status: currentTask.status ?? 'discovered',
         hasDraft,
         hasPrimaryMaterial: Boolean(currentTask.primary_material_id),
+        cancellationReason: currentTask.cancellation_reason,
+        canContinueManually: currentTask.can_continue_manually,
+        canWriteFollowUp: currentTask.can_write_follow_up,
       })
     : null;
   const nextStepDescription = nextStep ? getWorkspaceNextStepDescription(nextStep.title) : '';
@@ -460,6 +479,32 @@ export const WorkspacePage = () => {
     }
 
     void runAction(() => cancelScheduledTask(currentTaskId), '取消定时失败', '取消定时失败');
+  }, [currentTaskId, runAction]);
+
+  const handleContinueManually = useCallback(() => {
+    if (!currentTaskId) {
+      return;
+    }
+
+    void runAction(
+      () => continueManually(currentTaskId),
+      '继续联系失败',
+      '继续联系失败',
+      () => setComposerExpanded(true),
+    );
+  }, [currentTaskId, runAction]);
+
+  const handleStartFollowUp = useCallback(() => {
+    if (!currentTaskId) {
+      return;
+    }
+
+    void runAction(
+      () => startFollowUp(currentTaskId),
+      '创建跟进邮件失败',
+      '创建跟进邮件失败',
+      () => setComposerExpanded(true),
+    );
   }, [currentTaskId, runAction]);
 
   const handleSelectPrimaryMaterial = useCallback(
@@ -627,6 +672,9 @@ export const WorkspacePage = () => {
                   canChangeMode={canChangeMode}
                   canCalculateMatch={canCalculateMatch}
                   canGenerateDraft={canGenerateDraft}
+                  canContinueManually={Boolean(currentTask.can_continue_manually)}
+                  canStartFollowUp={Boolean(currentTask.can_write_follow_up)}
+                  canSubmitDraft={canSubmitDraft}
                   composerExpanded={composerExpanded}
                   onToggleExpanded={() =>
                     setComposerExpanded((current) => !current)
@@ -639,6 +687,8 @@ export const WorkspacePage = () => {
                   onSendNow={handleSendNow}
                   onScheduleSend={handleScheduleSend}
                   onCancelSchedule={handleCancelSchedule}
+                  onContinueManually={handleContinueManually}
+                  onStartFollowUp={handleStartFollowUp}
                   onCalculateMatch={handleCalculateMatch}
                   onGenerateDraft={handleGenerateDraft}
                   onChangeMode={handleChangeMode}

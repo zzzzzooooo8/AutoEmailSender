@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import os
 import sqlite3
 import subprocess
@@ -387,6 +388,90 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(restored_dashboard.status_code, 200)
         self.assertEqual(len(restored_dashboard.json()), 1)
         self.assertEqual(restored_dashboard.json()[0]["name"], "张教授")
+
+    def test_professor_dashboard_returns_contact_state_labels(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        professor_cases = [
+            ("未联系导师", "dashboard-not-contacted@example.edu", None, "not_contacted"),
+            ("准备中导师", "dashboard-preparing@example.edu", "matched", "preparing"),
+            ("approved 导师", "dashboard-approved@example.edu", "approved", "ready_to_send"),
+            ("待发送导师", "dashboard-ready@example.edu", "scheduled", "ready_to_send"),
+            ("已联系导师", "dashboard-contacted@example.edu", "sent", "contacted"),
+            ("已回复导师", "dashboard-replied@example.edu", "reply_detected", "replied"),
+            ("send_failed 导师", "dashboard-send-failed@example.edu", "send_failed", "needs_attention"),
+            ("需处理导师", "dashboard-needs-attention@example.edu", "canceled", "needs_attention"),
+        ]
+
+        professor_ids: dict[str, int] = {}
+        task_ids: dict[str, int] = {}
+
+        for name, email, task_status, _expected_status in professor_cases:
+            create_response = self.client.post(
+                "/api/professors",
+                json={
+                    "name": name,
+                    "email": email,
+                    "title": "Professor",
+                    "university": "Example University",
+                    "school": "School of AI",
+                    "department": "Computer Science",
+                    "research_direction": "Large language models",
+                    "recent_papers": [],
+                    "profile_url": None,
+                    "source_url": None,
+                },
+            )
+            self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+            professor_id = create_response.json()["id"]
+            professor_ids[email] = professor_id
+
+            if task_status is None:
+                continue
+
+            ensure_response = self.client.post(
+                f"/api/workspaces/{professor_id}/ensure-task",
+                params={"identity_id": identity_id, "llm_profile_id": llm_id},
+            )
+            self.assertEqual(ensure_response.status_code, 200, msg=ensure_response.text)
+            task_ids[email] = ensure_response.json()["current_task"]["id"]
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            for _name, email, task_status, _expected_status in professor_cases:
+                task_id = task_ids.get(email)
+                if task_id is None or task_status is None:
+                    continue
+                connection.execute(
+                    """
+                    UPDATE email_tasks
+                    SET status = ?, cancellation_reason = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        task_status,
+                        "batch_stopped" if task_status == "canceled" else None,
+                        task_id,
+                    ),
+                )
+            connection.commit()
+        finally:
+            connection.close()
+
+        response = self.client.get(
+            "/api/professors",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        payload_by_id = {item["id"]: item for item in response.json()}
+        for _name, email, _task_status, expected_status in professor_cases:
+            payload = payload_by_id[professor_ids[email]]
+            self.assertEqual(payload["status"], expected_status)
+            self.assertNotIn(
+                payload["status"],
+                {"matched", "scheduled", "sent", "skipped", "send_failed"},
+            )
 
     def test_professor_template_download_and_import_file_upserts_existing_records(self) -> None:
         csv_template = self.client.get("/api/professors/template", params={"format": "csv"})
@@ -939,7 +1024,7 @@ class ApiEndpointTests(unittest.TestCase):
         finally:
             connection.close()
 
-        self.assertEqual(version, "2f6a9d8c1e20")
+        self.assertEqual(version, "4c1a2b3d4e5f")
 
         if get_engine.cache_info().currsize:
             asyncio.run(dispose_engine())
@@ -1000,7 +1085,7 @@ class ApiEndpointTests(unittest.TestCase):
         selected_professor = next(
             item for item in updated_professors if item["id"] == selected_professor_ids[0]
         )
-        self.assertEqual(selected_professor["status"], "matched")
+        self.assertEqual(selected_professor["status"], "preparing")
         self.assertIsNone(selected_professor["match_score"])
 
         workspace_before = self.client.get(
@@ -1094,6 +1179,1249 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertGreaterEqual(len(payload["messages"]), 2)
         self.assertEqual(payload["messages"][-1]["direction"], "sent")
         mocked_send.assert_awaited_once()
+
+    def test_calculate_match_keeps_low_score_task_in_matched_state(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        material_id = self._upload_material(
+            identity_id,
+            filename="resume.txt",
+            content=b"My background covers information extraction and agents.",
+            material_type="resume",
+        )
+        set_primary_response = self.client.post(f"/api/materials/{material_id}/set-primary")
+        self.assertEqual(set_primary_response.status_code, 200, msg=set_primary_response.text)
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "低分匹配导师",
+                "email": "low-score-match@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Agents",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            connection.execute(
+                """
+                UPDATE identity_profiles
+                SET match_threshold = ?
+                WHERE id = ?
+                """,
+                (95, identity_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        ensure_response = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(ensure_response.status_code, 200, msg=ensure_response.text)
+        task_id = ensure_response.json()["current_task"]["id"]
+
+        with patch(
+            "app.services.task_runtime.llm_runtime.generate_match_evaluation",
+            AsyncMock(return_value=self._build_match_evaluation_result(match_score=18)),
+        ):
+            response = self.client.post(f"/api/email-tasks/{task_id}/calculate-match")
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        self.assertEqual(response.json()["current_task"]["match_score"], 18)
+        self.assertEqual(response.json()["current_task"]["status"], "matched")
+
+    def test_stop_batch_task_marks_pending_items_as_canceled(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+
+        self.client.post("/api/professors/import-sample")
+        professor_ids = [item["id"] for item in self.client.get("/api/professors").json()[:3]]
+
+        create_response = self.client.post(
+            "/api/batch-tasks",
+            json={
+                "identity_id": identity_id,
+                "llm_profile_id": llm_id,
+                "name": "停止后取消未完成任务",
+                "professor_ids": professor_ids,
+                "schedule_type": "immediate",
+                "window_start_time": None,
+                "window_end_time": None,
+                "emails_per_window": None,
+                "primary_material_id": None,
+                "email_subject": "联系 {{name}}",
+                "email_body": "老师您好，我是{{sender_name}}。",
+                "selected_material_ids": None,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        batch_task_id = create_response.json()["id"]
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            task_ids = [
+                row[0]
+                for row in connection.execute(
+                    """
+                    SELECT id
+                    FROM email_tasks
+                    WHERE batch_task_id = ?
+                    ORDER BY id
+                    """,
+                    (batch_task_id,),
+                ).fetchall()
+            ]
+            self.assertEqual(len(task_ids), 3)
+            connection.execute(
+                "UPDATE email_tasks SET status = ? WHERE id = ?",
+                ("matched", task_ids[0]),
+            )
+            connection.execute(
+                "UPDATE email_tasks SET status = ? WHERE id = ?",
+                ("review_required", task_ids[1]),
+            )
+            connection.execute(
+                """
+                UPDATE email_tasks
+                SET status = ?, sent_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                ("sent", task_ids[2]),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        stop_response = self.client.post(f"/api/batch-tasks/{batch_task_id}/stop")
+        self.assertEqual(stop_response.status_code, 200, msg=stop_response.text)
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            rows = connection.execute(
+                """
+                SELECT id, status, cancellation_reason
+                FROM email_tasks
+                WHERE batch_task_id = ?
+                ORDER BY id
+                """,
+                (batch_task_id,),
+            ).fetchall()
+        finally:
+            connection.close()
+
+        self.assertEqual(
+            rows,
+            [
+                (task_ids[0], "canceled", "batch_stopped"),
+                (task_ids[1], "canceled", "batch_stopped"),
+                (task_ids[2], "sent", None),
+            ],
+        )
+
+    def test_stop_batch_task_keeps_send_failed_items_failed(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+
+        self.client.post("/api/professors/import-sample")
+        professor_ids = [item["id"] for item in self.client.get("/api/professors").json()[:2]]
+
+        create_response = self.client.post(
+            "/api/batch-tasks",
+            json={
+                "identity_id": identity_id,
+                "llm_profile_id": llm_id,
+                "name": "停止时保留失败任务",
+                "professor_ids": professor_ids,
+                "schedule_type": "immediate",
+                "window_start_time": None,
+                "window_end_time": None,
+                "emails_per_window": None,
+                "primary_material_id": None,
+                "email_subject": "联系 {{name}}",
+                "email_body": "老师您好，我是{{sender_name}}。",
+                "selected_material_ids": None,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        batch_task_id = create_response.json()["id"]
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            task_ids = [
+                row[0]
+                for row in connection.execute(
+                    """
+                    SELECT id
+                    FROM email_tasks
+                    WHERE batch_task_id = ?
+                    ORDER BY id
+                    """,
+                    (batch_task_id,),
+                ).fetchall()
+            ]
+            self.assertEqual(len(task_ids), 2)
+            connection.execute(
+                """
+                UPDATE email_tasks
+                SET status = ?, last_error = ?
+                WHERE id = ?
+                """,
+                ("send_failed", "smtp timeout", task_ids[0]),
+            )
+            connection.execute(
+                "UPDATE email_tasks SET status = ? WHERE id = ?",
+                ("matched", task_ids[1]),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        stop_response = self.client.post(f"/api/batch-tasks/{batch_task_id}/stop")
+        self.assertEqual(stop_response.status_code, 200, msg=stop_response.text)
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            rows = connection.execute(
+                """
+                SELECT id, status, cancellation_reason, last_error
+                FROM email_tasks
+                WHERE batch_task_id = ?
+                ORDER BY id
+                """,
+                (batch_task_id,),
+            ).fetchall()
+        finally:
+            connection.close()
+
+        self.assertEqual(
+            rows,
+            [
+                (task_ids[0], "send_failed", None, "smtp timeout"),
+                (task_ids[1], "canceled", "batch_stopped", None),
+            ],
+        )
+
+    def test_continue_manually_creates_manual_child_task_from_batch_stopped_task(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        primary_material_id = self._upload_material(
+            identity_id,
+            filename="resume.txt",
+            content=b"My background covers agent systems and information extraction.",
+            material_type="resume",
+        )
+        attachment_material_id = self._upload_material(
+            identity_id,
+            filename="paper.pdf",
+            content=b"%PDF-1.4 test attachment",
+            material_type="portfolio",
+        )
+        set_primary_response = self.client.post(f"/api/materials/{primary_material_id}/set-primary")
+        self.assertEqual(set_primary_response.status_code, 200, msg=set_primary_response.text)
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "手动继续联系导师",
+                "email": "continue-manually@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Agent systems",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        create_response = self.client.post(
+            "/api/batch-tasks",
+            json={
+                "identity_id": identity_id,
+                "llm_profile_id": llm_id,
+                "name": "继续联系批量任务",
+                "professor_ids": [professor_id],
+                "schedule_type": "immediate",
+                "window_start_time": None,
+                "window_end_time": None,
+                "emails_per_window": None,
+                "primary_material_id": primary_material_id,
+                "email_subject": None,
+                "email_body": None,
+                "selected_material_ids": [attachment_material_id],
+                "outreach_generation_mode": "template",
+                "outreach_template_subject": "继续联系 {{name}}",
+                "outreach_template_body_text": "继续联系正文 {{name}}",
+                "outreach_template_body_html": "<p>继续联系正文 {{name}}</p>",
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        batch_task_id = create_response.json()["id"]
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            parent_task_id = connection.execute(
+                """
+                SELECT id
+                FROM email_tasks
+                WHERE batch_task_id = ?
+                """,
+                (batch_task_id,),
+            ).fetchone()[0]
+            connection.execute(
+                """
+                UPDATE email_tasks
+                SET status = ?,
+                    cancellation_reason = ?,
+                    match_score = ?,
+                    match_reason = ?,
+                    fit_points = ?,
+                    risk_points = ?,
+                    match_keywords = ?,
+                    generated_subject = ?,
+                    generated_content_text = ?,
+                    generated_content_html = ?,
+                    selected_material_ids = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    "canceled",
+                    "batch_stopped",
+                    91,
+                    "研究方向与材料高度匹配",
+                    json.dumps(["研究方向契合"]),
+                    json.dumps(["需要补充近期成果"]),
+                    json.dumps(["agent"]),
+                    "旧草稿主题",
+                    "旧草稿正文",
+                    "<p>旧草稿正文</p>",
+                    json.dumps([attachment_material_id]),
+                    parent_task_id,
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        workspace_before = self.client.get(
+            f"/api/workspaces/{professor_id}",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(workspace_before.status_code, 200, msg=workspace_before.text)
+        before_task = workspace_before.json()["current_task"]
+        self.assertEqual(before_task["id"], parent_task_id)
+        self.assertEqual(before_task["source"], "batch")
+        self.assertIsNone(before_task["parent_task_id"])
+        self.assertEqual(before_task["cancellation_reason"], "batch_stopped")
+        self.assertTrue(before_task["can_continue_manually"])
+        self.assertFalse(before_task["can_write_follow_up"])
+
+        response = self.client.post(f"/api/email-tasks/{parent_task_id}/continue-manually")
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        payload = response.json()
+        current_task = payload["current_task"]
+        self.assertNotEqual(current_task["id"], parent_task_id)
+        self.assertIsNone(current_task["batch_task_id"])
+        self.assertEqual(current_task["source"], "manual")
+        self.assertEqual(current_task["parent_task_id"], parent_task_id)
+        self.assertEqual(current_task["status"], "review_required")
+        self.assertIsNone(current_task["cancellation_reason"])
+        self.assertEqual(current_task["primary_material_id"], primary_material_id)
+        self.assertEqual(current_task["selected_material_ids"], [attachment_material_id])
+        self.assertEqual(current_task["match_score"], 91)
+        self.assertEqual(current_task["match_reason"], "研究方向与材料高度匹配")
+        self.assertEqual(current_task["fit_points"], ["研究方向契合"])
+        self.assertEqual(current_task["risk_points"], ["需要补充近期成果"])
+        self.assertEqual(current_task["match_keywords"], ["agent"])
+        self.assertEqual(current_task["generated_subject"], "旧草稿主题")
+        self.assertEqual(current_task["generated_content_text"], "旧草稿正文")
+        self.assertEqual(current_task["generated_content_html"], "<p>旧草稿正文</p>")
+        self.assertEqual(current_task["outreach_generation_mode"], "template")
+        self.assertEqual(current_task["outreach_template_subject"], "继续联系 {{name}}")
+        self.assertEqual(current_task["outreach_template_body_text"], "继续联系正文 {{name}}")
+        self.assertEqual(current_task["outreach_template_body_html"], "<p>继续联系正文 {{name}}</p>")
+        self.assertFalse(current_task["can_continue_manually"])
+        self.assertFalse(current_task["can_write_follow_up"])
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            rows = connection.execute(
+                """
+                SELECT id, source, batch_task_id, parent_task_id, status, cancellation_reason,
+                       generated_subject, generated_content_text, selected_material_ids
+                FROM email_tasks
+                WHERE professor_id = ?
+                ORDER BY id
+                """,
+                (professor_id,),
+            ).fetchall()
+        finally:
+            connection.close()
+
+        self.assertEqual(
+            rows,
+            [
+                (
+                    parent_task_id,
+                    "batch",
+                    batch_task_id,
+                    None,
+                    "canceled",
+                    "batch_stopped",
+                    "旧草稿主题",
+                    "旧草稿正文",
+                    json.dumps([attachment_material_id]),
+                ),
+                (
+                    current_task["id"],
+                    "manual",
+                    None,
+                    parent_task_id,
+                    "review_required",
+                    None,
+                    "旧草稿主题",
+                    "旧草稿正文",
+                    json.dumps([attachment_material_id]),
+                ),
+            ],
+        )
+
+    def test_continue_manually_restores_matched_when_parent_has_match_without_draft(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        primary_material_id = self._upload_material(
+            identity_id,
+            filename="resume.txt",
+            content=b"My background covers agent systems and information extraction.",
+            material_type="resume",
+        )
+        set_primary_response = self.client.post(f"/api/materials/{primary_material_id}/set-primary")
+        self.assertEqual(set_primary_response.status_code, 200, msg=set_primary_response.text)
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "无草稿已匹配导师",
+                "email": "continue-matched@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Agent systems",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        create_response = self.client.post(
+            "/api/batch-tasks",
+            json={
+                "identity_id": identity_id,
+                "llm_profile_id": llm_id,
+                "name": "继续联系匹配分支",
+                "professor_ids": [professor_id],
+                "schedule_type": "immediate",
+                "window_start_time": None,
+                "window_end_time": None,
+                "emails_per_window": None,
+                "primary_material_id": primary_material_id,
+                "email_subject": "联系 {{name}}",
+                "email_body": "联系正文 {{name}}",
+                "selected_material_ids": None,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        batch_task_id = create_response.json()["id"]
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            parent_task_id = connection.execute(
+                "SELECT id FROM email_tasks WHERE batch_task_id = ?",
+                (batch_task_id,),
+            ).fetchone()[0]
+            connection.execute(
+                """
+                UPDATE email_tasks
+                SET status = ?,
+                    cancellation_reason = ?,
+                    match_score = ?,
+                    match_reason = ?,
+                    fit_points = ?,
+                    risk_points = ?,
+                    match_keywords = ?,
+                    generated_subject = NULL,
+                    generated_content_text = NULL,
+                    generated_content_html = NULL,
+                    approved_subject = NULL,
+                    approved_body_text = NULL,
+                    approved_body_html = NULL
+                WHERE id = ?
+                """,
+                (
+                    "canceled",
+                    "batch_stopped",
+                    75,
+                    "匹配结果仍可复用",
+                    json.dumps(["方向契合"]),
+                    json.dumps(["需补充研究计划"]),
+                    json.dumps(["match"]),
+                    parent_task_id,
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        response = self.client.post(f"/api/email-tasks/{parent_task_id}/continue-manually")
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        current_task = response.json()["current_task"]
+        self.assertEqual(current_task["status"], "matched")
+        self.assertEqual(current_task["parent_task_id"], parent_task_id)
+        self.assertIsNone(current_task["generated_subject"])
+        self.assertIsNone(current_task["generated_content_text"])
+        self.assertIsNone(current_task["generated_content_html"])
+        self.assertEqual(current_task["match_score"], 75)
+        self.assertEqual(current_task["match_reason"], "匹配结果仍可复用")
+
+    def test_continue_manually_restores_discovered_when_parent_has_no_match(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "未匹配导师",
+                "email": "continue-discovered@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Agent systems",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        create_response = self.client.post(
+            "/api/batch-tasks",
+            json={
+                "identity_id": identity_id,
+                "llm_profile_id": llm_id,
+                "name": "继续联系 discovered 分支",
+                "professor_ids": [professor_id],
+                "schedule_type": "immediate",
+                "window_start_time": None,
+                "window_end_time": None,
+                "emails_per_window": None,
+                "primary_material_id": None,
+                "email_subject": "联系 {{name}}",
+                "email_body": "联系正文 {{name}}",
+                "selected_material_ids": None,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        batch_task_id = create_response.json()["id"]
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            parent_task_id = connection.execute(
+                "SELECT id FROM email_tasks WHERE batch_task_id = ?",
+                (batch_task_id,),
+            ).fetchone()[0]
+            connection.execute(
+                """
+                UPDATE email_tasks
+                SET status = ?,
+                    cancellation_reason = ?,
+                    match_score = NULL,
+                    match_reason = NULL,
+                    fit_points = NULL,
+                    risk_points = NULL,
+                    match_keywords = NULL,
+                    generated_subject = NULL,
+                    generated_content_text = NULL,
+                    generated_content_html = NULL,
+                    approved_subject = NULL,
+                    approved_body_text = NULL,
+                    approved_body_html = NULL
+                WHERE id = ?
+                """,
+                ("canceled", "batch_stopped", parent_task_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        response = self.client.post(f"/api/email-tasks/{parent_task_id}/continue-manually")
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        current_task = response.json()["current_task"]
+        self.assertEqual(current_task["status"], "discovered")
+        self.assertEqual(current_task["parent_task_id"], parent_task_id)
+        self.assertIsNone(current_task["match_score"])
+        self.assertIsNone(current_task["match_reason"])
+        self.assertIsNone(current_task["generated_subject"])
+
+    def test_continue_manually_rejects_duplicate_manual_child_creation(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "继续联系重复派生导师",
+                "email": "continue-duplicate@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Agent systems",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        create_response = self.client.post(
+            "/api/batch-tasks",
+            json={
+                "identity_id": identity_id,
+                "llm_profile_id": llm_id,
+                "name": "继续联系重复派生",
+                "professor_ids": [professor_id],
+                "schedule_type": "immediate",
+                "window_start_time": None,
+                "window_end_time": None,
+                "emails_per_window": None,
+                "primary_material_id": None,
+                "email_subject": "联系 {{name}}",
+                "email_body": "联系正文 {{name}}",
+                "selected_material_ids": None,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        batch_task_id = create_response.json()["id"]
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            parent_task_id = connection.execute(
+                "SELECT id FROM email_tasks WHERE batch_task_id = ?",
+                (batch_task_id,),
+            ).fetchone()[0]
+            connection.execute(
+                """
+                UPDATE email_tasks
+                SET status = ?, cancellation_reason = ?
+                WHERE id = ?
+                """,
+                ("canceled", "batch_stopped", parent_task_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        first_response = self.client.post(f"/api/email-tasks/{parent_task_id}/continue-manually")
+        second_response = self.client.post(f"/api/email-tasks/{parent_task_id}/continue-manually")
+
+        self.assertEqual(first_response.status_code, 200, msg=first_response.text)
+        self.assertEqual(second_response.status_code, 400, msg=second_response.text)
+
+    def test_continue_manually_returns_404_for_missing_task(self) -> None:
+        response = self.client.post("/api/email-tasks/9999/continue-manually")
+
+        self.assertEqual(response.status_code, 404, msg=response.text)
+        self.assertEqual(response.json()["detail"], "EmailTask 9999 不存在")
+
+    def test_continue_manually_rejects_task_without_canceled_batch_stopped_guard(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "继续联系非法状态导师",
+                "email": "continue-guard@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Agent systems",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        ensure_response = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(ensure_response.status_code, 200, msg=ensure_response.text)
+        task_id = ensure_response.json()["current_task"]["id"]
+
+        cases = [
+            ("matched", None),
+            ("canceled", None),
+        ]
+        for status_value, cancellation_reason in cases:
+            with self.subTest(status=status_value, cancellation_reason=cancellation_reason):
+                connection = sqlite3.connect(self.db_path)
+                try:
+                    connection.execute(
+                        """
+                        UPDATE email_tasks
+                        SET status = ?, cancellation_reason = ?
+                        WHERE id = ?
+                        """,
+                        (status_value, cancellation_reason, task_id),
+                    )
+                    connection.commit()
+                finally:
+                    connection.close()
+
+                response = self.client.post(f"/api/email-tasks/{task_id}/continue-manually")
+
+                self.assertEqual(response.status_code, 400, msg=response.text)
+
+    def test_approve_and_send_rejects_canceled_batch_stopped_parent_task(self) -> None:
+        task_id = self._create_canceled_batch_stopped_parent_task(
+            email="approve-send-guard@example.edu",
+        )
+
+        with patch(
+            "app.services.task_runtime.mail_runtime.send_email",
+            AsyncMock(
+                return_value=self._build_send_result(
+                    message_id="<guarded-send@example.com>",
+                    provider_payload={"smtp_host": "smtp.example.com"},
+                ),
+            ),
+        ) as mocked_send:
+            response = self.client.post(
+                f"/api/email-tasks/{task_id}/approve-and-send",
+                json={
+                    "subject": "直接发送",
+                    "body_text": "老师您好，这里尝试直接发送。",
+                    "body_html": None,
+                    "selected_material_ids": [],
+                },
+            )
+
+        self.assertEqual(response.status_code, 400, msg=response.text)
+        self.assertEqual(
+            response.json()["detail"],
+            "该任务已因批量任务停止而取消，请先“作为单独联系继续”后再执行此操作",
+        )
+        mocked_send.assert_not_awaited()
+
+    def test_approve_and_schedule_rejects_canceled_batch_stopped_parent_task(self) -> None:
+        task_id = self._create_canceled_batch_stopped_parent_task(
+            email="approve-schedule-guard@example.edu",
+        )
+
+        response = self.client.post(
+            f"/api/email-tasks/{task_id}/approve-and-schedule",
+            json={
+                "subject": "稍后发送",
+                "body_text": "老师您好，这里尝试直接定时发送。",
+                "body_html": None,
+                "selected_material_ids": [],
+                "scheduled_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+            },
+        )
+
+        self.assertEqual(response.status_code, 400, msg=response.text)
+        self.assertEqual(
+            response.json()["detail"],
+            "该任务已因批量任务停止而取消，请先“作为单独联系继续”后再执行此操作",
+        )
+
+    def test_start_follow_up_creates_manual_child_task_from_sent_task(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        primary_material_id = self._upload_material(
+            identity_id,
+            filename="resume.txt",
+            content=b"My background covers agent systems and information extraction.",
+            material_type="resume",
+        )
+        attachment_material_id = self._upload_material(
+            identity_id,
+            filename="portfolio.pdf",
+            content=b"%PDF-1.4 follow up attachment",
+            material_type="portfolio",
+        )
+        set_primary_response = self.client.post(f"/api/materials/{primary_material_id}/set-primary")
+        self.assertEqual(set_primary_response.status_code, 200, msg=set_primary_response.text)
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "跟进邮件导师",
+                "email": "follow-up@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Information extraction",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        ensure_response = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(ensure_response.status_code, 200, msg=ensure_response.text)
+        parent_task_id = ensure_response.json()["current_task"]["id"]
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            connection.execute(
+                """
+                UPDATE email_tasks
+                SET status = ?,
+                    source = ?,
+                    primary_material_id = ?,
+                    match_score = ?,
+                    match_reason = ?,
+                    fit_points = ?,
+                    risk_points = ?,
+                    match_keywords = ?,
+                    generated_subject = ?,
+                    generated_content_text = ?,
+                    generated_content_html = ?,
+                    approved_subject = ?,
+                    approved_body_text = ?,
+                    approved_body_html = ?,
+                    outreach_generation_mode = ?,
+                    outreach_template_subject = ?,
+                    outreach_template_body_text = ?,
+                    outreach_template_body_html = ?,
+                    selected_material_ids = ?,
+                    sent_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    "sent",
+                    "manual",
+                    primary_material_id,
+                    88,
+                    "已建立初步联系",
+                    json.dumps(["研究主题重合"]),
+                    json.dumps(["需要补充最新进展"]),
+                    json.dumps(["nlp"]),
+                    "历史草稿主题",
+                    "历史草稿正文",
+                    "<p>历史草稿正文</p>",
+                    "已发送主题",
+                    "已发送正文",
+                    "<p>已发送正文</p>",
+                    "template",
+                    "跟进主题 {{name}}",
+                    "跟进正文 {{name}}",
+                    "<p>跟进正文 {{name}}</p>",
+                    json.dumps([attachment_material_id]),
+                    parent_task_id,
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        workspace_before = self.client.get(
+            f"/api/workspaces/{professor_id}",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(workspace_before.status_code, 200, msg=workspace_before.text)
+        before_task = workspace_before.json()["current_task"]
+        self.assertEqual(before_task["id"], parent_task_id)
+        self.assertEqual(before_task["source"], "manual")
+        self.assertIsNone(before_task["parent_task_id"])
+        self.assertIsNone(before_task["cancellation_reason"])
+        self.assertFalse(before_task["can_continue_manually"])
+        self.assertTrue(before_task["can_write_follow_up"])
+
+        response = self.client.post(f"/api/email-tasks/{parent_task_id}/start-follow-up")
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        payload = response.json()
+        current_task = payload["current_task"]
+        self.assertNotEqual(current_task["id"], parent_task_id)
+        self.assertIsNone(current_task["batch_task_id"])
+        self.assertEqual(current_task["source"], "manual")
+        self.assertEqual(current_task["parent_task_id"], parent_task_id)
+        self.assertEqual(current_task["status"], "matched")
+        self.assertIsNone(current_task["cancellation_reason"])
+        self.assertEqual(current_task["primary_material_id"], primary_material_id)
+        self.assertEqual(current_task["selected_material_ids"], [attachment_material_id])
+        self.assertEqual(current_task["match_score"], 88)
+        self.assertEqual(current_task["match_reason"], "已建立初步联系")
+        self.assertEqual(current_task["fit_points"], ["研究主题重合"])
+        self.assertEqual(current_task["risk_points"], ["需要补充最新进展"])
+        self.assertEqual(current_task["match_keywords"], ["nlp"])
+        self.assertIsNone(current_task["generated_subject"])
+        self.assertIsNone(current_task["generated_content_text"])
+        self.assertIsNone(current_task["generated_content_html"])
+        self.assertIsNone(current_task["approved_subject"])
+        self.assertIsNone(current_task["approved_body_text"])
+        self.assertIsNone(current_task["approved_body_html"])
+        self.assertEqual(current_task["outreach_generation_mode"], "template")
+        self.assertEqual(current_task["outreach_template_subject"], "跟进主题 {{name}}")
+        self.assertEqual(current_task["outreach_template_body_text"], "跟进正文 {{name}}")
+        self.assertEqual(current_task["outreach_template_body_html"], "<p>跟进正文 {{name}}</p>")
+        self.assertFalse(current_task["can_continue_manually"])
+        self.assertFalse(current_task["can_write_follow_up"])
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            rows = connection.execute(
+                """
+                SELECT id, source, batch_task_id, parent_task_id, status, cancellation_reason,
+                       generated_subject, generated_content_text, approved_subject, approved_body_text,
+                       selected_material_ids
+                FROM email_tasks
+                WHERE professor_id = ?
+                ORDER BY id
+                """,
+                (professor_id,),
+            ).fetchall()
+        finally:
+            connection.close()
+
+        self.assertEqual(
+            rows,
+            [
+                (
+                    parent_task_id,
+                    "manual",
+                    None,
+                    None,
+                    "sent",
+                    None,
+                    "历史草稿主题",
+                    "历史草稿正文",
+                    "已发送主题",
+                    "已发送正文",
+                    json.dumps([attachment_material_id]),
+                ),
+                (
+                    current_task["id"],
+                    "manual",
+                    None,
+                    parent_task_id,
+                    "matched",
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    json.dumps([attachment_material_id]),
+                ),
+            ],
+        )
+
+    def test_start_follow_up_restores_matched_when_parent_has_no_match_result(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "无匹配结果跟进导师",
+                "email": "follow-up-minimum-status@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Information extraction",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        ensure_response = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(ensure_response.status_code, 200, msg=ensure_response.text)
+        parent_task_id = ensure_response.json()["current_task"]["id"]
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            connection.execute(
+                """
+                UPDATE email_tasks
+                SET status = ?,
+                    source = ?,
+                    match_score = NULL,
+                    match_reason = NULL,
+                    fit_points = NULL,
+                    risk_points = NULL,
+                    match_keywords = NULL,
+                    generated_subject = NULL,
+                    generated_content_text = NULL,
+                    generated_content_html = NULL,
+                    approved_subject = NULL,
+                    approved_body_text = NULL,
+                    approved_body_html = NULL,
+                    sent_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                ("sent", "manual", parent_task_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        response = self.client.post(f"/api/email-tasks/{parent_task_id}/start-follow-up")
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        current_task = response.json()["current_task"]
+        self.assertEqual(current_task["status"], "matched")
+        self.assertEqual(current_task["parent_task_id"], parent_task_id)
+        self.assertIsNone(current_task["match_score"])
+        self.assertIsNone(current_task["match_reason"])
+
+    def test_start_follow_up_creates_manual_child_task_from_reply_detected_task(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        primary_material_id = self._upload_material(
+            identity_id,
+            filename="resume.txt",
+            content=b"My background covers agent systems and information extraction.",
+            material_type="resume",
+        )
+        set_primary_response = self.client.post(f"/api/materials/{primary_material_id}/set-primary")
+        self.assertEqual(set_primary_response.status_code, 200, msg=set_primary_response.text)
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "回复后跟进导师",
+                "email": "follow-up-replied@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Information extraction",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        ensure_response = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(ensure_response.status_code, 200, msg=ensure_response.text)
+        parent_task_id = ensure_response.json()["current_task"]["id"]
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            connection.execute(
+                """
+                UPDATE email_tasks
+                SET status = ?,
+                    source = ?,
+                    primary_material_id = ?,
+                    match_score = ?,
+                    match_reason = ?,
+                    fit_points = ?,
+                    risk_points = ?,
+                    match_keywords = ?,
+                    generated_subject = ?,
+                    generated_content_text = ?,
+                    generated_content_html = ?,
+                    approved_subject = ?,
+                    approved_body_text = ?,
+                    approved_body_html = ?,
+                    is_replied = 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    "reply_detected",
+                    "manual",
+                    primary_material_id,
+                    86,
+                    "对方已回复，适合继续跟进",
+                    json.dumps(["已建立对话"]),
+                    json.dumps(["需明确下一步诉求"]),
+                    json.dumps(["reply"]),
+                    "旧跟进草稿主题",
+                    "旧跟进草稿正文",
+                    "<p>旧跟进草稿正文</p>",
+                    "旧审批主题",
+                    "旧审批正文",
+                    "<p>旧审批正文</p>",
+                    parent_task_id,
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        workspace_before = self.client.get(
+            f"/api/workspaces/{professor_id}",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(workspace_before.status_code, 200, msg=workspace_before.text)
+        self.assertTrue(workspace_before.json()["current_task"]["can_write_follow_up"])
+
+        response = self.client.post(f"/api/email-tasks/{parent_task_id}/start-follow-up")
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        current_task = response.json()["current_task"]
+        self.assertEqual(current_task["parent_task_id"], parent_task_id)
+        self.assertEqual(current_task["source"], "manual")
+        self.assertEqual(current_task["status"], "matched")
+        self.assertIsNone(current_task["generated_subject"])
+        self.assertIsNone(current_task["generated_content_text"])
+        self.assertIsNone(current_task["approved_subject"])
+        self.assertIsNone(current_task["approved_body_text"])
+        self.assertEqual(current_task["match_score"], 86)
+        self.assertEqual(current_task["match_reason"], "对方已回复，适合继续跟进")
+
+    def test_start_follow_up_rejects_duplicate_manual_child_creation(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "跟进重复派生导师",
+                "email": "follow-up-duplicate@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Information extraction",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        ensure_response = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(ensure_response.status_code, 200, msg=ensure_response.text)
+        parent_task_id = ensure_response.json()["current_task"]["id"]
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            connection.execute(
+                """
+                UPDATE email_tasks
+                SET status = ?, source = ?, sent_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                ("sent", "manual", parent_task_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        first_response = self.client.post(f"/api/email-tasks/{parent_task_id}/start-follow-up")
+        second_response = self.client.post(f"/api/email-tasks/{parent_task_id}/start-follow-up")
+
+        self.assertEqual(first_response.status_code, 200, msg=first_response.text)
+        self.assertEqual(second_response.status_code, 400, msg=second_response.text)
+
+    def test_start_follow_up_returns_404_for_missing_task(self) -> None:
+        response = self.client.post("/api/email-tasks/9999/start-follow-up")
+
+        self.assertEqual(response.status_code, 404, msg=response.text)
+        self.assertEqual(response.json()["detail"], "EmailTask 9999 不存在")
+
+    def test_start_follow_up_rejects_task_without_sent_or_reply_detected_guard(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "跟进非法状态导师",
+                "email": "follow-up-guard@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Information extraction",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        ensure_response = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(ensure_response.status_code, 200, msg=ensure_response.text)
+        task_id = ensure_response.json()["current_task"]["id"]
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            connection.execute(
+                """
+                UPDATE email_tasks
+                SET status = ?
+                WHERE id = ?
+                """,
+                ("matched", task_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        response = self.client.post(f"/api/email-tasks/{task_id}/start-follow-up")
+
+        self.assertEqual(response.status_code, 400, msg=response.text)
 
     def test_batch_task_without_default_material_can_still_send_manually(self) -> None:
         identity_id = self._create_identity(with_imap=False)
@@ -1847,6 +3175,81 @@ class ApiEndpointTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 201)
         return response.json()["id"]
+
+    def _create_canceled_batch_stopped_parent_task(self, *, email: str) -> int:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "旧动作拦截导师",
+                "email": email,
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Agent systems",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        create_response = self.client.post(
+            "/api/batch-tasks",
+            json={
+                "identity_id": identity_id,
+                "llm_profile_id": llm_id,
+                "name": "旧动作拦截批量任务",
+                "professor_ids": [professor_id],
+                "schedule_type": "immediate",
+                "window_start_time": None,
+                "window_end_time": None,
+                "emails_per_window": None,
+                "primary_material_id": None,
+                "email_subject": "联系 {{name}}",
+                "email_body": "联系正文 {{name}}",
+                "selected_material_ids": None,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        batch_task_id = create_response.json()["id"]
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            task_id = connection.execute(
+                """
+                SELECT id
+                FROM email_tasks
+                WHERE batch_task_id = ?
+                """,
+                (batch_task_id,),
+            ).fetchone()[0]
+            connection.execute(
+                """
+                UPDATE batch_tasks
+                SET status = ?
+                WHERE id = ?
+                """,
+                ("stopped", batch_task_id),
+            )
+            connection.execute(
+                """
+                UPDATE email_tasks
+                SET status = ?,
+                    cancellation_reason = ?
+                WHERE id = ?
+                """,
+                ("canceled", "batch_stopped", task_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        return task_id
 
     async def _dispatch_due_tasks(self) -> None:
         from app.core.database import get_session_factory

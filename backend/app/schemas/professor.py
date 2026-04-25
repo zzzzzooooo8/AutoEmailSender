@@ -1,8 +1,19 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+ProfessorDashboardStatus = Literal[
+    "not_contacted",
+    "preparing",
+    "ready_to_send",
+    "contacted",
+    "replied",
+    "needs_attention",
+]
 
 
 class ProfessorRead(BaseModel):
@@ -38,7 +49,7 @@ class ProfessorDashboardItemRead(BaseModel):
     recent_papers: list[str]
     match_score: int | None
     sent_count: int
-    status: str
+    status: ProfessorDashboardStatus
 
 
 class ProfessorImportResult(BaseModel):

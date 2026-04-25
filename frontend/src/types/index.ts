@@ -122,7 +122,6 @@ export interface IdentityPayload {
   outreach_template_subject: string | null;
   outreach_template_body_text: string | null;
   outreach_template_body_html: string | null;
-  match_threshold: number | null;
   daily_send_limit: number | null;
   send_interval_min: number | null;
   send_interval_max: number | null;
@@ -214,16 +213,16 @@ export interface ProfessorDashboardItemDTO {
   recent_papers: string[];
   match_score: number | null;
   sent_count: number;
-  status:
-    | 'not_contacted'
-    | 'matched'
-    | 'review_required'
-    | 'scheduled'
-    | 'sent'
-    | 'replied'
-    | 'send_failed'
-    | 'skipped';
+  status: ProfessorDashboardStatus;
 }
+
+export type ProfessorDashboardStatus =
+  | 'not_contacted'
+  | 'preparing'
+  | 'ready_to_send'
+  | 'contacted'
+  | 'replied'
+  | 'needs_attention';
 
 export interface ProfessorDTO {
   id: number;
@@ -323,14 +322,15 @@ export type BatchTaskRuntimeStatus = 'running' | 'paused' | 'stopped' | 'complet
 export type WorkspaceTaskStatus =
   | 'discovered'
   | 'matched'
-  | 'draft_generated'
   | 'review_required'
   | 'approved'
   | 'scheduled'
   | 'sent'
   | 'send_failed'
   | 'reply_detected'
-  | 'skipped';
+  | 'canceled';
+
+export type WorkspaceTaskStatusLabelKey = WorkspaceTaskStatus;
 
 export interface BatchTaskCardDTO {
   id: number;
@@ -382,8 +382,13 @@ export interface WorkspaceLLMDTO {
 
 export interface WorkspaceTaskSummaryDTO {
   id: number | null;
+  source?: string | null;
   batch_task_id: number | null;
+  parent_task_id?: number | null;
   status: WorkspaceTaskStatus | null;
+  cancellation_reason?: string | null;
+  can_continue_manually?: boolean;
+  can_write_follow_up?: boolean;
   outreach_generation_mode: OutreachGenerationMode;
   outreach_template_subject: string | null;
   outreach_template_body_text: string | null;
@@ -490,16 +495,17 @@ export interface EmailTaskSchedulePayloadDTO extends EmailTaskApprovalPayloadDTO
   scheduled_at: string;
 }
 
-export const PROFESSOR_STATUS_LABELS: Record<ProfessorDashboardItemDTO['status'], string> = {
-  not_contacted: '未联系',
+export const PROFESSOR_STATUS_LABELS = {
+  discovered: '待处理',
   matched: '待生成',
   review_required: '待审核',
+  approved: '待发送',
   scheduled: '已排程',
   sent: '已发送',
-  replied: '已回复',
+  reply_detected: '已回复',
   send_failed: '发送失败',
-  skipped: '已跳过',
-};
+  canceled: '已取消',
+} satisfies Record<WorkspaceTaskStatusLabelKey, string>;
 
 export const BATCH_TASK_STATUS_LABELS: Record<BatchTaskRuntimeStatus, string> = {
   running: '运行中',
