@@ -93,6 +93,15 @@ class CrawlCandidateRead(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    @field_validator("recent_papers", mode="before")
+    @classmethod
+    def _normalize_recent_papers(cls, value: object) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        return []
+
 
 class CrawlCandidateUpdatePayload(BaseModel):
     name: str
@@ -132,6 +141,17 @@ class CrawlCandidateUpdatePayload(BaseModel):
         if not value:
             raise ValueError("姓名不能为空")
         return value
+
+    @field_validator("recent_papers", mode="before")
+    @classmethod
+    def _normalize_recent_papers(cls, value: object) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if isinstance(value, str):
+            return [item.strip() for item in value.split("|") if item.strip()]
+        return []
 
 
 class CrawlJobApprovePayload(BaseModel):
