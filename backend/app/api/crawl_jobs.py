@@ -145,10 +145,12 @@ async def approve_crawl_candidates(
     payload: CrawlJobApprovePayload,
     session: AsyncSession = Depends(get_async_session),
 ) -> CrawlJobApproveResult:
+    job = await _get_crawl_job_or_404(session, job_id)
+    if job.status != CrawlJobStatus.NEEDS_REVIEW.value:
+        raise HTTPException(status_code=409, detail="抓取任务尚未进入审核状态")
     if not payload.candidate_ids:
         raise HTTPException(status_code=400, detail="请至少选择一位候选导师")
 
-    job = await _get_crawl_job_or_404(session, job_id)
     candidates = list(
         (
             await session.execute(
@@ -161,6 +163,8 @@ async def approve_crawl_candidates(
             )
         ).scalars(),
     )
+    if not candidates:
+        raise HTTPException(status_code=400, detail="未找到可审核的候选导师")
 
     inserted_count = 0
     updated_count = 0

@@ -9,6 +9,7 @@ from app.services.crawler_tools import (
     crawl_page_with_http,
     is_allowed_crawl_url,
     normalize_candidate_payload,
+    save_candidates,
 )
 
 
@@ -60,6 +61,29 @@ class CrawlerToolTests(unittest.TestCase):
 
 
 class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_save_candidates_skips_canceled_job(self) -> None:
+        session_factory = _FakeSessionFactory(job_status="canceled")
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://cs.example.edu/faculty",
+            university="示例大学",
+            school="计算机学院",
+            session_factory=session_factory,  # type: ignore[arg-type]
+        )
+
+        saved = await save_candidates(
+            ctx,
+            [
+                ProfessorCandidatePayload(
+                    name="张三",
+                    email="zhang@example.edu",
+                ),
+            ],
+        )
+
+        self.assertEqual(saved, [])
+        self.assertEqual(session_factory.added, [])
+
     async def test_crawl_page_with_http_rejects_cross_host_final_url(self) -> None:
         session_factory = _FakeSessionFactory()
         ctx = CrawlToolContext(
@@ -91,16 +115,18 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
 
 
 class _FakeSessionFactory:
-    def __init__(self) -> None:
+    def __init__(self, *, job_status: str = "running") -> None:
         self.added: list[object] = []
+        self.job_status = job_status
 
     def __call__(self) -> "_FakeSession":
-        return _FakeSession(self.added)
+        return _FakeSession(self.added, self.job_status)
 
 
 class _FakeSession:
-    def __init__(self, added: list[object]) -> None:
+    def __init__(self, added: list[object], job_status: str) -> None:
         self._added = added
+        self._job_status = job_status
 
     async def __aenter__(self) -> "_FakeSession":
         return self
@@ -111,11 +137,20 @@ class _FakeSession:
     def add(self, row: object) -> None:
         self._added.append(row)
 
+    async def get(self, model: object, key: object) -> object:
+        _ = model, key
+        return _FakeJob(status=self._job_status)
+
     async def commit(self) -> None:
         return None
 
     async def refresh(self, row: object) -> None:
         return None
+
+
+class _FakeJob:
+    def __init__(self, *, status: str) -> None:
+        self.status = status
 
 
 class _FakeHttpResponse:

@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.models.crawl_job import CrawlCandidate, CrawlPage
+from app.models.crawl_job import CrawlCandidate, CrawlJob, CrawlJobStatus, CrawlPage
 from app.services.html_text import html_to_text
 
 
@@ -233,6 +233,9 @@ async def save_candidates(
 ) -> list[CrawlCandidate]:
     saved: list[CrawlCandidate] = []
     async with ctx.session_factory() as session:
+        if await _is_crawl_job_canceled(session, ctx.job_id):
+            return []
+
         existing_emails = await _load_existing_candidate_emails(session, ctx.job_id)
         seen_emails = set(existing_emails)
         for candidate in candidates:
@@ -257,8 +260,11 @@ async def save_candidates(
     return saved
 
 
-async def record_page_snapshot(ctx: CrawlToolContext, snapshot: PageSnapshot) -> CrawlPage:
+async def record_page_snapshot(ctx: CrawlToolContext, snapshot: PageSnapshot) -> CrawlPage | None:
     async with ctx.session_factory() as session:
+        if await _is_crawl_job_canceled(session, ctx.job_id):
+            return None
+
         row = CrawlPage(
             job_id=ctx.job_id,
             url=snapshot.url,
@@ -337,6 +343,11 @@ async def _load_existing_candidate_emails(session: AsyncSession, job_id: int) ->
         )
     )
     return {email.lower() for email in result if email}
+
+
+async def _is_crawl_job_canceled(session: AsyncSession, job_id: int) -> bool:
+    job = await session.get(CrawlJob, job_id)
+    return bool(job is not None and job.status == CrawlJobStatus.CANCELED.value)
 
 
 def _failed_snapshot(url: str, fetch_method: str, error_message: str) -> PageSnapshot:

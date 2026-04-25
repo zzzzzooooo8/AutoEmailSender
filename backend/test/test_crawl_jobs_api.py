@@ -75,6 +75,7 @@ class CrawlJobsApiTests(unittest.TestCase):
         self.assertEqual(job["status"], "queued")
 
         self._seed_page_and_candidates(job["id"])
+        self._set_job_status(job["id"], "needs_review")
 
         list_response = self.client.get("/api/crawl-jobs")
         self.assertEqual(list_response.status_code, 200)
@@ -140,6 +141,7 @@ class CrawlJobsApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        self._set_job_status(create_response.json()["id"], "needs_review")
 
         response = self.client.post(
             f"/api/crawl-jobs/{create_response.json()['id']}/approve",
@@ -147,6 +149,64 @@ class CrawlJobsApiTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+
+    def test_approve_rejects_job_before_review_state(self) -> None:
+        create_response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "llm_profile_id": None,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        job_id = create_response.json()["id"]
+        self._seed_page_and_candidates(job_id)
+        candidates = self.client.get(f"/api/crawl-jobs/{job_id}/candidates").json()
+
+        response = self.client.post(
+            f"/api/crawl-jobs/{job_id}/approve",
+            json={"candidate_ids": [candidates[0]["id"]]},
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"], "抓取任务尚未进入审核状态")
+
+    def test_approve_rejects_candidates_from_other_job(self) -> None:
+        first_response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "llm_profile_id": None,
+            },
+        )
+        second_response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "另一大学",
+                "school": "信息学院",
+                "start_url": "https://other.example.edu/faculty",
+                "llm_profile_id": None,
+            },
+        )
+        self.assertEqual(first_response.status_code, 201, msg=first_response.text)
+        self.assertEqual(second_response.status_code, 201, msg=second_response.text)
+        first_job_id = first_response.json()["id"]
+        second_job_id = second_response.json()["id"]
+        self._seed_page_and_candidates(first_job_id)
+        self._set_job_status(second_job_id, "needs_review")
+        other_candidates = self.client.get(f"/api/crawl-jobs/{first_job_id}/candidates").json()
+
+        response = self.client.post(
+            f"/api/crawl-jobs/{second_job_id}/approve",
+            json={"candidate_ids": [other_candidates[0]["id"]]},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "未找到可审核的候选导师")
 
     def test_missing_crawl_job_returns_chinese_message(self) -> None:
         response = self.client.get("/api/crawl-jobs/999999")
@@ -222,6 +282,19 @@ class CrawlJobsApiTests(unittest.TestCase):
                 await session.commit()
 
         asyncio.run(_seed())
+
+    def _set_job_status(self, job_id: int, status: str) -> None:
+        async def _set_status() -> None:
+            from app.core.database import get_session_factory
+            from app.models import CrawlJob
+
+            async with get_session_factory()() as session:
+                job = await session.get(CrawlJob, job_id)
+                self.assertIsNotNone(job)
+                job.status = status
+                await session.commit()
+
+        asyncio.run(_set_status())
 
     def _run_alembic_upgrade(self) -> None:
         env = os.environ.copy()
