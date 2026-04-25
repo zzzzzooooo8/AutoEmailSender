@@ -127,7 +127,16 @@ async def crawl_page_with_http(ctx: CrawlToolContext, url: str) -> PageSnapshot:
         await record_page_snapshot(ctx, snapshot)
         return snapshot
 
-    snapshot = html_to_snapshot(str(response.url), response.text, "http")
+    final_url = str(response.url)
+    if not is_allowed_crawl_url(ctx.start_url, final_url):
+        snapshot = _final_url_rejected_snapshot(
+            final_url=final_url,
+            fetch_method="http",
+        )
+        await record_page_snapshot(ctx, snapshot)
+        return snapshot
+
+    snapshot = html_to_snapshot(final_url, response.text, "http")
     snapshot.links = [
         link for link in snapshot.links if is_allowed_crawl_url(ctx.start_url, link)
     ][:MAX_LINKS]
@@ -167,10 +176,19 @@ async def crawl_page_with_crawl4ai(ctx: CrawlToolContext, url: str) -> PageSnaps
         await record_page_snapshot(ctx, snapshot)
         return snapshot
 
+    final_url = _extract_result_url(result) or absolute_url
+    if not is_allowed_crawl_url(ctx.start_url, final_url):
+        snapshot = _final_url_rejected_snapshot(
+            final_url=final_url,
+            fetch_method="crawl4ai",
+        )
+        await record_page_snapshot(ctx, snapshot)
+        return snapshot
+
     html = str(getattr(result, "html", "") or "")
     text = str(getattr(result, "markdown", "") or getattr(result, "cleaned_html", "") or "")
-    snapshot = html_to_snapshot(absolute_url, html, "crawl4ai") if html else PageSnapshot(
-        url=absolute_url,
+    snapshot = html_to_snapshot(final_url, html, "crawl4ai") if html else PageSnapshot(
+        url=final_url,
         title=None,
         text=text[:MAX_TEXT_CHARS],
         html="",
@@ -333,3 +351,19 @@ def _failed_snapshot(url: str, fetch_method: str, error_message: str) -> PageSna
         error_message=error_message,
         suspicious_empty=True,
     )
+
+
+def _final_url_rejected_snapshot(final_url: str, fetch_method: str) -> PageSnapshot:
+    return _failed_snapshot(
+        url=final_url,
+        fetch_method=fetch_method,
+        error_message="最终 URL 不在允许范围内，已拒绝抓取结果",
+    )
+
+
+def _extract_result_url(result: object) -> str | None:
+    for attr_name in ("url", "final_url", "response_url"):
+        value = getattr(result, attr_name, None)
+        if value:
+            return str(value)
+    return None

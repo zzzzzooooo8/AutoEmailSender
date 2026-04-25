@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from app.services.crawler_tools import (
+    CrawlToolContext,
     ProfessorCandidatePayload,
+    crawl_page_with_http,
     is_allowed_crawl_url,
     normalize_candidate_payload,
 )
@@ -54,6 +57,74 @@ class CrawlerToolTests(unittest.TestCase):
         self.assertEqual(payload["recent_papers"], ["Paper A"])
         self.assertEqual(payload["confidence"], 1.0)
         self.assertEqual(payload["field_confidence"], {"email": 1.0})
+
+
+class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_crawl_page_with_http_rejects_cross_host_final_url(self) -> None:
+        session_factory = _FakeSessionFactory()
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://cs.example.edu/faculty",
+            university="示例大学",
+            school="计算机学院",
+            session_factory=session_factory,  # type: ignore[arg-type]
+        )
+        response = _FakeHttpResponse(
+            url="https://evil.example.net/people/a",
+            text="<html><body>外域正文</body></html>",
+        )
+
+        with patch("app.services.crawler_tools.httpx.AsyncClient") as client_class:
+            client = client_class.return_value.__aenter__.return_value
+            client.get.return_value = response
+
+            snapshot = await crawl_page_with_http(ctx, "https://cs.example.edu/faculty")
+
+        self.assertEqual(snapshot.status, "failed")
+        self.assertIn("最终 URL 不在允许范围内", snapshot.error_message or "")
+        self.assertNotIn("外域正文", snapshot.text)
+
+        self.assertEqual(len(session_factory.added), 1)
+        recorded = session_factory.added[0]
+        self.assertEqual(recorded.status, "failed")
+        self.assertIsNone(recorded.text_excerpt)
+
+
+class _FakeSessionFactory:
+    def __init__(self) -> None:
+        self.added: list[object] = []
+
+    def __call__(self) -> "_FakeSession":
+        return _FakeSession(self.added)
+
+
+class _FakeSession:
+    def __init__(self, added: list[object]) -> None:
+        self._added = added
+
+    async def __aenter__(self) -> "_FakeSession":
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+    def add(self, row: object) -> None:
+        self._added.append(row)
+
+    async def commit(self) -> None:
+        return None
+
+    async def refresh(self, row: object) -> None:
+        return None
+
+
+class _FakeHttpResponse:
+    def __init__(self, *, url: str, text: str) -> None:
+        self.url = url
+        self.text = text
+
+    def raise_for_status(self) -> None:
+        return None
 
 
 if __name__ == "__main__":
