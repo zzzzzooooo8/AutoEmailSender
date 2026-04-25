@@ -1,7 +1,6 @@
 import clsx from "clsx";
 import type { ReactNode } from "react";
 import { Archive, PencilLine, RotateCcw } from "lucide-react";
-import { ProfessorIdentityBlock } from "@/components/molecules/ProfessorIdentityBlock";
 import { SelectionToggleButton } from "@/components/molecules/SelectionToggleButton";
 import { formatApiDateTime } from "@/lib/dateTime";
 import type { ProfessorManagementItemDTO } from "@/types";
@@ -54,7 +53,7 @@ export const ManagementProfessorRow = ({
       )}
     >
       <div className={clsx("grid gap-4 lg:items-center", tableColumns)}>
-        <div className="flex items-center">
+        <div className="flex items-center justify-center">
           <SelectionToggleButton
             label={`选择 ${professor.name}`}
             selected={checked}
@@ -63,36 +62,41 @@ export const ManagementProfessorRow = ({
           />
         </div>
 
-        <ProfessorIdentityBlock
-          compact
-          name={professor.name}
-          title={professor.title}
-          university={professor.university}
-          school={professor.school}
-          researchDirection={professor.research_direction}
-          archived={Boolean(professor.archived_at)}
-        />
+        <div className="min-w-0 lg:text-center">
+          <div className="truncate text-base font-semibold text-stone-900 lg:text-center">
+            {professor.name}
+          </div>
+          {professor.archived_at ? (
+            <span className="mt-2 inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700">
+              已删除
+            </span>
+          ) : null}
+        </div>
 
-        <FieldCell label="邮箱" valueClassName="break-all text-sm text-stone-700">
+        <FieldCell label="职称" valueClassName="text-sm text-stone-600 lg:text-center">
+          {professor.title || "未填写职称"}
+        </FieldCell>
+
+        <FieldCell label="邮箱" valueClassName="break-all text-sm text-stone-700 lg:text-center">
           {professor.email || "未填写邮箱"}
         </FieldCell>
 
         <FieldCell
           label="学校 / 学院"
-          valueClassName="break-words text-sm text-stone-600"
+          valueClassName="break-words text-sm text-stone-600 lg:text-center"
         >
           {schoolAndCollege || "未填写学校 / 学院"}
         </FieldCell>
 
         <FieldCell
           label="研究方向"
-          valueClassName="line-clamp-3 text-sm leading-6 text-stone-600"
+          valueClassName="line-clamp-3 text-sm leading-6 text-stone-600 lg:text-center"
         >
           {professor.research_direction || "未填写研究方向"}
         </FieldCell>
 
-        <FieldCell label="更新时间" valueClassName="text-sm text-stone-500">
-          <div>{formatApiDateTime(professor.updated_at)}</div>
+        <FieldCell label="更新时间" valueClassName="text-sm text-stone-500 lg:text-center">
+          <div className="lg:text-center">{formatApiDateTime(professor.updated_at)}</div>
           {professor.archived_at ? (
             <div className="mt-2 text-xs text-amber-700">
               删除于 {formatApiDateTime(professor.archived_at)}
@@ -100,8 +104,12 @@ export const ManagementProfessorRow = ({
           ) : null}
         </FieldCell>
 
-        <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-          <button type="button" onClick={onEdit} className="ui-btn-secondary px-3 py-2">
+        <div className="grid w-full max-w-[12rem] grid-cols-2 gap-2 lg:mx-auto lg:justify-center">
+          <button
+            type="button"
+            onClick={onEdit}
+            className="ui-btn-secondary justify-center whitespace-nowrap px-3 py-2"
+          >
             <PencilLine className="h-4 w-4" />
             编辑
           </button>
@@ -109,15 +117,19 @@ export const ManagementProfessorRow = ({
             <button
               type="button"
               onClick={onRestore}
-              className="ui-btn-secondary px-3 py-2"
+              className="ui-btn-secondary justify-center whitespace-nowrap px-3 py-2"
             >
               <RotateCcw className="h-4 w-4" />
               恢复
             </button>
           ) : (
-            <button type="button" onClick={onArchive} className="ui-btn-danger px-3 py-2">
+            <button
+              type="button"
+              onClick={onArchive}
+              className="ui-btn-danger justify-center whitespace-nowrap px-3 py-2"
+            >
               <Archive className="h-4 w-4" />
-              移入回收站
+              回收站
             </button>
           )}
         </div>

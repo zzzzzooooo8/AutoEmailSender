@@ -26,6 +26,7 @@ type NativeSelectFieldProps = {
   defaultValue?: string | number | readonly string[];
   name?: string;
   onChange?: (event: ChangeEvent<HTMLSelectElement>) => void;
+  ariaLabel?: string;
 };
 
 type ParsedOption = {
@@ -85,6 +86,7 @@ export const NativeSelectField = ({
   defaultValue,
   name,
   onChange,
+  ariaLabel,
 }: NativeSelectFieldProps) => {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -159,6 +161,7 @@ export const NativeSelectField = ({
           ref={triggerRef}
           type="button"
           disabled={disabled}
+          aria-label={ariaLabel}
           aria-haspopup="listbox"
           aria-expanded={open}
           aria-controls={menuId}

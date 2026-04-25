@@ -22,6 +22,7 @@ import {
   Upload,
   Users,
 } from "lucide-react";
+import { NativeSelectField } from "@/components/atoms/NativeSelectField";
 import { ManagementProfessorRow } from "@/components/molecules/ManagementProfessorRow";
 import { useNotification } from "@/context/NotificationContext";
 import { useConfirmDialog } from "@/lib/useConfirmDialog";
@@ -58,8 +59,9 @@ type ProfessorFormState = {
 };
 
 const PROFESSORS_PER_PAGE = 20;
+const ALL_PROFESSOR_FILTER_VALUE = "__all__";
 const managementTableColumns =
-  "lg:grid-cols-[2.75rem_minmax(0,1.15fr)_minmax(0,1.08fr)_minmax(0,1.12fr)_minmax(0,1.5fr)_minmax(0,0.82fr)_minmax(12rem,0.92fr)]";
+  "lg:grid-cols-[2.75rem_minmax(0,0.72fr)_minmax(0,0.74fr)_minmax(0,1.08fr)_minmax(0,1.18fr)_minmax(0,1.56fr)_minmax(0,0.78fr)_minmax(12rem,0.92fr)]";
 
 const archiveFilterLabels: Record<ArchiveFilter, string> = {
   active: "正常",
@@ -115,6 +117,8 @@ const toProfessorPayload = (
 
 const fieldLabelClassName =
   "mb-2 inline-flex items-center gap-1 text-sm font-medium text-stone-800";
+const filterFieldLabelClassName =
+  "h-5 text-sm font-medium leading-5 text-stone-800";
 const inputClassName =
   "w-full rounded-2xl border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-700 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15";
 
@@ -139,6 +143,12 @@ const triggerDownload = (url: string) => {
 
 const getActionErrorMessage = (error: unknown, fallback: string) =>
   error instanceof Error ? error.message : fallback;
+
+const getSchoolPairValue = (professor: ProfessorManagementItemDTO) =>
+  `${professor.university ?? ""}\t${professor.school ?? ""}`;
+
+const getSchoolPairLabel = (professor: ProfessorManagementItemDTO) =>
+  [professor.university, professor.school].filter(Boolean).join(" / ");
 
 const ToolbarMenu = ({
   disabled,
@@ -169,7 +179,7 @@ const ToolbarMenu = ({
         type="button"
         disabled={disabled}
         onClick={() => setOpen((previous) => !previous)}
-        className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
+        className="ui-btn-secondary h-10 rounded-2xl disabled:cursor-not-allowed disabled:opacity-60"
       >
         <Download className="h-4 w-4" />
         下载模板
@@ -288,6 +298,10 @@ export const ProfessorsPage = () => {
     [],
   );
   const [keyword, setKeyword] = useState("");
+  const [titleFilter, setTitleFilter] = useState(ALL_PROFESSOR_FILTER_VALUE);
+  const [schoolPairFilter, setSchoolPairFilter] = useState(
+    ALL_PROFESSOR_FILTER_VALUE,
+  );
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(false);
@@ -335,28 +349,88 @@ export const ProfessorsPage = () => {
     void loadProfessors();
   }, [loadProfessors]);
 
+  const titleOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          professors
+            .map((professor) => professor.title?.trim())
+            .filter((title): title is string => Boolean(title)),
+        ),
+      ).sort((first, second) => first.localeCompare(second)),
+    [professors],
+  );
+
+  const schoolPairOptions = useMemo(() => {
+    const pairMap = new Map<string, string>();
+    professors.forEach((professor) => {
+      const label = getSchoolPairLabel(professor);
+      if (!label) {
+        return;
+      }
+      pairMap.set(getSchoolPairValue(professor), label);
+    });
+    return Array.from(pairMap.entries())
+      .map(([value, label]) => ({ value, label }))
+      .sort((first, second) => first.label.localeCompare(second.label));
+  }, [professors]);
+
+  const hasAdvancedFilters =
+    titleFilter !== ALL_PROFESSOR_FILTER_VALUE ||
+    schoolPairFilter !== ALL_PROFESSOR_FILTER_VALUE;
+
   const filteredProfessors = useMemo(() => {
     const query = keyword.trim().toLowerCase();
-    if (!query) {
-      return professors;
-    }
-    return professors.filter((professor) =>
-      [
-        professor.name,
-        professor.email,
-        professor.university,
-        professor.school,
-        professor.department,
-        professor.research_direction,
-      ]
-        .filter(Boolean)
-        .some((value) => value?.toLowerCase().includes(query)),
-    );
-  }, [keyword, professors]);
+    return professors.filter((professor) => {
+      const textMatched =
+        !query ||
+        [
+          professor.name,
+          professor.email,
+          professor.university,
+          professor.school,
+          professor.department,
+          professor.research_direction,
+        ]
+          .filter(Boolean)
+          .some((value) => value?.toLowerCase().includes(query));
+      const titleMatched =
+        titleFilter === ALL_PROFESSOR_FILTER_VALUE ||
+        professor.title === titleFilter;
+      const schoolPairMatched =
+        schoolPairFilter === ALL_PROFESSOR_FILTER_VALUE ||
+        getSchoolPairValue(professor) === schoolPairFilter;
+
+      return textMatched && titleMatched && schoolPairMatched;
+    });
+  }, [keyword, professors, schoolPairFilter, titleFilter]);
+
+  const resetAdvancedFilters = () => {
+    setTitleFilter(ALL_PROFESSOR_FILTER_VALUE);
+    setSchoolPairFilter(ALL_PROFESSOR_FILTER_VALUE);
+  };
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [archiveFilter, keyword]);
+  }, [archiveFilter, keyword, schoolPairFilter, titleFilter]);
+
+  useEffect(() => {
+    if (
+      titleFilter !== ALL_PROFESSOR_FILTER_VALUE &&
+      !titleOptions.includes(titleFilter)
+    ) {
+      setTitleFilter(ALL_PROFESSOR_FILTER_VALUE);
+    }
+  }, [titleFilter, titleOptions]);
+
+  useEffect(() => {
+    if (
+      schoolPairFilter !== ALL_PROFESSOR_FILTER_VALUE &&
+      !schoolPairOptions.some((option) => option.value === schoolPairFilter)
+    ) {
+      setSchoolPairFilter(ALL_PROFESSOR_FILTER_VALUE);
+    }
+  }, [schoolPairFilter, schoolPairOptions]);
 
   const totalPages = Math.max(
     1,
@@ -417,7 +491,10 @@ export const ProfessorsPage = () => {
       setUpsertModalOpen(false);
       await loadProfessors();
     } catch (saveError) {
-      notifyError("保存导师失败", getActionErrorMessage(saveError, "保存导师失败"));
+      notifyError(
+        "保存导师失败",
+        getActionErrorMessage(saveError, "保存导师失败"),
+      );
     } finally {
       setSavingProfessor(false);
     }
@@ -633,58 +710,139 @@ export const ProfessorsPage = () => {
             )}
           </div>
 
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            <label className="flex min-h-[3.1rem] flex-1 items-center gap-3 rounded-3xl border border-stone-200 bg-white px-4 py-3 shadow-sm">
-              <Search className="h-4 w-4 text-stone-400" />
-              <input
-                value={keyword}
-                onChange={(event) => setKeyword(event.target.value)}
-                placeholder="搜索姓名、邮箱、学校、院系或研究方向"
-                className="w-full bg-transparent text-sm text-stone-700 outline-none placeholder:text-stone-400"
-              />
-            </label>
+          <div className="grid gap-3">
+            <div data-testid="professor-search-row" className="min-w-0">
+              <label className="flex min-h-[3.35rem] w-full min-w-0 items-center gap-3 rounded-3xl border border-stone-200 bg-white px-4 py-3 shadow-sm">
+                <Search className="h-4 w-4 shrink-0 text-stone-400" />
+                <input
+                  value={keyword}
+                  onChange={(event) => setKeyword(event.target.value)}
+                  placeholder="搜索姓名、邮箱、学校、院系或研究方向"
+                  className="w-full min-w-0 bg-transparent text-sm text-stone-700 outline-none placeholder:text-stone-400"
+                />
+              </label>
+            </div>
 
-            <div className="flex flex-wrap gap-3">
-              <ToolbarMenu onDownload={handleDownloadTemplate} />
-              <button
-                type="button"
-                onClick={() => {
-                  setImportFile(null);
-                  setImportResult(null);
-                  setImportModalOpen(true);
-                }}
-                className="ui-btn-secondary"
-              >
-                <Upload className="h-4 w-4" />
-                导入文件
-              </button>
-              <button
-                type="button"
-                onClick={openCreateModal}
-                className="ui-btn-primary"
-              >
-                <Plus className="h-4 w-4" />
-                新增导师
-              </button>
-              <button
-                type="button"
-                onClick={() => void loadProfessors()}
-                className="ui-btn-secondary"
-              >
-                <RefreshCcw className="h-4 w-4" />
-                刷新
-              </button>
+            <div
+              data-testid="professor-filter-row"
+              className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between"
+            >
+              <div className="grid min-w-0 flex-1 items-start gap-3 sm:grid-cols-[minmax(11rem,0.65fr)_minmax(15rem,1fr)_auto]">
+                <div className="grid gap-2">
+                  <div
+                    data-testid="professor-title-filter-label"
+                    className={filterFieldLabelClassName}
+                  >
+                    职称
+                  </div>
+                  <NativeSelectField
+                    ariaLabel="职称筛选"
+                    value={titleFilter}
+                    onChange={(event) => setTitleFilter(event.target.value)}
+                    shellClassName="min-h-[3.1rem] rounded-3xl bg-white shadow-sm"
+                  >
+                    <option value={ALL_PROFESSOR_FILTER_VALUE}>全部职称</option>
+                    {titleOptions.map((title) => (
+                      <option key={title} value={title}>
+                        {title}
+                      </option>
+                    ))}
+                  </NativeSelectField>
+                </div>
+
+                <div className="grid gap-2">
+                  <div
+                    data-testid="professor-school-filter-label"
+                    className={filterFieldLabelClassName}
+                  >
+                    学校 / 学院
+                  </div>
+                  <NativeSelectField
+                    ariaLabel="学校学院筛选"
+                    value={schoolPairFilter}
+                    onChange={(event) =>
+                      setSchoolPairFilter(event.target.value)
+                    }
+                    shellClassName="min-h-[3.1rem] rounded-3xl bg-white shadow-sm"
+                  >
+                    <option value={ALL_PROFESSOR_FILTER_VALUE}>
+                      全部学校 / 学院
+                    </option>
+                    {schoolPairOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </NativeSelectField>
+                </div>
+
+                <div className="grid gap-2">
+                  <div
+                    data-testid="professor-reset-filter-label"
+                    className={filterFieldLabelClassName}
+                  >
+                    操作
+                  </div>
+                  <button
+                    type="button"
+                    onClick={resetAdvancedFilters}
+                    disabled={!hasAdvancedFilters}
+                    className="ui-select-shell min-h-[3.1rem] w-full justify-center rounded-3xl bg-white font-medium shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <RefreshCcw className="h-4 w-4" />
+                    重置筛选
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid gap-2 lg:justify-end">
+                <div
+                  aria-hidden="true"
+                  data-testid="professor-toolbar-spacer"
+                  className={filterFieldLabelClassName}
+                />
+                <div className="flex flex-wrap items-center gap-3 lg:justify-end">
+                  <ToolbarMenu onDownload={handleDownloadTemplate} />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setImportFile(null);
+                      setImportResult(null);
+                      setImportModalOpen(true);
+                    }}
+                    className="ui-btn-secondary h-10 rounded-2xl"
+                  >
+                    <Upload className="h-4 w-4" />
+                    导入文件
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openCreateModal}
+                    className="ui-btn-primary h-10 rounded-2xl"
+                  >
+                    <Plus className="h-4 w-4" />
+                    新增导师
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void loadProfessors()}
+                    className="ui-btn-secondary h-10 rounded-2xl"
+                  >
+                    <RefreshCcw className="h-4 w-4" />
+                    刷新
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
-
         </div>
       </section>
 
       <section className="mt-6 overflow-hidden rounded-[32px] border border-stone-200 bg-white shadow-sm">
         <div className="flex flex-col gap-3 border-b border-stone-100 px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="text-sm text-stone-600">
-            共 {filteredProfessors.length} 位导师，第 {safeCurrentPage} / {totalPages} 页，每页最多{" "}
-            {PROFESSORS_PER_PAGE} 位
+            共 {filteredProfessors.length} 位导师，第 {safeCurrentPage} /{" "}
+            {totalPages} 页，每页最多 {PROFESSORS_PER_PAGE} 位
           </div>
           <div className="flex flex-wrap gap-2">
             <button
@@ -715,6 +873,7 @@ export const ProfessorsPage = () => {
         >
           <div className="flex justify-center text-center">选择</div>
           <div className="flex justify-center text-center">导师</div>
+          <div className="flex justify-center text-center">职称</div>
           <div className="flex justify-center text-center">邮箱</div>
           <div className="flex justify-center text-center">学校 / 学院</div>
           <div className="flex justify-center text-center">研究方向</div>
@@ -796,7 +955,8 @@ export const ProfessorsPage = () => {
         {!loading && filteredProfessors.length > 0 ? (
           <div className="flex flex-col gap-3 border-t border-stone-100 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-sm text-stone-500">
-              当前页 {paginatedProfessors.length} 位导师，已选中 {selectedIds.size} 位
+              当前页 {paginatedProfessors.length} 位导师，已选中{" "}
+              {selectedIds.size} 位
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -1126,7 +1286,7 @@ export const ProfessorsPage = () => {
               上传并导入
             </div>
             <p className="mt-2 text-sm leading-6 text-stone-500">
-              必填列是 name 和 email。格式错误的行会跳过；同邮箱记录会覆盖更新，回收站记录会自动恢复。
+              必填列是 name 和 email。格式错误的行会跳过；同邮箱记录会覆盖更新。
             </p>
             <label
               onDragOver={(event) => event.preventDefault()}

@@ -298,7 +298,7 @@ describe("HomePage onboarding", () => {
       "aria-pressed",
       "false",
     );
-    expect(selectButton).toHaveClass("h-10", "w-10");
+    expect(selectButton).toHaveClass("h-8", "w-8");
     expect(
       screen.queryByRole("checkbox", { name: "选择 王教授" }),
     ).not.toBeInTheDocument();

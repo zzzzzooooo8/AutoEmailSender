@@ -8,6 +8,8 @@ type ProfessorIdentityBlockProps = {
   researchDirection?: string | null;
   archived?: boolean;
   compact?: boolean;
+  showAffiliation?: boolean;
+  showResearchDirection?: boolean;
   className?: string;
 };
 
@@ -19,6 +21,8 @@ export const ProfessorIdentityBlock = ({
   researchDirection,
   archived = false,
   compact = false,
+  showAffiliation = true,
+  showResearchDirection = true,
   className,
 }: ProfessorIdentityBlockProps) => {
   const affiliation = [title, university, school].filter(Boolean).join(" / ");
@@ -40,17 +44,23 @@ export const ProfessorIdentityBlock = ({
           </span>
         ) : null}
       </div>
-      <div className="mt-1 text-sm text-stone-500">
-        {affiliation || "未填写职称 / 学校 / 学院"}
-      </div>
-      <p
-        className={clsx(
-          "mt-2 text-sm leading-6 text-stone-600",
-          compact ? "line-clamp-2" : "line-clamp-3",
-        )}
-      >
-        {researchDirection || "暂无研究方向描述"}
-      </p>
+      {showAffiliation ? (
+        <div className="mt-1 text-sm text-stone-500">
+          {affiliation || "未填写职称 / 学校 / 学院"}
+        </div>
+      ) : title ? (
+        <div className="mt-1 text-sm text-stone-500">{title}</div>
+      ) : null}
+      {showResearchDirection ? (
+        <p
+          className={clsx(
+            "mt-2 text-sm leading-6 text-stone-600",
+            compact ? "line-clamp-2" : "line-clamp-3",
+          )}
+        >
+          {researchDirection || "暂无研究方向描述"}
+        </p>
+      ) : null}
     </div>
   );
 };
