@@ -357,8 +357,11 @@ async def _load_existing_candidate_emails(session: AsyncSession, job_id: int) ->
 
 
 async def _is_crawl_job_canceled(session: AsyncSession, job_id: int) -> bool:
-    job = await session.get(CrawlJob, job_id)
-    return bool(job is not None and job.status == CrawlJobStatus.CANCELED.value)
+    return await _get_job_status(session, job_id) == CrawlJobStatus.CANCELED.value
+
+
+async def _get_job_status(session: AsyncSession, job_id: int) -> str | None:
+    return await session.scalar(select(CrawlJob.status).where(CrawlJob.id == job_id))
 
 
 def _failed_snapshot(url: str, fetch_method: str, error_message: str) -> PageSnapshot:

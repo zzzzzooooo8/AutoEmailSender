@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from app.models import CrawlCandidate, CrawlJob, CrawlJobStatus, CrawlPage
+from app.models.base import Base
 from app.services.crawler_tools import (
     CrawlToolContext,
     PageSnapshot,
@@ -159,6 +166,55 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session_factory.added, [])
         self.assertEqual(session_factory.rollback_count, 1)
 
+    async def test_save_candidates_sees_canceled_status_changed_by_other_session(self) -> None:
+        async with _RealCrawlerSessionHarness() as harness:
+            job_id = await harness.create_job()
+            ctx = CrawlToolContext(
+                job_id=job_id,
+                start_url="https://cs.example.edu/faculty",
+                university="示例大学",
+                school="计算机学院",
+                session_factory=harness.cancel_on_second_status_factory(job_id),  # type: ignore[arg-type]
+            )
+
+            saved = await save_candidates(
+                ctx,
+                [
+                    ProfessorCandidatePayload(
+                        name="张三",
+                        email="zhang@example.edu",
+                    ),
+                ],
+            )
+
+            self.assertEqual(saved, [])
+            self.assertEqual(await harness.count_rows(CrawlCandidate), 0)
+
+    async def test_record_page_snapshot_sees_canceled_status_changed_by_other_session(self) -> None:
+        async with _RealCrawlerSessionHarness() as harness:
+            job_id = await harness.create_job()
+            ctx = CrawlToolContext(
+                job_id=job_id,
+                start_url="https://cs.example.edu/faculty",
+                university="示例大学",
+                school="计算机学院",
+                session_factory=harness.cancel_on_second_status_factory(job_id),  # type: ignore[arg-type]
+            )
+
+            row = await record_page_snapshot(
+                ctx,
+                PageSnapshot(
+                    url="https://cs.example.edu/faculty",
+                    title="Faculty",
+                    text="Faculty page",
+                    fetch_method="http",
+                    status="succeeded",
+                ),
+            )
+
+            self.assertIsNone(row)
+            self.assertEqual(await harness.count_rows(CrawlPage), 0)
+
     async def test_crawl_page_with_http_rejects_cross_host_final_url(self) -> None:
         session_factory = _FakeSessionFactory()
         ctx = CrawlToolContext(
@@ -222,6 +278,10 @@ class _FakeSession:
         _ = model, key
         return _FakeJob(status=self._factory.next_job_status())
 
+    async def scalar(self, statement: object) -> str:
+        _ = statement
+        return self._factory.next_job_status()
+
     async def scalars(self, statement: object) -> "_FakeScalarResult":
         _ = statement
         return _FakeScalarResult([])
@@ -250,6 +310,116 @@ class _FakeScalarResult:
 class _FakeJob:
     def __init__(self, *, status: str) -> None:
         self.status = status
+
+
+class _RealCrawlerSessionHarness:
+    def __init__(self) -> None:
+        self._temp_dir: tempfile.TemporaryDirectory[str] | None = None
+        self._session_factory: async_sessionmaker[AsyncSession] | None = None
+        self._engine = None
+
+    async def __aenter__(self) -> "_RealCrawlerSessionHarness":
+        asyncio.get_running_loop().slow_callback_duration = 1.0
+        self._temp_dir = tempfile.TemporaryDirectory()
+        db_path = Path(self._temp_dir.name) / "crawler_tools.db"
+        self._engine = create_async_engine(f"sqlite+aiosqlite:///{db_path.as_posix()}")
+        self._session_factory = async_sessionmaker(
+            bind=self._engine,
+            autoflush=False,
+            expire_on_commit=False,
+        )
+        async with self._engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        if self._engine is not None:
+            await self._engine.dispose()
+        if self._temp_dir is not None:
+            self._temp_dir.cleanup()
+
+    async def create_job(self) -> int:
+        async with self._session_factory() as session:
+            job = CrawlJob(
+                university="示例大学",
+                school="计算机学院",
+                start_url="https://cs.example.edu/faculty",
+                status=CrawlJobStatus.RUNNING.value,
+                progress_current=0,
+                progress_total=0,
+            )
+            session.add(job)
+            await session.commit()
+            await session.refresh(job)
+            return job.id
+
+    def cancel_on_second_status_factory(self, job_id: int) -> "_CancelOnSecondStatusSessionFactory":
+        return _CancelOnSecondStatusSessionFactory(self._session_factory, job_id)
+
+    async def count_rows(self, model: object) -> int:
+        async with self._session_factory() as session:
+            rows = await session.scalars(model.__table__.select())
+            return len(list(rows))
+
+
+class _CancelOnSecondStatusSessionFactory:
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], job_id: int) -> None:
+        self._session_factory = session_factory
+        self._job_id = job_id
+
+    def __call__(self) -> "_CancelOnSecondStatusSession":
+        return _CancelOnSecondStatusSession(self._session_factory, self._job_id)
+
+
+class _CancelOnSecondStatusSession:
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], job_id: int) -> None:
+        self._session_factory = session_factory
+        self._job_id = job_id
+        self._session: AsyncSession | None = None
+        self._status_read_count = 0
+        self._cached_job: CrawlJob | None = None
+
+    async def __aenter__(self) -> "_CancelOnSecondStatusSession":
+        self._session = self._session_factory()
+        await self._session.__aenter__()
+        self._cached_job = await self._session.get(CrawlJob, self._job_id)
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        await self._session.__aexit__(*args)
+
+    def add(self, row: object) -> None:
+        self._session.add(row)
+
+    async def get(self, model: object, key: object) -> object:
+        if model is CrawlJob and key == self._job_id:
+            await self._maybe_cancel_job()
+        return await self._session.get(model, key)
+
+    async def scalar(self, statement: object) -> object:
+        await self._maybe_cancel_job()
+        return await self._session.scalar(statement)
+
+    async def scalars(self, statement: object) -> object:
+        return await self._session.scalars(statement)
+
+    async def commit(self) -> None:
+        await self._session.commit()
+
+    async def rollback(self) -> None:
+        await self._session.rollback()
+
+    async def refresh(self, row: object) -> None:
+        await self._session.refresh(row)
+
+    async def _maybe_cancel_job(self) -> None:
+        self._status_read_count += 1
+        if self._status_read_count != 2:
+            return
+        async with self._session_factory() as session:
+            job = await session.get(CrawlJob, self._job_id)
+            job.status = CrawlJobStatus.CANCELED.value
+            await session.commit()
 
 
 class _FakeHttpResponse:
