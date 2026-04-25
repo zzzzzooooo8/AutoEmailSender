@@ -1,6 +1,14 @@
 from app.models.app_setting import AppSetting, MailDeliveryMode
 from app.models.base import Base
 from app.models.batch_task import BatchTask, BatchTaskStatus
+from app.models.crawl_job import (
+    CrawlCandidate,
+    CrawlCandidateReviewStatus,
+    CrawlJob,
+    CrawlJobStatus,
+    CrawlPage,
+    CrawlPageStatus,
+)
 from app.models.email_log import EmailDirection, EmailLog
 from app.models.email_task import (
     EmailTask,
@@ -20,6 +28,12 @@ __all__ = [
     "Base",
     "BatchTask",
     "BatchTaskStatus",
+    "CrawlCandidate",
+    "CrawlCandidateReviewStatus",
+    "CrawlJob",
+    "CrawlJobStatus",
+    "CrawlPage",
+    "CrawlPageStatus",
     "EmailDirection",
     "EmailLog",
     "EmailTask",
