@@ -19,6 +19,7 @@ from app.services.html_text import html_to_text
 
 MAX_TEXT_CHARS = 12000
 MAX_LINKS = 200
+MAX_HTTP_REDIRECTS = 5
 UNSAFE_CRAWL_URL_MESSAGE = "URL 不允许指向本机、内网或不可解析地址"
 
 
@@ -128,6 +129,7 @@ def _validate_resolved_host_ips(host: str, port: int | None) -> None:
 def _is_unsafe_ip_address(ip_address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     return any(
         (
+            not ip_address.is_global,
             ip_address.is_private,
             ip_address.is_loopback,
             ip_address.is_link_local,
@@ -172,31 +174,56 @@ def normalize_candidate_payload(
 
 async def crawl_page_with_http(ctx: CrawlToolContext, url: str) -> PageSnapshot:
     absolute_url = urljoin(ctx.start_url, url)
-    if _has_unsafe_public_crawl_url(ctx.start_url, absolute_url):
-        snapshot = _failed_snapshot(
-            url=absolute_url,
-            fetch_method="http",
-            error_message=UNSAFE_CRAWL_URL_MESSAGE,
-        )
-        await record_page_snapshot(ctx, snapshot)
-        return snapshot
-
-    if not is_allowed_crawl_url(ctx.start_url, url):
-        snapshot = _failed_snapshot(
-            url=url,
-            fetch_method="http",
-            error_message="URL 不在入口页面同域范围内，已拒绝抓取",
-        )
+    snapshot = _pre_request_rejected_snapshot(ctx, absolute_url, "http")
+    if snapshot is not None:
         await record_page_snapshot(ctx, snapshot)
         return snapshot
 
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=20.0) as client:
-            response = await client.get(
-                absolute_url,
-                headers={"User-Agent": "AutoEmailSenderCrawler/0.1"},
-            )
-            response.raise_for_status()
+        response: httpx.Response | Any | None = None
+        current_url = absolute_url
+        async with httpx.AsyncClient(follow_redirects=False, timeout=20.0) as client:
+            for redirect_count in range(MAX_HTTP_REDIRECTS + 1):
+                snapshot = _pre_request_rejected_snapshot(ctx, current_url, "http")
+                if snapshot is not None:
+                    await record_page_snapshot(ctx, snapshot)
+                    return snapshot
+
+                response = await client.get(
+                    current_url,
+                    headers={"User-Agent": "AutoEmailSenderCrawler/0.1"},
+                )
+                if not getattr(response, "is_redirect", False):
+                    response.raise_for_status()
+                    break
+
+                if redirect_count >= MAX_HTTP_REDIRECTS:
+                    snapshot = _failed_snapshot(
+                        url=str(response.url),
+                        fetch_method="http",
+                        error_message="重定向次数过多，已拒绝抓取",
+                    )
+                    await record_page_snapshot(ctx, snapshot)
+                    return snapshot
+
+                location = response.headers.get("Location") or response.headers.get("location")
+                if not location:
+                    snapshot = _failed_snapshot(
+                        url=str(response.url),
+                        fetch_method="http",
+                        error_message="重定向响应缺少 Location，已拒绝抓取",
+                    )
+                    await record_page_snapshot(ctx, snapshot)
+                    return snapshot
+
+                next_url = urljoin(str(response.url), location)
+                snapshot = _pre_request_rejected_snapshot(ctx, next_url, "http")
+                if snapshot is not None:
+                    await record_page_snapshot(ctx, snapshot)
+                    return snapshot
+                current_url = next_url
+        if response is None:
+            raise RuntimeError("HTTP 抓取未返回响应")
     except Exception as exc:
         snapshot = _failed_snapshot(
             url=absolute_url,
@@ -233,84 +260,8 @@ async def crawl_page_with_http(ctx: CrawlToolContext, url: str) -> PageSnapshot:
 
 
 async def crawl_page_with_crawl4ai(ctx: CrawlToolContext, url: str) -> PageSnapshot:
-    absolute_url = urljoin(ctx.start_url, url)
-    if _has_unsafe_public_crawl_url(ctx.start_url, absolute_url):
-        snapshot = _failed_snapshot(
-            url=absolute_url,
-            fetch_method="crawl4ai",
-            error_message=UNSAFE_CRAWL_URL_MESSAGE,
-        )
-        await record_page_snapshot(ctx, snapshot)
-        return snapshot
-
-    if not is_allowed_crawl_url(ctx.start_url, url):
-        snapshot = _failed_snapshot(
-            url=url,
-            fetch_method="crawl4ai",
-            error_message="URL 不在入口页面同域范围内，已拒绝抓取",
-        )
-        await record_page_snapshot(ctx, snapshot)
-        return snapshot
-
-    try:
-        from crawl4ai import AsyncWebCrawler
-    except Exception:
-        return await crawl_page_with_http(ctx, url)
-
-    try:
-        async with AsyncWebCrawler() as crawler:
-            result = await crawler.arun(url=absolute_url)
-    except Exception:
-        return await crawl_page_with_http(ctx, absolute_url)
-
-    if not getattr(result, "success", True):
-        error_message = str(getattr(result, "error_message", "") or "Crawl4AI 抓取失败")
-        snapshot = _failed_snapshot(
-            url=absolute_url,
-            fetch_method="crawl4ai",
-            error_message=error_message,
-        )
-        await record_page_snapshot(ctx, snapshot)
-        return snapshot
-
-    final_url = _extract_result_url(result) or absolute_url
-    if not is_safe_public_crawl_url(final_url):
-        snapshot = _failed_snapshot(
-            url=final_url,
-            fetch_method="crawl4ai",
-            error_message=UNSAFE_CRAWL_URL_MESSAGE,
-        )
-        await record_page_snapshot(ctx, snapshot)
-        return snapshot
-
-    if not is_allowed_crawl_url(ctx.start_url, final_url):
-        snapshot = _final_url_rejected_snapshot(
-            final_url=final_url,
-            fetch_method="crawl4ai",
-        )
-        await record_page_snapshot(ctx, snapshot)
-        return snapshot
-
-    html = str(getattr(result, "html", "") or "")
-    text = str(getattr(result, "markdown", "") or getattr(result, "cleaned_html", "") or "")
-    snapshot = html_to_snapshot(final_url, html, "crawl4ai") if html else PageSnapshot(
-        url=final_url,
-        title=None,
-        text=text[:MAX_TEXT_CHARS],
-        html="",
-        links=[],
-        fetch_method="crawl4ai",
-        status="succeeded",
-        suspicious_empty=not text.strip(),
-    )
-    if text.strip():
-        snapshot.text = text.strip()[:MAX_TEXT_CHARS]
-        snapshot.suspicious_empty = False
-    snapshot.links = [
-        link for link in snapshot.links if is_allowed_crawl_url(ctx.start_url, link)
-    ][:MAX_LINKS]
-    await record_page_snapshot(ctx, snapshot)
-    return snapshot
+    # Crawl4AI owns redirect/DNS behavior; re-enable after safe transport controls exist.
+    return await crawl_page_with_http(ctx, url)
 
 
 async def browser_investigate(ctx: CrawlToolContext, url: str, goal: str) -> PageSnapshot:
@@ -498,17 +449,31 @@ def _has_unsafe_public_crawl_url(start_url: str, candidate_url: str) -> bool:
     return not is_safe_public_crawl_url(start_url) or not is_safe_public_crawl_url(candidate_url)
 
 
+def _pre_request_rejected_snapshot(
+    ctx: CrawlToolContext,
+    target_url: str,
+    fetch_method: str,
+) -> PageSnapshot | None:
+    if _has_unsafe_public_crawl_url(ctx.start_url, target_url):
+        return _failed_snapshot(
+            url=target_url,
+            fetch_method=fetch_method,
+            error_message=UNSAFE_CRAWL_URL_MESSAGE,
+        )
+
+    if not is_allowed_crawl_url(ctx.start_url, target_url):
+        return _failed_snapshot(
+            url=target_url,
+            fetch_method=fetch_method,
+            error_message="URL 不在入口页面同域范围内，已拒绝抓取",
+        )
+
+    return None
+
+
 def _final_url_rejected_snapshot(final_url: str, fetch_method: str) -> PageSnapshot:
     return _failed_snapshot(
         url=final_url,
         fetch_method=fetch_method,
         error_message="最终 URL 不在允许范围内，已拒绝抓取结果",
     )
-
-
-def _extract_result_url(result: object) -> str | None:
-    for attr_name in ("url", "final_url", "response_url"):
-        value = getattr(result, attr_name, None)
-        if value:
-            return str(value)
-    return None

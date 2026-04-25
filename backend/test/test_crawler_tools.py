@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import socket
+import types
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.models import CrawlCandidate, CrawlJob, CrawlJobStatus, CrawlPage
@@ -15,6 +17,7 @@ from app.services.crawler_tools import (
     CrawlToolContext,
     PageSnapshot,
     ProfessorCandidatePayload,
+    crawl_page_with_crawl4ai,
     crawl_page_with_http,
     is_allowed_crawl_url,
     is_safe_public_crawl_url,
@@ -60,6 +63,9 @@ class CrawlerToolTests(unittest.TestCase):
             "http://faculty.localhost/faculty",
             "http://10.0.0.1/faculty",
             "http://169.254.169.254/latest/meta-data",
+            "http://224.0.0.1/faculty",
+            "http://0.0.0.0/faculty",
+            "http://192.0.2.1/faculty",
         ):
             with self.subTest(url=url):
                 self.assertFalse(is_safe_public_crawl_url(url))
@@ -358,6 +364,97 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("URL 不允许指向本机、内网或不可解析地址", snapshot.error_message or "")
         self.assertNotIn("内网正文", snapshot.text)
 
+    async def test_crawl_page_with_http_does_not_request_unsafe_redirect_target(self) -> None:
+        session_factory = _FakeSessionFactory()
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://faculty.example.edu/faculty",
+            university="示例大学",
+            school="计算机学院",
+            session_factory=session_factory,  # type: ignore[arg-type]
+        )
+        requested_urls: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requested_urls.append(str(request.url))
+            if str(request.url) == "https://faculty.example.edu/faculty":
+                return httpx.Response(
+                    302,
+                    headers={"Location": "http://127.0.0.1/admin"},
+                    request=request,
+                )
+            return httpx.Response(200, text="unsafe target was requested", request=request)
+
+        transport = httpx.MockTransport(handler)
+        async_client = httpx.AsyncClient
+
+        def client_factory(**kwargs: object) -> httpx.AsyncClient:
+            return async_client(transport=transport, **kwargs)
+
+        with patch(
+            "app.services.crawler_tools.socket.getaddrinfo",
+            return_value=[
+                (0, 0, 0, "", ("93.184.216.34", 443)),
+            ],
+        ), patch("app.services.crawler_tools.httpx.AsyncClient", side_effect=client_factory):
+            snapshot = await crawl_page_with_http(ctx, "https://faculty.example.edu/faculty")
+
+        self.assertEqual(snapshot.status, "failed")
+        self.assertIn("URL 不允许指向本机、内网或不可解析地址", snapshot.error_message or "")
+        self.assertEqual(requested_urls, ["https://faculty.example.edu/faculty"])
+
+    async def test_crawl_page_with_crawl4ai_delegates_to_safe_http_path(self) -> None:
+        session_factory = _FakeSessionFactory()
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://faculty.example.edu/faculty",
+            university="示例大学",
+            school="计算机学院",
+            session_factory=session_factory,  # type: ignore[arg-type]
+        )
+        direct_calls: list[str] = []
+        expected_snapshot = PageSnapshot(
+            url="https://faculty.example.edu/faculty",
+            text="Faculty page",
+            fetch_method="http",
+            status="succeeded",
+        )
+
+        class _UnsafeCrawler:
+            async def __aenter__(self) -> "_UnsafeCrawler":
+                return self
+
+            async def __aexit__(self, *args: object) -> None:
+                return None
+
+            async def arun(self, *, url: str) -> object:
+                direct_calls.append(url)
+                return types.SimpleNamespace(success=True, url=url, html="<html></html>")
+
+        async def safe_http_path(
+            delegated_ctx: CrawlToolContext,
+            delegated_url: str,
+        ) -> PageSnapshot:
+            self.assertIs(delegated_ctx, ctx)
+            self.assertEqual(delegated_url, "https://faculty.example.edu/faculty")
+            return expected_snapshot
+
+        crawl4ai_module = types.SimpleNamespace(AsyncWebCrawler=_UnsafeCrawler)
+        with patch(
+            "app.services.crawler_tools.socket.getaddrinfo",
+            return_value=[
+                (0, 0, 0, "", ("93.184.216.34", 443)),
+            ],
+        ), patch.dict("sys.modules", {"crawl4ai": crawl4ai_module}), patch(
+            "app.services.crawler_tools.crawl_page_with_http",
+            side_effect=safe_http_path,
+        ) as http_path:
+            snapshot = await crawl_page_with_crawl4ai(ctx, "https://faculty.example.edu/faculty")
+
+        self.assertIs(snapshot, expected_snapshot)
+        self.assertEqual(http_path.call_count, 1)
+        self.assertEqual(direct_calls, [])
+
 
 class _FakeSessionFactory:
     def __init__(self, *, job_status: str = "running", job_statuses: list[str] | None = None) -> None:
@@ -537,9 +634,24 @@ class _CancelOnSecondStatusSession:
 
 
 class _FakeHttpResponse:
-    def __init__(self, *, url: str, text: str) -> None:
+    def __init__(
+        self,
+        *,
+        url: str,
+        text: str,
+        status_code: int = 200,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self.url = url
         self.text = text
+        self.status_code = status_code
+        self.headers = headers or {}
+
+    @property
+    def is_redirect(self) -> bool:
+        return 300 <= self.status_code < 400 and "location" in {
+            key.lower() for key in self.headers
+        }
 
     def raise_for_status(self) -> None:
         return None
