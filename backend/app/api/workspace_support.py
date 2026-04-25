@@ -11,6 +11,7 @@ from app.api.identity_serializers import serialize_material
 from app.models import (
     EmailLog,
     EmailTask,
+    EmailTaskCancellationReason,
     EmailTaskStatus,
     IdentityProfile,
     LLMProfile,
@@ -120,8 +121,13 @@ async def build_workspace_thread(
         ],
         current_task=WorkspaceTaskSummaryRead(
             id=current_task.id if current_task else None,
+            source=current_task.source if current_task else None,
             batch_task_id=current_task.batch_task_id if current_task else None,
+            parent_task_id=current_task.parent_task_id if current_task else None,
             status=current_task.status if current_task else None,
+            cancellation_reason=current_task.cancellation_reason if current_task else None,
+            can_continue_manually=_can_continue_manually(current_task),
+            can_write_follow_up=_can_write_follow_up(current_task),
             outreach_generation_mode=current_task_outreach.generation_mode,
             outreach_template_subject=current_task_outreach.subject_template,
             outreach_template_body_text=current_task_outreach.body_text_template,
@@ -186,6 +192,7 @@ async def ensure_workspace_task(
 
     snapshot = resolve_outreach_template_config(identity)
     task = EmailTask(
+        source="manual",
         batch_task_id=None,
         identity_id=identity.id,
         llm_profile_id=llm_profile_id,
@@ -256,7 +263,7 @@ async def _get_latest_email_task(
             EmailTask.identity_id == identity_id,
             EmailTask.llm_profile_id == llm_profile_id,
         )
-        .order_by(EmailTask.created_at.desc()),
+        .order_by(EmailTask.created_at.desc(), EmailTask.id.desc()),
     )
 
 
@@ -320,3 +327,21 @@ def _normalize_nullable_text(value: str | None) -> str | None:
         return None
     normalized = value.strip()
     return normalized or None
+
+
+def _can_continue_manually(task: EmailTask | None) -> bool:
+    return bool(
+        task is not None
+        and task.status == EmailTaskStatus.CANCELED.value
+        and task.cancellation_reason == EmailTaskCancellationReason.BATCH_STOPPED.value
+    )
+
+
+def _can_write_follow_up(task: EmailTask | None) -> bool:
+    return bool(
+        task is not None
+        and task.status in {
+            EmailTaskStatus.SENT.value,
+            EmailTaskStatus.REPLY_DETECTED.value,
+        }
+    )

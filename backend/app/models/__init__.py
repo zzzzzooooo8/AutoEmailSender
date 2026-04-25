@@ -2,7 +2,12 @@ from app.models.app_setting import AppSetting, MailDeliveryMode
 from app.models.base import Base
 from app.models.batch_task import BatchTask, BatchTaskStatus
 from app.models.email_log import EmailDirection, EmailLog
-from app.models.email_task import EmailTask, EmailTaskStatus
+from app.models.email_task import (
+    EmailTask,
+    EmailTaskCancellationReason,
+    EmailTaskSource,
+    EmailTaskStatus,
+)
 from app.models.identity_profile import IdentityProfile
 from app.models.identity_material import IdentityMaterial, IdentityMaterialType
 from app.models.llm_profile import LLMProfile
@@ -18,6 +23,8 @@ __all__ = [
     "EmailDirection",
     "EmailLog",
     "EmailTask",
+    "EmailTaskCancellationReason",
+    "EmailTaskSource",
     "EmailTaskStatus",
     "IdentityProfile",
     "IdentityMaterial",

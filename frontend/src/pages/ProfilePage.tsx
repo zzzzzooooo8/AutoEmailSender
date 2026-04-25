@@ -80,7 +80,6 @@ type IdentityFormState = {
   outreach_template_subject: string;
   outreach_template_body_text: string;
   outreach_template_body_html: string;
-  match_threshold: string;
   daily_send_limit: string;
   send_interval_min: string;
   send_interval_max: string;
@@ -145,7 +144,6 @@ const createEmptyIdentityForm = (): IdentityFormState => ({
   outreach_template_subject: "",
   outreach_template_body_text: "",
   outreach_template_body_html: "",
-  match_threshold: "",
   daily_send_limit: "",
   send_interval_min: "",
   send_interval_max: "",
@@ -224,8 +222,6 @@ const toIdentityForm = (identity: IdentityDTO): IdentityFormState => {
     outreach_template_subject: identity.outreach_template_subject ?? "",
     outreach_template_body_text: identity.outreach_template_body_text ?? "",
     outreach_template_body_html: identity.outreach_template_body_html ?? "",
-    match_threshold:
-      identity.match_threshold === null ? "" : String(identity.match_threshold),
     daily_send_limit:
       identity.daily_send_limit === null ? "" : String(identity.daily_send_limit),
     send_interval_min:
@@ -272,7 +268,6 @@ const toIdentityPayload = (form: IdentityFormState): IdentityPayload => {
     outreach_template_subject: form.outreach_template_subject.trim() || null,
     outreach_template_body_text: form.outreach_template_body_text.trim() || null,
     outreach_template_body_html: form.outreach_template_body_html.trim() || null,
-    match_threshold: form.match_threshold ? Number(form.match_threshold) : null,
     daily_send_limit: form.daily_send_limit
       ? Number(form.daily_send_limit)
       : null,

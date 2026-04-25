@@ -12,7 +12,7 @@ from app.services.file_storage import (
 TERMINAL_MATERIAL_REFERENCING_STATUSES = {
     EmailTaskStatus.SENT.value,
     EmailTaskStatus.REPLY_DETECTED.value,
-    EmailTaskStatus.SKIPPED.value,
+    EmailTaskStatus.CANCELED.value,
 }
 
 

@@ -4,6 +4,7 @@ import re
 from datetime import UTC, datetime
 
 from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
@@ -12,6 +13,8 @@ from app.models import (
     BatchTaskStatus,
     EmailDirection,
     EmailLog,
+    EmailTaskCancellationReason,
+    EmailTaskSource,
     EmailTask,
     EmailTaskStatus,
     IdentityMaterial,
@@ -307,11 +310,7 @@ async def calculate_task_match(
         task.fit_points = result.fit_points
         task.risk_points = result.risk_points
         task.match_keywords = result.keywords
-        task.status = (
-            EmailTaskStatus.SKIPPED.value
-            if task.identity.match_threshold is not None and result.match_score < task.identity.match_threshold
-            else EmailTaskStatus.MATCHED.value
-        )
+        task.status = EmailTaskStatus.MATCHED.value
         task.updated_at = datetime.now(UTC)
         task.last_error = None
         await session.commit()
@@ -341,6 +340,7 @@ async def update_task_primary_material(
         task = await _load_email_task(session, task_id)
         if not task:
             raise ValueError(f"EmailTask {task_id} 不存在")
+        _ensure_task_allows_legacy_manual_actions(task)
         if task.status in {
             EmailTaskStatus.SENT.value,
             EmailTaskStatus.REPLY_DETECTED.value,
@@ -379,6 +379,7 @@ async def update_task_outreach_config(
         task = await _load_email_task(session, task_id)
         if not task:
             raise ValueError(f"EmailTask {task_id} 不存在")
+        _ensure_task_allows_legacy_manual_actions(task)
         if task.status in {
             EmailTaskStatus.SENT.value,
             EmailTaskStatus.REPLY_DETECTED.value,
@@ -417,6 +418,7 @@ async def approve_and_send_task(
         task = await _load_email_task(session, task_id)
         if not task:
             raise ValueError(f"EmailTask {task_id} 不存在")
+        _ensure_task_allows_legacy_manual_actions(task)
         await _snapshot_approval(session, task, payload)
         task.status = EmailTaskStatus.APPROVED.value
         await session.commit()
@@ -437,6 +439,7 @@ async def approve_and_schedule_task(
         task = await _load_email_task(session, task_id)
         if not task:
             raise ValueError(f"EmailTask {task_id} 不存在")
+        _ensure_task_allows_legacy_manual_actions(task)
         await _snapshot_approval(session, task, payload)
         task.status = EmailTaskStatus.SCHEDULED.value
         task.scheduled_at = payload.scheduled_at.astimezone(UTC)
@@ -453,6 +456,7 @@ async def cancel_scheduled_task(
         task = await _load_email_task(session, task_id)
         if not task:
             raise ValueError(f"EmailTask {task_id} 不存在")
+        _ensure_task_allows_legacy_manual_actions(task)
         task.status = EmailTaskStatus.REVIEW_REQUIRED.value
         task.scheduled_at = None
         task.updated_at = datetime.now(UTC)
@@ -460,7 +464,54 @@ async def cancel_scheduled_task(
         return task.professor_id, task.identity_id, task.llm_profile_id
 
 
+async def continue_task_manually(
+    session_factory: async_sessionmaker[AsyncSession],
+    task_id: int,
+) -> tuple[int, int, int]:
+    async with session_factory() as session:
+        task = await _load_email_task(session, task_id)
+        if not task:
+            raise ValueError(f"EmailTask {task_id} 不存在")
+        await _ensure_no_manual_child_exists(session, task.id)
+        if (
+            task.status != EmailTaskStatus.CANCELED.value
+            or task.cancellation_reason != EmailTaskCancellationReason.BATCH_STOPPED.value
+        ):
+            raise ValueError("只有 canceled 且 cancellation_reason 为 batch_stopped 的任务支持继续联系")
+
+        child_task = _create_manual_child_task(task, reuse_existing_draft=True)
+        session.add(child_task)
+        await _commit_manual_child_task(session)
+        return task.professor_id, task.identity_id, task.llm_profile_id
+
+
+async def start_follow_up_task(
+    session_factory: async_sessionmaker[AsyncSession],
+    task_id: int,
+) -> tuple[int, int, int]:
+    async with session_factory() as session:
+        task = await _load_email_task(session, task_id)
+        if not task:
+            raise ValueError(f"EmailTask {task_id} 不存在")
+        await _ensure_no_manual_child_exists(session, task.id)
+        if task.status not in {
+            EmailTaskStatus.SENT.value,
+            EmailTaskStatus.REPLY_DETECTED.value,
+        }:
+            raise ValueError("只有 sent 或 reply_detected 的任务支持发起跟进")
+
+        child_task = _create_manual_child_task(
+            task,
+            reuse_existing_draft=False,
+            minimum_status=EmailTaskStatus.MATCHED.value,
+        )
+        session.add(child_task)
+        await _commit_manual_child_task(session)
+        return task.professor_id, task.identity_id, task.llm_profile_id
+
+
 async def dispatch_email_task(
+
     session_factory: async_sessionmaker[AsyncSession],
     task_id: int,
 ) -> tuple[int, int, int]:
@@ -746,6 +797,22 @@ async def _load_email_task(session: AsyncSession, task_id: int) -> EmailTask | N
     )
 
 
+async def _ensure_no_manual_child_exists(session: AsyncSession, parent_task_id: int) -> None:
+    existing_child_id = await session.scalar(
+        select(EmailTask.id).where(EmailTask.parent_task_id == parent_task_id).limit(1),
+    )
+    if existing_child_id is not None:
+        raise ValueError("该任务已创建过手动子任务，不能重复派生")
+
+
+async def _commit_manual_child_task(session: AsyncSession) -> None:
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise ValueError("该任务已创建过手动子任务，不能重复派生") from exc
+
+
 def _resolve_task_outreach_config(task: EmailTask):
     return resolve_outreach_template_config(
         task.identity,
@@ -811,6 +878,94 @@ def _normalize_nullable_text(value: str | None) -> str | None:
     return normalized or None
 
 
+def _derive_manual_child_status(
+    task: EmailTask,
+    *,
+    reuse_existing_draft: bool,
+    minimum_status: str | None = None,
+) -> str:
+    if reuse_existing_draft and _task_has_reusable_draft(task):
+        return EmailTaskStatus.REVIEW_REQUIRED.value
+
+    status = (
+        EmailTaskStatus.MATCHED.value
+        if _build_match_result_from_task(task) is not None
+        else EmailTaskStatus.DISCOVERED.value
+    )
+    if minimum_status == EmailTaskStatus.MATCHED.value and status == EmailTaskStatus.DISCOVERED.value:
+        return EmailTaskStatus.MATCHED.value
+    return status
+
+
+def _create_manual_child_task(
+    task: EmailTask,
+    *,
+    reuse_existing_draft: bool,
+    minimum_status: str | None = None,
+) -> EmailTask:
+    now = datetime.now(UTC)
+    return EmailTask(
+        source=EmailTaskSource.MANUAL.value,
+        batch_task_id=None,
+        parent_task_id=task.id,
+        identity_id=task.identity_id,
+        llm_profile_id=task.llm_profile_id,
+        professor_id=task.professor_id,
+        primary_material_id=task.primary_material_id,
+        status=_derive_manual_child_status(
+            task,
+            reuse_existing_draft=reuse_existing_draft,
+            minimum_status=minimum_status,
+        ),
+        cancellation_reason=None,
+        match_score=task.match_score,
+        match_reason=task.match_reason,
+        generated_subject=task.generated_subject if reuse_existing_draft else None,
+        generated_content_text=task.generated_content_text if reuse_existing_draft else None,
+        generated_content_html=task.generated_content_html if reuse_existing_draft else None,
+        outreach_generation_mode=task.outreach_generation_mode,
+        outreach_template_subject=task.outreach_template_subject,
+        outreach_template_body_text=task.outreach_template_body_text,
+        outreach_template_body_html=task.outreach_template_body_html,
+        selected_material_ids=(
+            list(task.selected_material_ids)
+            if task.selected_material_ids is not None
+            else None
+        ),
+        approved_at=None,
+        fit_points=list(task.fit_points) if task.fit_points else [],
+        risk_points=list(task.risk_points) if task.risk_points else [],
+        match_keywords=list(task.match_keywords) if task.match_keywords else [],
+        approved_subject=task.approved_subject if reuse_existing_draft else None,
+        approved_body_text=task.approved_body_text if reuse_existing_draft else None,
+        approved_body_html=task.approved_body_html if reuse_existing_draft else None,
+        scheduled_at=None,
+        last_send_attempt_at=None,
+        sent_at=None,
+        last_rfc_message_id=None,
+        retry_count=0,
+        is_read=False,
+        is_replied=False,
+        last_error=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _task_has_reusable_draft(task: EmailTask) -> bool:
+    return any(
+        _normalize_nullable_text(value) is not None
+        for value in [
+            task.generated_subject,
+            task.generated_content_text,
+            task.generated_content_html,
+            task.approved_subject,
+            task.approved_body_text,
+            task.approved_body_html,
+        ]
+    )
+
+
 def _build_match_result_from_task(task: EmailTask) -> llm_runtime.MatchEvaluationResult | None:
     if task.match_score is None or not task.match_reason:
         return None
@@ -821,6 +976,14 @@ def _build_match_result_from_task(task: EmailTask) -> llm_runtime.MatchEvaluatio
         risk_points=task.risk_points or [],
         keywords=task.match_keywords or [],
     )
+
+
+def _ensure_task_allows_legacy_manual_actions(task: EmailTask) -> None:
+    if (
+        task.status == EmailTaskStatus.CANCELED.value
+        and task.cancellation_reason == EmailTaskCancellationReason.BATCH_STOPPED.value
+    ):
+        raise ValueError("该任务已因批量任务停止而取消，请先“作为单独联系继续”后再执行此操作")
 
 
 def extract_message_ids(*headers: str | None) -> set[str]:

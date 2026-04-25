@@ -99,8 +99,27 @@ const professor: ProfessorDashboardItemDTO = {
   recent_papers: [],
   match_score: 92,
   sent_count: 0,
-  status: "matched",
+  status: "preparing",
 };
+
+const createProfessor = (
+  id: number,
+  name: string,
+  status: ProfessorDashboardItemDTO["status"],
+): ProfessorDashboardItemDTO => ({
+  id,
+  name,
+  email: `${id}@example.com`,
+  title: "教授",
+  university: "测试大学",
+  school: "计算机学院",
+  department: "人工智能系",
+  research_direction: "多智能体系统",
+  recent_papers: [],
+  match_score: 92,
+  sent_count: 0,
+  status,
+});
 
 const materialsStageDescription = getOnboardingState({
   hasIdentity: true,
@@ -233,21 +252,35 @@ describe("HomePage onboarding", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows concise homepage status groups instead of every task state", async () => {
+  it("shows relationship status labels and filter controls on the dashboard", async () => {
+    mockedListProfessors.mockResolvedValue([professor]);
+    mockedUseSelectionContext.mockReturnValue({
+      selectedIdentityId: 1,
+      selectedLlmProfileId: 1,
+      selectedIdentity: createIdentity({
+        current_primary_material_id: 11,
+        outreach_template_body_text: "老师您好",
+      }),
+      selectedLlmProfile,
+    });
+
+    renderPage();
+
+    expect(
+      await screen.findByRole("heading", { name: "导师看板" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("准备中")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "状态" })).toBeInTheDocument();
+  });
+
+  it("renders six relationship filter options and filters the list through the UI", async () => {
     mockedListProfessors.mockResolvedValue([
-      professor,
-      {
-        ...professor,
-        id: 102,
-        name: "李教授",
-        status: "sent",
-      },
-      {
-        ...professor,
-        id: 103,
-        name: "赵教授",
-        status: "replied",
-      },
+      createProfessor(101, "未开始导师", "not_contacted"),
+      createProfessor(102, "准备中导师", "preparing"),
+      createProfessor(103, "待发送导师", "ready_to_send"),
+      createProfessor(104, "已联系导师", "contacted"),
+      createProfessor(105, "已回复导师", "replied"),
+      createProfessor(106, "需处理导师", "needs_attention"),
     ]);
     mockedUseSelectionContext.mockReturnValue({
       selectedIdentityId: 1,
@@ -264,18 +297,26 @@ describe("HomePage onboarding", () => {
     expect(
       await screen.findByRole("heading", { name: "导师看板" }),
     ).toBeInTheDocument();
+    expect(await screen.findByText("未开始导师")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "状态" }));
 
-    expect(screen.getAllByRole("option").map((item) => item.textContent)).toEqual([
-      "全部状态",
-      "未开始",
-      "准备中",
-      "已发送",
-      "已回复",
-      "需处理",
-    ]);
-    expect(screen.queryByRole("option", { name: "待审核" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "已排程" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "未开始" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "准备中" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "待发送" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "已联系" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "已回复" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "需处理" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("option", { name: "已联系" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("已联系导师")).toBeInTheDocument();
+      expect(screen.queryByText("未开始导师")).not.toBeInTheDocument();
+      expect(screen.queryByText("准备中导师")).not.toBeInTheDocument();
+      expect(screen.queryByText("待发送导师")).not.toBeInTheDocument();
+      expect(screen.queryByText("已回复导师")).not.toBeInTheDocument();
+      expect(screen.queryByText("需处理导师")).not.toBeInTheDocument();
+    });
   });
 });

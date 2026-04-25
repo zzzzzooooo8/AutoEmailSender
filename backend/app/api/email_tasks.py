@@ -17,7 +17,9 @@ from app.services.task_runtime import (
     approve_and_send_task,
     calculate_task_match_once,
     cancel_scheduled_task,
+    continue_task_manually,
     regenerate_task_draft,
+    start_follow_up_task,
     update_task_outreach_config,
     update_task_primary_material,
 )
@@ -126,6 +128,28 @@ async def cancel_schedule(
     return await _run_workspace_action(
         session,
         lambda: cancel_scheduled_task(get_session_factory(), task_id),
+    )
+
+
+@router.post("/{task_id}/continue-manually", response_model=WorkspaceThreadRead)
+async def continue_manually(
+    task_id: int,
+    session: AsyncSession = Depends(get_async_session),
+) -> WorkspaceThreadRead:
+    return await _run_workspace_action(
+        session,
+        lambda: continue_task_manually(get_session_factory(), task_id),
+    )
+
+
+@router.post("/{task_id}/start-follow-up", response_model=WorkspaceThreadRead)
+async def start_follow_up(
+    task_id: int,
+    session: AsyncSession = Depends(get_async_session),
+) -> WorkspaceThreadRead:
+    return await _run_workspace_action(
+        session,
+        lambda: start_follow_up_task(get_session_factory(), task_id),
     )
 
 

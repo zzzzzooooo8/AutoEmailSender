@@ -13,6 +13,8 @@ from app.models import (
     BatchTask,
     BatchTaskStatus,
     EmailTask,
+    EmailTaskCancellationReason,
+    EmailTaskSource,
     EmailTaskStatus,
     IdentityProfile,
     LLMProfile,
@@ -147,6 +149,7 @@ async def create_batch_task(
     for professor in professors:
         session.add(
             EmailTask(
+                source=EmailTaskSource.BATCH.value,
                 batch_task_id=batch_task.id,
                 identity_id=payload.identity_id,
                 llm_profile_id=payload.llm_profile_id,
@@ -204,8 +207,10 @@ async def stop_batch_task(
         if email_task.status not in {
             EmailTaskStatus.SENT.value,
             EmailTaskStatus.REPLY_DETECTED.value,
+            EmailTaskStatus.SEND_FAILED.value,
         }:
-            email_task.status = EmailTaskStatus.SKIPPED.value
+            email_task.status = EmailTaskStatus.CANCELED.value
+            email_task.cancellation_reason = EmailTaskCancellationReason.BATCH_STOPPED.value
             email_task.updated_at = datetime.now(UTC)
     await session.commit()
     await session.refresh(task, attribute_names=["email_tasks"])
@@ -247,7 +252,6 @@ def _serialize_batch_task(task: BatchTask) -> BatchTaskCardRead:
         for item in [
             EmailTaskStatus.DISCOVERED.value,
             EmailTaskStatus.MATCHED.value,
-            EmailTaskStatus.DRAFT_GENERATED.value,
         ]
     )
 

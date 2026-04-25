@@ -14,7 +14,9 @@ const mockedEnsureWorkspaceTask = vi.hoisted(() => vi.fn());
 const mockedWorkspaceComposerDock = vi.hoisted(() => vi.fn());
 const mockedApproveAndSend = vi.hoisted(() => vi.fn());
 const mockedApproveAndSchedule = vi.hoisted(() => vi.fn());
+const mockedContinueManually = vi.hoisted(() => vi.fn());
 const mockedGenerateDraft = vi.hoisted(() => vi.fn());
+const mockedStartFollowUp = vi.hoisted(() => vi.fn());
 const mockedConfirm = vi.hoisted(() => vi.fn());
 const mockedNotificationApi = vi.hoisted(() => ({
   notifyError: vi.fn(),
@@ -39,7 +41,9 @@ vi.mock("@/lib/api/emailTasksApi", () => ({
   approveAndSend: mockedApproveAndSend,
   calculateMatch: vi.fn(),
   cancelScheduledTask: vi.fn(),
+  continueManually: mockedContinueManually,
   generateDraft: mockedGenerateDraft,
+  startFollowUp: mockedStartFollowUp,
   updateTaskOutreachConfig: vi.fn(),
   updateTaskPrimaryMaterial: vi.fn(),
 }));
@@ -65,12 +69,15 @@ vi.mock("@/components/organisms/WorkspaceComposerDock", () => ({
     nextStepDescription: string;
     draftReady: boolean;
     subject: string;
+    canSubmitDraft: boolean;
     content: string;
     contentHtml: string;
     onContentChange: (value: { html: string; text: string }) => void;
     onGenerateDraft: () => void;
     onSendNow: () => void;
     onScheduleSend: () => void;
+    onContinueManually: () => void;
+    onStartFollowUp: () => void;
   }) => {
     mockedWorkspaceComposerDock(props);
     return (
@@ -84,11 +91,21 @@ vi.mock("@/components/organisms/WorkspaceComposerDock", () => ({
         <button type="button" onClick={props.onGenerateDraft}>
           mock-generate-draft
         </button>
-        <button type="button" onClick={props.onSendNow}>
-          mock-send-now
+        {props.canSubmitDraft ? (
+          <>
+            <button type="button" onClick={props.onSendNow}>
+              mock-send-now
+            </button>
+            <button type="button" onClick={props.onScheduleSend}>
+              mock-schedule-send
+            </button>
+          </>
+        ) : null}
+        <button type="button" onClick={props.onContinueManually}>
+          mock-continue-manually
         </button>
-        <button type="button" onClick={props.onScheduleSend}>
-          mock-schedule-send
+        <button type="button" onClick={props.onStartFollowUp}>
+          mock-start-follow-up
         </button>
       </div>
     );
@@ -112,12 +129,18 @@ const buildThread = ({
   generatedSubject = null,
   generatedContentText = null,
   generatedContentHtml = null,
+  cancellationReason = null,
+  canContinueManually = false,
+  canWriteFollowUp = false,
 }: {
   status?: WorkspaceTaskStatus;
   primaryMaterialId?: number | null;
   generatedSubject?: string | null;
   generatedContentText?: string | null;
   generatedContentHtml?: string | null;
+  cancellationReason?: string | null;
+  canContinueManually?: boolean;
+  canWriteFollowUp?: boolean;
 } = {}): WorkspaceThreadDTO => ({
   professor: {
     id: 101,
@@ -131,6 +154,8 @@ const buildThread = ({
   identity: {
     id: 1,
     name: "测试身份",
+    profile_name: "测试身份",
+    sender_name: "测试同学",
     email_address: "sender@example.com",
   },
   llm_profile: {
@@ -142,8 +167,13 @@ const buildThread = ({
   material_options: primaryMaterialId ? [primaryMaterial] : [],
   current_task: {
     id: 301,
+    source: "manual",
     batch_task_id: 21,
+    parent_task_id: null,
     status,
+    cancellation_reason: cancellationReason,
+    can_continue_manually: canContinueManually,
+    can_write_follow_up: canWriteFollowUp,
     outreach_generation_mode: "llm",
     outreach_template_subject: "测试主题",
     outreach_template_body_text: "测试正文",
@@ -169,7 +199,7 @@ const buildThread = ({
     last_rfc_message_id: null,
     retry_count: 0,
     last_error: null,
-    is_replied: false,
+    is_replied: status === "reply_detected",
     estimated_prompt_tokens: null,
     estimated_completion_tokens_upper_bound: null,
     estimated_total_tokens_upper_bound: null,
@@ -196,7 +226,9 @@ describe("WorkspacePage next-step", () => {
     mockedEnsureWorkspaceTask.mockReset();
     mockedApproveAndSend.mockReset();
     mockedApproveAndSchedule.mockReset();
+    mockedContinueManually.mockReset();
     mockedGenerateDraft.mockReset();
+    mockedStartFollowUp.mockReset();
     mockedConfirm.mockReset();
     mockedConfirm.mockResolvedValue(true);
     mockedApproveAndSend.mockImplementation(async () =>
@@ -210,12 +242,24 @@ describe("WorkspacePage next-step", () => {
         generatedContentHtml: "<p>定时后的 HTML 草稿</p>",
       }),
     );
+    mockedContinueManually.mockImplementation(async () =>
+      buildThread({
+        status: "matched",
+        primaryMaterialId: null,
+      }),
+    );
     mockedGenerateDraft.mockImplementation(async () =>
       buildThread({
         status: "review_required",
         generatedSubject: "生成后的主题",
         generatedContentText: "生成后的正文",
         generatedContentHtml: "<p>生成后的正文</p>",
+      }),
+    );
+    mockedStartFollowUp.mockImplementation(async () =>
+      buildThread({
+        status: "matched",
+        primaryMaterialId: null,
       }),
     );
     mockedUseSelectionContext.mockReturnValue({
@@ -312,18 +356,97 @@ describe("WorkspacePage next-step", () => {
     expect(screen.getByText("draft-empty")).toBeInTheDocument();
   });
 
-  it("keeps terminal status guidance ahead of missing-material or draft prompts", async () => {
+  it("shows follow-up guidance ahead of missing-material or draft prompts for sent tasks", async () => {
     mockedGetWorkspaceThread.mockResolvedValue(
       buildThread({
         status: "sent",
         primaryMaterialId: null,
+        canWriteFollowUp: true,
       }),
     );
 
     renderPage();
 
-    expect(await screen.findByText("查看发送结果")).toBeInTheDocument();
-    expect(screen.getByText("关注发送结果和导师回复。")).toBeInTheDocument();
+    expect(await screen.findByText("写跟进邮件")).toBeInTheDocument();
+    expect(screen.getByText("基于当前沟通记录起草下一封跟进邮件。")).toBeInTheDocument();
+    expect(screen.queryByText("选择分析材料")).not.toBeInTheDocument();
+  });
+
+  it("continues a batch-stopped task manually from the workspace action", async () => {
+    mockedGetWorkspaceThread.mockResolvedValue(
+      buildThread({
+        status: "canceled",
+        primaryMaterialId: null,
+        cancellationReason: "batch_stopped",
+        canContinueManually: true,
+        generatedContentHtml: "<p>旧草稿不应继续发送</p>",
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("作为单独联系继续")).toBeInTheDocument();
+    expect(screen.getByText("draft-empty")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "mock-send-now" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "mock-schedule-send" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "mock-continue-manually" }));
+
+    await waitFor(() => {
+      expect(mockedContinueManually).toHaveBeenCalledWith(301);
+    });
+  });
+
+  it("starts a follow-up draft from the workspace action", async () => {
+    mockedGetWorkspaceThread.mockResolvedValue(
+      buildThread({
+        status: "reply_detected",
+        primaryMaterialId: null,
+        canWriteFollowUp: true,
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("写跟进邮件")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "mock-start-follow-up" }));
+
+    await waitFor(() => {
+      expect(mockedStartFollowUp).toHaveBeenCalledWith(301);
+    });
+  });
+
+  it("shows follow-up guidance in the UI whenever can_write_follow_up is true, even if status is not sent or reply_detected", async () => {
+    mockedGetWorkspaceThread.mockResolvedValue(
+      buildThread({
+        status: "approved",
+        primaryMaterialId: null,
+        canWriteFollowUp: true,
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("写跟进邮件")).toBeInTheDocument();
+    expect(screen.getByText("基于当前沟通记录起草下一封跟进邮件。")).toBeInTheDocument();
+    expect(screen.queryByText("选择分析材料")).not.toBeInTheDocument();
+    expect(screen.queryByText("生成邮件草稿")).not.toBeInTheDocument();
+  });
+
+  it("prefers continue-manually guidance in the UI whenever can_continue_manually is true, without relying on canceled status", async () => {
+    mockedGetWorkspaceThread.mockResolvedValue(
+      buildThread({
+        status: "approved",
+        primaryMaterialId: null,
+        canContinueManually: true,
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("作为单独联系继续")).toBeInTheDocument();
+    expect(screen.getByText("从这条批量任务记录中拆出一条单独联系继续推进。")).toBeInTheDocument();
     expect(screen.queryByText("选择分析材料")).not.toBeInTheDocument();
   });
 

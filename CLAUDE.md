@@ -86,7 +86,9 @@ auto-email-agent/
 - **Structured output validation**: LLM JSON output must be validated before storage
 
 ### Task Status Workflow
-`discovered` → `skipped`/`matched` → `draft_generated` → `review_required` → `approved` → `scheduled` → `sent`/`send_failed` → `reply_detected`
+Current main flow: `discovered` → `matched` → `review_required` → `approved` → `scheduled` → `sent` → `reply_detected`
+
+`send_failed` is the failure branch during the sending stage. `canceled` is the explicit cancellation state, mainly used when batch sending is stopped.
 
 ## Important Constraints
 - Single-user, local-only deployment
