@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -21,6 +22,13 @@ class CrawlJobsApiTests(unittest.TestCase):
         os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{self.db_path.as_posix()}"
         os.environ["ENABLE_BACKGROUND_WORKERS"] = "0"
         self._run_alembic_upgrade()
+        self.getaddrinfo_patcher = patch(
+            "app.services.crawler_tools.socket.getaddrinfo",
+            return_value=[
+                (0, 0, 0, "", ("93.184.216.34", 443)),
+            ],
+        )
+        self.getaddrinfo_patcher.start()
 
         from app.core.config import get_settings
         from app.core.database import dispose_engine, get_engine, get_session_factory
@@ -45,6 +53,7 @@ class CrawlJobsApiTests(unittest.TestCase):
         get_settings.cache_clear()
         os.environ.pop("DATABASE_URL", None)
         os.environ.pop("ENABLE_BACKGROUND_WORKERS", None)
+        self.getaddrinfo_patcher.stop()
         self.temp_dir.cleanup()
 
     def test_create_crawl_job_rejects_non_http_url(self) -> None:
@@ -54,6 +63,19 @@ class CrawlJobsApiTests(unittest.TestCase):
                 "university": "示例大学",
                 "school": "计算机学院",
                 "start_url": "ftp://example.edu/faculty",
+                "llm_profile_id": None,
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_create_crawl_job_rejects_localhost_url(self) -> None:
+        response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "http://127.0.0.1/faculty",
                 "llm_profile_id": None,
             },
         )

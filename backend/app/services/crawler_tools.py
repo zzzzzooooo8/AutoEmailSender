@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+import ipaddress
+import socket
 from typing import Any, Literal
 from urllib.parse import urljoin, urlparse
 
@@ -17,6 +19,7 @@ from app.services.html_text import html_to_text
 
 MAX_TEXT_CHARS = 12000
 MAX_LINKS = 200
+UNSAFE_CRAWL_URL_MESSAGE = "URL 不允许指向本机、内网或不可解析地址"
 
 
 class PageSnapshot(BaseModel):
@@ -61,11 +64,78 @@ class CrawlToolContext:
 def is_allowed_crawl_url(start_url: str, candidate_url: str) -> bool:
     start = urlparse(start_url)
     candidate = urlparse(urljoin(start_url, candidate_url))
-    if candidate.scheme not in {"http", "https"}:
+    absolute_candidate_url = candidate.geturl()
+    if not is_safe_public_crawl_url(start_url):
         return False
-    if start.scheme not in {"http", "https"}:
+    if not is_safe_public_crawl_url(absolute_candidate_url):
         return False
     return (start.hostname or "").lower() == (candidate.hostname or "").lower()
+
+
+def is_safe_public_crawl_url(url: str) -> bool:
+    try:
+        validate_safe_public_crawl_url(url)
+    except ValueError:
+        return False
+    return True
+
+
+def validate_safe_public_crawl_url(url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError(UNSAFE_CRAWL_URL_MESSAGE)
+
+    host = parsed.hostname
+    if not host:
+        raise ValueError(UNSAFE_CRAWL_URL_MESSAGE)
+
+    normalized_host = host.rstrip(".").lower()
+    if normalized_host == "localhost" or normalized_host.endswith(".localhost"):
+        raise ValueError(UNSAFE_CRAWL_URL_MESSAGE)
+
+    try:
+        ip_address = ipaddress.ip_address(normalized_host)
+    except ValueError:
+        _validate_resolved_host_ips(normalized_host, parsed.port)
+        return
+
+    if _is_unsafe_ip_address(ip_address):
+        raise ValueError(UNSAFE_CRAWL_URL_MESSAGE)
+
+
+def _validate_resolved_host_ips(host: str, port: int | None) -> None:
+    try:
+        address_infos = socket.getaddrinfo(host, port or 443, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError(UNSAFE_CRAWL_URL_MESSAGE) from exc
+
+    if not address_infos:
+        raise ValueError(UNSAFE_CRAWL_URL_MESSAGE)
+
+    for address_info in address_infos:
+        sockaddr = address_info[4]
+        if not sockaddr:
+            raise ValueError(UNSAFE_CRAWL_URL_MESSAGE)
+        ip_text = str(sockaddr[0])
+        try:
+            ip_address = ipaddress.ip_address(ip_text)
+        except ValueError as exc:
+            raise ValueError(UNSAFE_CRAWL_URL_MESSAGE) from exc
+        if _is_unsafe_ip_address(ip_address):
+            raise ValueError(UNSAFE_CRAWL_URL_MESSAGE)
+
+
+def _is_unsafe_ip_address(ip_address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return any(
+        (
+            ip_address.is_private,
+            ip_address.is_loopback,
+            ip_address.is_link_local,
+            ip_address.is_multicast,
+            ip_address.is_unspecified,
+            ip_address.is_reserved,
+        )
+    )
 
 
 def normalize_candidate_payload(
@@ -101,6 +171,16 @@ def normalize_candidate_payload(
 
 
 async def crawl_page_with_http(ctx: CrawlToolContext, url: str) -> PageSnapshot:
+    absolute_url = urljoin(ctx.start_url, url)
+    if _has_unsafe_public_crawl_url(ctx.start_url, absolute_url):
+        snapshot = _failed_snapshot(
+            url=absolute_url,
+            fetch_method="http",
+            error_message=UNSAFE_CRAWL_URL_MESSAGE,
+        )
+        await record_page_snapshot(ctx, snapshot)
+        return snapshot
+
     if not is_allowed_crawl_url(ctx.start_url, url):
         snapshot = _failed_snapshot(
             url=url,
@@ -110,7 +190,6 @@ async def crawl_page_with_http(ctx: CrawlToolContext, url: str) -> PageSnapshot:
         await record_page_snapshot(ctx, snapshot)
         return snapshot
 
-    absolute_url = urljoin(ctx.start_url, url)
     try:
         async with httpx.AsyncClient(follow_redirects=True, timeout=20.0) as client:
             response = await client.get(
@@ -128,6 +207,15 @@ async def crawl_page_with_http(ctx: CrawlToolContext, url: str) -> PageSnapshot:
         return snapshot
 
     final_url = str(response.url)
+    if not is_safe_public_crawl_url(final_url):
+        snapshot = _failed_snapshot(
+            url=final_url,
+            fetch_method="http",
+            error_message=UNSAFE_CRAWL_URL_MESSAGE,
+        )
+        await record_page_snapshot(ctx, snapshot)
+        return snapshot
+
     if not is_allowed_crawl_url(ctx.start_url, final_url):
         snapshot = _final_url_rejected_snapshot(
             final_url=final_url,
@@ -145,6 +233,16 @@ async def crawl_page_with_http(ctx: CrawlToolContext, url: str) -> PageSnapshot:
 
 
 async def crawl_page_with_crawl4ai(ctx: CrawlToolContext, url: str) -> PageSnapshot:
+    absolute_url = urljoin(ctx.start_url, url)
+    if _has_unsafe_public_crawl_url(ctx.start_url, absolute_url):
+        snapshot = _failed_snapshot(
+            url=absolute_url,
+            fetch_method="crawl4ai",
+            error_message=UNSAFE_CRAWL_URL_MESSAGE,
+        )
+        await record_page_snapshot(ctx, snapshot)
+        return snapshot
+
     if not is_allowed_crawl_url(ctx.start_url, url):
         snapshot = _failed_snapshot(
             url=url,
@@ -159,7 +257,6 @@ async def crawl_page_with_crawl4ai(ctx: CrawlToolContext, url: str) -> PageSnaps
     except Exception:
         return await crawl_page_with_http(ctx, url)
 
-    absolute_url = urljoin(ctx.start_url, url)
     try:
         async with AsyncWebCrawler() as crawler:
             result = await crawler.arun(url=absolute_url)
@@ -177,6 +274,15 @@ async def crawl_page_with_crawl4ai(ctx: CrawlToolContext, url: str) -> PageSnaps
         return snapshot
 
     final_url = _extract_result_url(result) or absolute_url
+    if not is_safe_public_crawl_url(final_url):
+        snapshot = _failed_snapshot(
+            url=final_url,
+            fetch_method="crawl4ai",
+            error_message=UNSAFE_CRAWL_URL_MESSAGE,
+        )
+        await record_page_snapshot(ctx, snapshot)
+        return snapshot
+
     if not is_allowed_crawl_url(ctx.start_url, final_url):
         snapshot = _final_url_rejected_snapshot(
             final_url=final_url,
@@ -209,6 +315,16 @@ async def crawl_page_with_crawl4ai(ctx: CrawlToolContext, url: str) -> PageSnaps
 
 async def browser_investigate(ctx: CrawlToolContext, url: str, goal: str) -> PageSnapshot:
     _ = goal
+    absolute_url = urljoin(ctx.start_url, url)
+    if _has_unsafe_public_crawl_url(ctx.start_url, absolute_url):
+        snapshot = _failed_snapshot(
+            url=absolute_url,
+            fetch_method="browser_use",
+            error_message=UNSAFE_CRAWL_URL_MESSAGE,
+        )
+        await record_page_snapshot(ctx, snapshot)
+        return snapshot
+
     if not is_allowed_crawl_url(ctx.start_url, url):
         snapshot = _failed_snapshot(
             url=url,
@@ -219,7 +335,7 @@ async def browser_investigate(ctx: CrawlToolContext, url: str, goal: str) -> Pag
         return snapshot
 
     snapshot = _failed_snapshot(
-        url=urljoin(ctx.start_url, url),
+        url=absolute_url,
         fetch_method="browser_use",
         error_message="Browser Use 需要在任务 6 通过 LLMProfile 注入模型后启用",
     )
@@ -376,6 +492,10 @@ def _failed_snapshot(url: str, fetch_method: str, error_message: str) -> PageSna
         error_message=error_message,
         suspicious_empty=True,
     )
+
+
+def _has_unsafe_public_crawl_url(start_url: str, candidate_url: str) -> bool:
+    return not is_safe_public_crawl_url(start_url) or not is_safe_public_crawl_url(candidate_url)
 
 
 def _final_url_rejected_snapshot(final_url: str, fetch_method: str) -> PageSnapshot:

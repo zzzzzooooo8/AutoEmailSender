@@ -5,6 +5,11 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.services.crawler_tools import (
+    UNSAFE_CRAWL_URL_MESSAGE,
+    validate_safe_public_crawl_url,
+)
+
 
 CrawlJobStatusDTO = Literal["queued", "running", "needs_review", "completed", "failed", "canceled"]
 CrawlCandidateReviewStatusDTO = Literal["pending", "accepted", "rejected", "merged"]
@@ -35,6 +40,10 @@ class CrawlJobCreatePayload(BaseModel):
     def _validate_url(cls, value: str) -> str:
         if not value.startswith(("http://", "https://")):
             raise ValueError("教师列表页面 URL 必须以 http:// 或 https:// 开头")
+        try:
+            validate_safe_public_crawl_url(value)
+        except ValueError as exc:
+            raise ValueError(UNSAFE_CRAWL_URL_MESSAGE) from exc
         return value
 
 
