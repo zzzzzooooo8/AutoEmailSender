@@ -97,8 +97,6 @@ const baseProps = {
   onSubjectChange: vi.fn(),
   onContentChange: vi.fn(),
   onSelectedMaterialIdsChange: vi.fn(),
-  onScheduledAtChange: vi.fn(),
-  onSelectPrimaryMaterial: vi.fn(),
   onSendNow: vi.fn(),
   onScheduleSend: vi.fn(),
   onCancelSchedule: vi.fn(),
@@ -121,8 +119,6 @@ describe("WorkspaceComposerDock copy", () => {
         selectedMaterialIds={[]}
         scheduledAt=""
         acting={false}
-        primaryMaterialOptions={[material]}
-        canChangePrimaryMaterial={true}
         canChangeMode={true}
         canCalculateMatch={true}
         canGenerateDraft={true}
@@ -143,7 +139,7 @@ describe("WorkspaceComposerDock copy", () => {
     expect(screen.queryByRole("button", { name: "生成新草稿" })).not.toBeInTheDocument();
   });
 
-  it("keeps send actions enabled for an HTML-only draft", () => {
+  it("keeps send actions enabled for an HTML-only draft before choosing a schedule time", () => {
     render(
       <WorkspaceComposerDock
         {...baseProps}
@@ -152,10 +148,8 @@ describe("WorkspaceComposerDock copy", () => {
         content=""
         contentHtml="<p>老师您好</p>"
         selectedMaterialIds={[]}
-        scheduledAt="2026-04-22T18:30"
+        scheduledAt=""
         acting={false}
-        primaryMaterialOptions={[material]}
-        canChangePrimaryMaterial={true}
         canChangeMode={true}
         canCalculateMatch={true}
         canGenerateDraft={true}
@@ -183,8 +177,6 @@ describe("WorkspaceComposerDock copy", () => {
         selectedMaterialIds={[]}
         scheduledAt=""
         acting={false}
-        primaryMaterialOptions={[material]}
-        canChangePrimaryMaterial={true}
         canChangeMode={true}
         canCalculateMatch={true}
         canGenerateDraft={true}
@@ -215,8 +207,6 @@ describe("WorkspaceComposerDock copy", () => {
         selectedMaterialIds={[material.id]}
         scheduledAt="2026-04-22T18:30"
         acting={false}
-        primaryMaterialOptions={[material]}
-        canChangePrimaryMaterial={true}
         canChangeMode={true}
         canCalculateMatch={true}
         canGenerateDraft={true}
@@ -231,8 +221,19 @@ describe("WorkspaceComposerDock copy", () => {
 
     expect(screen.getByText("正文编辑")).toBeInTheDocument();
     expect(screen.getByText("发送前核对")).toBeInTheDocument();
-    expect(screen.getByText("生成与模式")).toBeInTheDocument();
+    expect(screen.getByText("选择写信方式，并生成下一版草稿。")).toBeInTheDocument();
+    expect(screen.queryByText("生成与模式")).not.toBeInTheDocument();
+    expect(screen.queryByText("生成辅助")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "AI 辅助写信" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "分析匹配度" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "生成草稿" })).toBeInTheDocument();
     expect(screen.getByText("发送动作")).toBeInTheDocument();
+    expect(screen.queryByText("发送设置")).not.toBeInTheDocument();
+    expect(screen.queryByText("默认材料")).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("定时发送")).not.toBeInTheDocument();
+    expect(screen.queryByText("继续写信")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "编辑草稿" })).not.toBeInTheDocument();
   });
 
   it("does not expose send actions for canceled tasks that should continue manually", () => {
@@ -253,8 +254,6 @@ describe("WorkspaceComposerDock copy", () => {
         selectedMaterialIds={[]}
         scheduledAt=""
         acting={false}
-        primaryMaterialOptions={[material]}
-        canChangePrimaryMaterial={false}
         canChangeMode={false}
         canCalculateMatch={false}
         canGenerateDraft={false}
@@ -291,8 +290,6 @@ describe("WorkspaceComposerDock copy", () => {
         selectedMaterialIds={[]}
         scheduledAt=""
         acting={false}
-        primaryMaterialOptions={[material]}
-        canChangePrimaryMaterial={false}
         canChangeMode={false}
         canCalculateMatch={false}
         canGenerateDraft={false}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { FolderOpen, Loader2, MailPlus, RefreshCcw, Search, Sparkles } from 'lucide-react';
 import { NativeSelectField } from '@/components/atoms/NativeSelectField';
+import { DashboardProfessorRow } from '@/components/molecules/DashboardProfessorRow';
 import { OnboardingChecklistCard } from '@/components/molecules/OnboardingChecklistCard';
 import { useNotification } from '@/context/NotificationContext';
 import { useSelectionContext } from '@/context/SelectionContext';
@@ -430,68 +431,17 @@ export const HomePage = () => {
           ) : (
             <div className="divide-y divide-stone-100">
               {filteredProfessors.map((professor) => (
-                <div key={professor.id} className="flex flex-col gap-4 px-6 py-5 md:flex-row md:items-start">
-                  <div className="flex items-start gap-4 md:w-[52%]">
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(professor.id)}
-                      onChange={() => toggleSelection(professor.id)}
-                      className="mt-1 h-4 w-4 rounded border-stone-300 text-primary focus:ring-primary"
-                    />
-                    <div>
-                      <div className="text-lg font-medium text-stone-900">{professor.name}</div>
-                      <div className="mt-1 text-sm text-stone-500">
-                        {[professor.title, professor.university, professor.school].filter(Boolean).join(' / ')}
-                      </div>
-                      <p className="mt-2 text-sm leading-6 text-stone-600">
-                        {professor.research_direction || '暂无研究方向描述'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="grid flex-1 gap-3 md:grid-cols-3">
-                    <div className="rounded-2xl bg-stone-50 px-4 py-3 text-sm">
-                      <div className="text-stone-500">匹配分数</div>
-                      <div className="mt-2 text-lg font-semibold text-stone-900">
-                        {professor.match_score === null ? '未计算' : `${professor.match_score}%`}
-                      </div>
-                    </div>
-                    <div className="rounded-2xl bg-stone-50 px-4 py-3 text-sm">
-                      <div className="text-stone-500">发送次数</div>
-                      <div className="mt-2 text-lg font-semibold text-stone-900">{professor.sent_count}</div>
-                    </div>
-                    <div className="rounded-2xl bg-stone-50 px-4 py-3 text-sm">
-                      <div className="text-stone-500">当前状态</div>
-                      <div className="mt-2 text-lg font-semibold text-stone-900">
-                        {getProfessorDashboardStatusLabel(professor.status)}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-3 md:justify-end">
-                    <button
-                      type="button"
-                      onClick={() => void handleGenerateOne(professor.id)}
-                      disabled={bulkScoring || scoringProfessorIds.has(professor.id)}
-                      className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {scoringProfessorIds.has(professor.id) ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Sparkles className="h-4 w-4" />
-                      )}
-                      只算匹配
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/workspace/${professor.id}`)}
-                      disabled={bulkScoring}
-                      className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      打开工作区
-                    </button>
-                  </div>
-                </div>
+                <DashboardProfessorRow
+                  key={professor.id}
+                  professor={professor}
+                  selected={selectedIds.has(professor.id)}
+                  bulkDisabled={bulkScoring}
+                  scoring={scoringProfessorIds.has(professor.id)}
+                  statusLabel={getProfessorDashboardStatusLabel(professor.status)}
+                  onToggleSelection={() => toggleSelection(professor.id)}
+                  onCalculateMatch={() => void handleGenerateOne(professor.id)}
+                  onOpenWorkspace={() => navigate(`/workspace/${professor.id}`)}
+                />
               ))}
             </div>
           )}

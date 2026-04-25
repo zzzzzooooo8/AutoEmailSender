@@ -67,7 +67,7 @@ def get_settings() -> Settings:
         default_mail_delivery_mode=os.getenv("DEFAULT_MAIL_DELIVERY_MODE", "dry_run"),
         draft_worker_interval_seconds=_get_int_env("DRAFT_WORKER_INTERVAL_SECONDS", 10),
         dispatcher_interval_seconds=_get_int_env("DISPATCHER_INTERVAL_SECONDS", 30),
-        imap_poll_interval_seconds=_get_int_env("IMAP_POLL_INTERVAL_SECONDS", 300),
+        imap_poll_interval_seconds=_get_int_env("IMAP_POLL_INTERVAL_SECONDS", 60),
         llm_request_timeout_seconds=_get_int_env("LLM_REQUEST_TIMEOUT_SECONDS", 90),
         smtp_send_timeout_seconds=_get_int_env("SMTP_SEND_TIMEOUT_SECONDS", 30),
         imap_lookback_hours=_get_int_env("IMAP_LOOKBACK_HOURS", 72),

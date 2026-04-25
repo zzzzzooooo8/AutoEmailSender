@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import mimetypes
 import smtplib
+import imaplib
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from email import policy
@@ -18,6 +20,26 @@ from typing import Any
 
 from app.core.config import get_settings
 from app.models import IdentityProfile, Professor
+
+
+IMAP_CLIENT_ID_NAME = "AutoEmailSender"
+IMAP_CLIENT_ID_VERSION = "3.0.0"
+IMAP_CLIENT_ID_VENDOR = "AutoEmailSender"
+REPLY_QUOTE_TEXT_MARKERS = (
+    "---- 回复的原邮件 ----",
+    "----- 回复的原邮件 -----",
+    "---- 原始邮件 ----",
+    "----- 原始邮件 -----",
+    "-----Original Message-----",
+    "-------- Original Message --------",
+)
+REPLY_QUOTE_HTML_PATTERNS = (
+    re.compile(r"<[^>]*>\s*-{2,}\s*(回复的原邮件|原始邮件)\s*-{2,}", re.IGNORECASE),
+    re.compile(r"-{2,}\s*(回复的原邮件|原始邮件)\s*-{2,}", re.IGNORECASE),
+    re.compile(r"<[^>]*>\s*-{2,}\s*Original Message\s*-{2,}", re.IGNORECASE),
+    re.compile(r"-{2,}\s*Original Message\s*-{2,}", re.IGNORECASE),
+    re.compile(r"<blockquote\b", re.IGNORECASE),
+)
 
 
 class MailRuntimeError(RuntimeError):
@@ -204,7 +226,8 @@ def _test_imap_connection_sync(identity: IdentityProfile) -> None:
     try:
         client = _open_imap_client(identity)
         client.login(identity.imap_username or "", identity.imap_password or "")
-        client.select("INBOX")
+        _send_imap_client_id(client, identity)
+        _select_inbox_or_raise(client)
     except OSError as exc:
         raise MailRuntimeError(f"IMAP 连接失败: {exc}") from exc
     finally:
@@ -237,7 +260,8 @@ def _fetch_recent_inbox_messages_sync(identity: IdentityProfile) -> list[Receive
     try:
         client = _open_imap_client(identity)
         client.login(identity.imap_username or "", identity.imap_password or "")
-        client.select("INBOX")
+        _send_imap_client_id(client, identity)
+        _select_inbox_or_raise(client)
 
         since_date = (datetime.now(UTC) - timedelta(hours=get_settings().imap_lookback_hours)).strftime(
             "%d-%b-%Y",
@@ -265,6 +289,58 @@ def _fetch_recent_inbox_messages_sync(identity: IdentityProfile) -> list[Receive
             except OSError:
                 pass
     return messages
+
+
+def _send_imap_client_id(client: IMAP4 | IMAP4_SSL, identity: IdentityProfile) -> None:
+    simple_command = getattr(client, "_simple_command", None)
+    untagged_response = getattr(client, "_untagged_response", None)
+    if not callable(simple_command) or not callable(untagged_response):
+        return
+
+    imaplib.Commands.setdefault("ID", ("AUTH", "SELECTED"))
+    args = (
+        "name",
+        IMAP_CLIENT_ID_NAME,
+        "contact",
+        identity.email_address,
+        "version",
+        IMAP_CLIENT_ID_VERSION,
+        "vendor",
+        IMAP_CLIENT_ID_VENDOR,
+    )
+    payload = '("' + '" "'.join(_escape_imap_id_value(item) for item in args) + '")'
+    try:
+        status, data = simple_command("ID", payload)
+        untagged_response(status, data, "ID")
+    except Exception:
+        return
+
+
+def _escape_imap_id_value(value: object) -> str:
+    return str(value).replace("\\", "\\\\").replace('"', r"\"")
+
+
+def _select_inbox_or_raise(client: IMAP4 | IMAP4_SSL) -> None:
+    status, data = client.select("INBOX")
+    if status == "OK":
+        return
+    detail = _format_imap_response(data)
+    raise MailRuntimeError(f"IMAP 选择收件箱失败: {detail}")
+
+
+def _format_imap_response(data: object) -> str:
+    if isinstance(data, (list, tuple)):
+        parts = data
+    else:
+        parts = [data]
+
+    text_parts: list[str] = []
+    for part in parts:
+        if isinstance(part, bytes):
+            text_parts.append(part.decode("utf-8", errors="replace"))
+        elif part is not None:
+            text_parts.append(str(part))
+    return "; ".join(text_parts) or "服务商未返回原因"
 
 
 def parse_received_email(raw_message: bytes) -> ReceivedEmail:
@@ -329,11 +405,41 @@ def extract_message_content(message: EmailMessage) -> tuple[str, str | None]:
         else:
             text_parts.append(str(payload))
 
-    text_content = "\n".join(part.strip() for part in text_parts if part.strip()).strip()
-    html_content = "\n".join(part.strip() for part in html_parts if part.strip()).strip() or None
+    text_content = strip_quoted_reply_text(
+        "\n".join(part.strip() for part in text_parts if part.strip()).strip(),
+    )
+    html_content = strip_quoted_reply_html(
+        "\n".join(part.strip() for part in html_parts if part.strip()).strip(),
+    ) or None
     if not text_content and html_content:
-        text_content = html_content
+        text_content = strip_quoted_reply_text(html_content)
     return text_content or "", html_content
+
+
+def strip_quoted_reply_text(content: str) -> str:
+    next_content = content.strip()
+    for marker in REPLY_QUOTE_TEXT_MARKERS:
+        marker_index = next_content.find(marker)
+        if marker_index >= 0:
+            next_content = next_content[:marker_index]
+            break
+    return next_content.strip()
+
+
+def strip_quoted_reply_html(content: str) -> str:
+    next_content = content.strip()
+    marker_index: int | None = None
+    for pattern in REPLY_QUOTE_HTML_PATTERNS:
+        match = pattern.search(next_content)
+        if match and (marker_index is None or match.start() < marker_index):
+            marker_index = match.start()
+    if marker_index is not None:
+        last_tag_start = next_content.rfind("<", 0, marker_index)
+        last_tag_end = next_content.rfind(">", 0, marker_index)
+        if last_tag_start > last_tag_end:
+            marker_index = last_tag_start
+        next_content = next_content[:marker_index]
+    return next_content.strip()
 
 
 def decode_mime_header(value: str | None) -> str | None:

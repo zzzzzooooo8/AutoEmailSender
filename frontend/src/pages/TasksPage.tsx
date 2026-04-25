@@ -140,7 +140,7 @@ export const TasksPage = () => {
   }
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-8">
+    <main className="mx-auto max-w-7xl px-6 py-8">
       <div className="rounded-3xl border border-stone-200 bg-[#fcfbf8] p-6 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>

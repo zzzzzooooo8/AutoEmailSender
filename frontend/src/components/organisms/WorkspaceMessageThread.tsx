@@ -1,11 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 import { formatApiDateTime } from '@/lib/dateTime';
+import {
+  hasRenderablePreviewContent,
+  sanitizeTemplateHtmlForPreview,
+} from '@/lib/htmlPreview';
 import type { WorkspaceMessageDTO } from '@/types';
 
 type WorkspaceMessageThreadProps = {
   messages: WorkspaceMessageDTO[];
+  monitoringLabel?: string;
+  lastCheckedAt?: Date | null;
+  refreshing?: boolean;
+  newReceivedCount?: number;
+  onRefresh?: () => void;
 };
 
 const previewStyle = {
@@ -30,6 +39,11 @@ const getMessageBubbleClassName = (direction: WorkspaceMessageDTO['direction']) 
 
 export const WorkspaceMessageThread = ({
   messages,
+  monitoringLabel = '正在监听回复',
+  lastCheckedAt = null,
+  refreshing = false,
+  newReceivedCount = 0,
+  onRefresh,
 }: WorkspaceMessageThreadProps) => {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [shouldStickToBottom, setShouldStickToBottom] = useState(true);
@@ -48,6 +62,8 @@ export const WorkspaceMessageThread = ({
     node.scrollTop = node.scrollHeight;
   }, [realMessages.length, shouldStickToBottom]);
 
+  const showJumpToReply = newReceivedCount > 0 && !shouldStickToBottom;
+
   return (
     <div
       ref={scrollRef}
@@ -59,18 +75,65 @@ export const WorkspaceMessageThread = ({
       }}
       className="flex-1 min-h-0 overflow-y-auto bg-[radial-gradient(circle_at_top,rgba(153,27,27,0.06),transparent_22%),linear-gradient(180deg,rgba(255,252,247,0.94),rgba(255,255,255,0.98))] px-4 py-4 sm:px-6"
     >
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
+      <div
+        className="mx-auto flex w-full max-w-6xl flex-col gap-4"
+        data-message-thread-inner
+      >
         <div className="sticky top-0 z-10 rounded-[24px] border border-stone-200/80 bg-white/92 px-4 py-3 shadow-sm backdrop-blur-xl">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <div className="text-sm font-semibold text-stone-900">通信记录</div>
-              <div className="mt-1 text-xs leading-5 text-stone-500">
-                显示已发送邮件和导师回复。
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="text-sm font-semibold text-stone-900">通信记录</div>
+                {newReceivedCount > 0 ? (
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+                    新回复
+                  </span>
+                ) : null}
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs leading-5 text-stone-500">
+                <span>{monitoringLabel}</span>
+                {lastCheckedAt ? (
+                  <span>
+                    上次检查{' '}
+                    {lastCheckedAt.toLocaleTimeString('zh-CN', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                ) : null}
               </div>
             </div>
-            <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1 text-xs font-medium text-stone-600">
-              {realMessages.length} 条
-            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              {showJumpToReply ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const node = scrollRef.current;
+                    if (node) {
+                      node.scrollTop = node.scrollHeight;
+                    }
+                    setShouldStickToBottom(true);
+                  }}
+                  className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100"
+                >
+                  跳到新回复
+                </button>
+              ) : null}
+              <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1 text-xs font-medium text-stone-600">
+                {realMessages.length} 条
+              </span>
+              {onRefresh ? (
+                <button
+                  type="button"
+                  aria-label="刷新通信记录"
+                  onClick={onRefresh}
+                  disabled={refreshing}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 transition hover:border-stone-300 hover:bg-stone-50 disabled:cursor-wait disabled:opacity-60"
+                >
+                  <RefreshCw className={clsx('h-4 w-4', refreshing && 'animate-spin')} />
+                </button>
+              ) : null}
+            </div>
           </div>
         </div>
 
@@ -88,6 +151,11 @@ export const WorkspaceMessageThread = ({
               expandedMessageId === message.id &&
               realMessages.some((item) => item.id === expandedMessageId);
             const preview = buildPreview(message.content);
+            const expandedHtml = message.content_html
+              ? sanitizeTemplateHtmlForPreview(message.content_html)
+              : '';
+            const canRenderExpandedHtml =
+              Boolean(expandedHtml) && hasRenderablePreviewContent(expandedHtml);
 
             return (
               <div
@@ -141,7 +209,18 @@ export const WorkspaceMessageThread = ({
                     </div>
                   ) : null}
 
-                  {isExpanded ? (
+                  {isExpanded && canRenderExpandedHtml ? (
+                    <div
+                      className={clsx(
+                        'mt-3 overflow-x-auto rounded-2xl px-4 py-4 text-sm leading-7 shadow-inner',
+                        isReceived
+                          ? 'border border-stone-100 bg-white text-stone-900 shadow-stone-200/60'
+                          : 'border border-white/20 bg-white/10 text-white/92 shadow-black/10 [&_*]:!text-inherit',
+                      )}
+                      data-message-html
+                      dangerouslySetInnerHTML={{ __html: expandedHtml }}
+                    />
+                  ) : isExpanded ? (
                     <div
                       className={clsx(
                         'mt-3 whitespace-pre-wrap break-words text-sm leading-7',

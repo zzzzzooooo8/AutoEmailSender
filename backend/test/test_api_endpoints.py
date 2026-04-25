@@ -473,6 +473,96 @@ class ApiEndpointTests(unittest.TestCase):
                 {"matched", "scheduled", "sent", "skipped", "send_failed"},
             )
 
+    def test_professor_dashboard_prioritizes_existing_contact_over_follow_up_draft(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "已联系后跟进导师",
+                "email": "contacted-follow-up@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of AI",
+                "department": "Computer Science",
+                "research_direction": "Large language models",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        ensure_response = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(ensure_response.status_code, 200, msg=ensure_response.text)
+        parent_task_id = ensure_response.json()["current_task"]["id"]
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            connection.execute(
+                """
+                UPDATE email_tasks
+                SET status = 'sent', sent_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (parent_task_id,),
+            )
+            connection.execute(
+                """
+                INSERT INTO email_logs (
+                    email_task_id, identity_id, llm_profile_id, professor_id,
+                    direction, subject, content, rfc_message_id
+                )
+                VALUES (?, ?, ?, ?, 'sent', 'hello', 'hello body', '<sent@example.edu>')
+                """,
+                (parent_task_id, identity_id, llm_id, professor_id),
+            )
+            connection.execute(
+                """
+                INSERT INTO email_tasks (
+                    source, parent_task_id, identity_id, llm_profile_id,
+                    professor_id, status, created_at, updated_at
+                )
+                VALUES ('manual', ?, ?, ?, ?, 'matched', datetime('now', '+1 minute'), datetime('now', '+1 minute'))
+                """,
+                (parent_task_id, identity_id, llm_id, professor_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        response = self.client.get(
+            "/api/professors",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        professor = next(item for item in response.json() if item["id"] == professor_id)
+        self.assertEqual(professor["status"], "contacted")
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            connection.execute(
+                "UPDATE email_tasks SET status = 'reply_detected', is_replied = 1 WHERE id = ?",
+                (parent_task_id,),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        replied_response = self.client.get(
+            "/api/professors",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+
+        self.assertEqual(replied_response.status_code, 200, msg=replied_response.text)
+        replied_professor = next(item for item in replied_response.json() if item["id"] == professor_id)
+        self.assertEqual(replied_professor["status"], "replied")
+
     def test_professor_template_download_and_import_file_upserts_existing_records(self) -> None:
         csv_template = self.client.get("/api/professors/template", params={"format": "csv"})
         xlsx_template = self.client.get("/api/professors/template", params={"format": "xlsx"})

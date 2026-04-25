@@ -24,7 +24,7 @@ npm run dev
 | `DATABASE_URL` | SQLite 本地文件 | 数据库位置 |
 | `DRAFT_WORKER_INTERVAL_SECONDS` | `10` | 兼容保留，当前未启用 |
 | `DISPATCHER_INTERVAL_SECONDS` | `30` | 发送 dispatcher 周期 |
-| `IMAP_POLL_INTERVAL_SECONDS` | `300` | 回信检测周期 |
+| `IMAP_POLL_INTERVAL_SECONDS` | `60` | 回信检测周期 |
 | `LLM_REQUEST_TIMEOUT_SECONDS` | `90` | LLM 请求超时 |
 | `SMTP_SEND_TIMEOUT_SECONDS` | `30` | SMTP 超时 |
 | `IMAP_LOOKBACK_HOURS` | `72` | IMAP 回溯窗口 |

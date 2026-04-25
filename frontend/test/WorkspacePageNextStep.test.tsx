@@ -1,9 +1,11 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkspacePage } from "@/pages/WorkspacePage";
 import type {
   IdentityMaterialDTO,
+  OutreachGenerationMode,
+  WorkspaceMessageDTO,
   WorkspaceTaskStatus,
   WorkspaceThreadDTO,
 } from "@/types";
@@ -21,6 +23,7 @@ const mockedConfirm = vi.hoisted(() => vi.fn());
 const mockedNotificationApi = vi.hoisted(() => ({
   notifyError: vi.fn(),
   notifyFormErrors: vi.fn(),
+  notifySuccess: vi.fn(),
 }));
 
 vi.mock("@/context/SelectionContext", () => ({
@@ -56,7 +59,24 @@ vi.mock("@/lib/useConfirmDialog", () => ({
 }));
 
 vi.mock("@/components/organisms/WorkspaceMessageThread", () => ({
-  WorkspaceMessageThread: () => <div>mock-message-thread</div>,
+  WorkspaceMessageThread: (props: {
+    monitoringLabel?: string;
+    lastCheckedAt?: Date | null;
+    refreshing?: boolean;
+    newReceivedCount?: number;
+    onRefresh?: () => void;
+  }) => (
+    <div>
+      <div>mock-message-thread</div>
+      <div>{props.monitoringLabel}</div>
+      <div>{props.lastCheckedAt ? "checked" : "not-checked"}</div>
+      <div>{props.refreshing ? "refreshing-thread" : "idle-thread"}</div>
+      <div>{`new-replies:${props.newReceivedCount ?? 0}`}</div>
+      <button type="button" onClick={props.onRefresh}>
+        mock-refresh-thread
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock("@/components/organisms/WorkspaceSidebar", () => ({
@@ -132,6 +152,8 @@ const buildThread = ({
   cancellationReason = null,
   canContinueManually = false,
   canWriteFollowUp = false,
+  outreachGenerationMode = "llm",
+  messages = [],
 }: {
   status?: WorkspaceTaskStatus;
   primaryMaterialId?: number | null;
@@ -141,6 +163,8 @@ const buildThread = ({
   cancellationReason?: string | null;
   canContinueManually?: boolean;
   canWriteFollowUp?: boolean;
+  outreachGenerationMode?: OutreachGenerationMode;
+  messages?: WorkspaceMessageDTO[];
 } = {}): WorkspaceThreadDTO => ({
   professor: {
     id: 101,
@@ -174,7 +198,7 @@ const buildThread = ({
     cancellation_reason: cancellationReason,
     can_continue_manually: canContinueManually,
     can_write_follow_up: canWriteFollowUp,
-    outreach_generation_mode: "llm",
+    outreach_generation_mode: outreachGenerationMode,
     outreach_template_subject: "测试主题",
     outreach_template_body_text: "测试正文",
     outreach_template_body_html: null,
@@ -207,7 +231,25 @@ const buildThread = ({
     last_draft_completion_tokens: null,
     last_draft_total_tokens: null,
   },
-  messages: [],
+  messages,
+});
+
+const buildWorkspaceMessage = (
+  overrides: Partial<WorkspaceMessageDTO> = {},
+): WorkspaceMessageDTO => ({
+  id: 1,
+  direction: "sent",
+  subject: "测试主题",
+  content: "老师您好",
+  content_html: "<p>老师您好</p>",
+  rfc_message_id: null,
+  failure_summary: null,
+  reply_headers: null,
+  prompt_tokens: null,
+  completion_tokens: null,
+  total_tokens: null,
+  created_at: "2026-04-22T10:00:00Z",
+  ...overrides,
 });
 
 const renderPage = () =>
@@ -220,6 +262,10 @@ const renderPage = () =>
   );
 
 describe("WorkspacePage next-step", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   beforeEach(() => {
     mockedWorkspaceComposerDock.mockReset();
     mockedGetWorkspaceThread.mockReset();
@@ -230,6 +276,9 @@ describe("WorkspacePage next-step", () => {
     mockedGenerateDraft.mockReset();
     mockedStartFollowUp.mockReset();
     mockedConfirm.mockReset();
+    mockedNotificationApi.notifyError.mockReset();
+    mockedNotificationApi.notifyFormErrors.mockReset();
+    mockedNotificationApi.notifySuccess.mockReset();
     mockedConfirm.mockResolvedValue(true);
     mockedApproveAndSend.mockImplementation(async () =>
       buildThread({
@@ -268,6 +317,79 @@ describe("WorkspacePage next-step", () => {
     });
   });
 
+  it("refreshes the current workspace once a minute without replacing the thread with a loading screen", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    mockedGetWorkspaceThread.mockResolvedValue(buildThread());
+
+    renderPage();
+
+    expect(await screen.findByText("mock-message-thread")).toBeInTheDocument();
+    expect(screen.getByText("idle-thread")).toBeInTheDocument();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    await waitFor(() => {
+      expect(mockedGetWorkspaceThread).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.queryByText("正在打开老师档案...")).not.toBeInTheDocument();
+
+    vi.useRealTimers();
+  });
+
+  it("notifies when a background refresh detects a new teacher reply", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    mockedGetWorkspaceThread
+      .mockResolvedValueOnce(buildThread())
+      .mockResolvedValueOnce(
+        buildThread({
+          status: "reply_detected",
+          messages: [
+            buildWorkspaceMessage({
+              id: 2,
+              direction: "received",
+              subject: "Re: 测试主题",
+              content: "欢迎继续交流",
+              content_html: "<p>欢迎继续交流</p>",
+            }),
+          ],
+        }),
+      );
+
+    renderPage();
+
+    expect(await screen.findByText("mock-message-thread")).toBeInTheDocument();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    await waitFor(() => {
+      expect(mockedNotificationApi.notifySuccess).toHaveBeenCalledWith(
+        "收到老师回复",
+        "王教授回复了：Re: 测试主题",
+      );
+      expect(screen.getByText("new-replies:1")).toBeInTheDocument();
+    });
+
+    vi.useRealTimers();
+  });
+
+  it("refreshes immediately when returning to a visible workspace tab", async () => {
+    mockedGetWorkspaceThread.mockResolvedValue(buildThread());
+
+    renderPage();
+
+    expect(await screen.findByText("mock-message-thread")).toBeInTheDocument();
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    await waitFor(() => {
+      expect(mockedGetWorkspaceThread).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it("treats an HTML-only draft as an existing draft instead of prompting to generate one", async () => {
     mockedGetWorkspaceThread.mockResolvedValue(
       buildThread({
@@ -281,6 +403,52 @@ describe("WorkspacePage next-step", () => {
     expect(screen.getByText("检查主题、正文和附件后发送。")).toBeInTheDocument();
     expect(screen.getByText("draft-ready")).toBeInTheDocument();
     expect(screen.queryByText("生成邮件草稿")).not.toBeInTheDocument();
+  });
+
+  it("shows sent relationship status when a follow-up draft is the current task", async () => {
+    mockedGetWorkspaceThread.mockResolvedValue(
+      buildThread({
+        status: "matched",
+        messages: [
+          buildWorkspaceMessage({
+            id: 10,
+            direction: "sent",
+            subject: "已发送主题",
+          }),
+        ],
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("已发送")).toBeInTheDocument();
+    expect(screen.queryByText("已算匹配")).not.toBeInTheDocument();
+  });
+
+  it("shows replied relationship status ahead of the current follow-up draft state", async () => {
+    mockedGetWorkspaceThread.mockResolvedValue(
+      buildThread({
+        status: "matched",
+        messages: [
+          buildWorkspaceMessage({
+            id: 10,
+            direction: "sent",
+            subject: "已发送主题",
+          }),
+          buildWorkspaceMessage({
+            id: 11,
+            direction: "received",
+            subject: "回复：已发送主题",
+            content: "欢迎报考",
+          }),
+        ],
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("已回复")).toBeInTheDocument();
+    expect(screen.queryByText("已算匹配")).not.toBeInTheDocument();
   });
 
   it("shows readable draft content in the workspace for an HTML-only draft", async () => {
@@ -321,6 +489,22 @@ describe("WorkspacePage next-step", () => {
     expect(await screen.findByText("draft-subject:测试主题")).toBeInTheDocument();
     expect(screen.getByText("draft-content:测试正文")).toBeInTheDocument();
     expect(screen.getByText("draft-empty")).toBeInTheDocument();
+  });
+
+  it("treats a template-mode configured template as sendable before generating a draft", async () => {
+    mockedGetWorkspaceThread.mockResolvedValue(
+      buildThread({
+        outreachGenerationMode: "template",
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("draft-subject:测试主题")).toBeInTheDocument();
+    expect(screen.getByText("draft-content:测试正文")).toBeInTheDocument();
+    expect(screen.getByText("draft-ready")).toBeInTheDocument();
+    expect(screen.getByText("检查后发送")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "mock-send-now" })).toBeInTheDocument();
   });
 
   it("shows the generated draft in the composer after clicking generate", async () => {
@@ -485,7 +669,7 @@ describe("WorkspacePage next-step", () => {
     expect(payload.body_text).toContain("老师您好");
   });
 
-  it("fills a non-empty body_text when scheduling an HTML-only draft", async () => {
+  it("asks for the scheduled send time after clicking schedule and uses it in the payload", async () => {
     mockedGetWorkspaceThread.mockResolvedValue(
       buildThread({
         generatedContentHtml: "<p>老师您好</p><p>期待和您进一步交流。</p>",
@@ -498,12 +682,20 @@ describe("WorkspacePage next-step", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "mock-schedule-send" }));
 
+    expect(await screen.findByText("选择定时发送时间")).toBeInTheDocument();
+    expect(mockedApproveAndSchedule).not.toHaveBeenCalled();
+    expect(mockedConfirm).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "确认定时发送这封真实邮件？",
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText("发送时间"), {
+      target: { value: "2026-04-22T18:30" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "确认定时" }));
+
     await waitFor(() => {
-      expect(mockedConfirm).toHaveBeenCalledWith(
-        expect.objectContaining({
-          title: "确认定时发送这封真实邮件？",
-        }),
-      );
       expect(mockedApproveAndSchedule).toHaveBeenCalledTimes(1);
     });
 

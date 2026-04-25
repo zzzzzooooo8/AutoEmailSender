@@ -157,7 +157,7 @@ export const EmailTemplateEditor = ({
     editorProps: {
       attributes: {
         class:
-          "email-editor-content min-h-[320px] rounded-[28px] border border-stone-200 bg-white px-4 py-4 text-sm leading-7 text-stone-700 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15",
+          "email-editor-content min-h-[320px] max-h-[520px] overflow-y-auto overscroll-contain rounded-[28px] border border-stone-200 bg-white px-4 py-4 text-sm leading-7 text-stone-700 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15",
         role: "textbox",
         "aria-label": label,
       },

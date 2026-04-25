@@ -54,7 +54,7 @@ async def list_professors(
         return []
 
     professor_ids = [professor.id for professor in professors]
-    latest_task_by_professor: dict[int, EmailTask] = {}
+    tasks_by_professor: dict[int, list[EmailTask]] = defaultdict(list)
     sent_count_by_professor: dict[int, int] = defaultdict(int)
 
     if identity_id is not None and llm_profile_id is not None:
@@ -68,7 +68,7 @@ async def list_professors(
             .order_by(EmailTask.created_at.desc()),
         )
         for task in task_result.scalars():
-            latest_task_by_professor.setdefault(task.professor_id, task)
+            tasks_by_professor[task.professor_id].append(task)
 
         log_result = await session.execute(
             select(EmailLog)
@@ -81,6 +81,12 @@ async def list_professors(
         )
         for log in log_result.scalars():
             sent_count_by_professor[log.professor_id] += 1
+
+    latest_task_by_professor = {
+        professor_id: tasks[0]
+        for professor_id, tasks in tasks_by_professor.items()
+        if tasks
+    }
 
     return [
         ProfessorDashboardItemRead(
@@ -97,7 +103,7 @@ async def list_professors(
             if professor.id in latest_task_by_professor
             else None,
             sent_count=sent_count_by_professor.get(professor.id, 0),
-            status=_map_dashboard_status(latest_task_by_professor.get(professor.id)),
+            status=_map_dashboard_status(tasks_by_professor.get(professor.id, [])),
         )
         for professor in professors
     ]
@@ -418,21 +424,28 @@ def _serialize_management_professor(professor: Professor) -> ProfessorManagement
     )
 
 
-def _map_dashboard_status(task: EmailTask | None) -> str:
-    if task is None:
+def _map_dashboard_status(tasks: list[EmailTask]) -> str:
+    if not tasks:
         return "not_contacted"
-    if task.is_replied or task.status == EmailTaskStatus.REPLY_DETECTED.value:
+    if any(
+        task.is_replied or task.status == EmailTaskStatus.REPLY_DETECTED.value
+        for task in tasks
+    ):
         return "replied"
-    if task.status in {
-        EmailTaskStatus.APPROVED.value,
-        EmailTaskStatus.SCHEDULED.value,
-    }:
-        return "ready_to_send"
-    if task.status == EmailTaskStatus.SENT.value:
-        return "contacted"
-    if task.status in {
+
+    latest_task = tasks[0]
+    if latest_task.status in {
         EmailTaskStatus.SEND_FAILED.value,
         EmailTaskStatus.CANCELED.value,
     }:
         return "needs_attention"
+
+    if any(task.status == EmailTaskStatus.SENT.value or task.sent_at for task in tasks):
+        return "contacted"
+
+    if latest_task.status in {
+        EmailTaskStatus.APPROVED.value,
+        EmailTaskStatus.SCHEDULED.value,
+    }:
+        return "ready_to_send"
     return "preparing"

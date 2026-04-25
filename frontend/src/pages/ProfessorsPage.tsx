@@ -16,17 +16,15 @@ import {
   Download,
   FileSpreadsheet,
   Loader2,
-  PencilLine,
   Plus,
   RefreshCcw,
-  RotateCcw,
   Search,
   Upload,
   Users,
 } from "lucide-react";
+import { ManagementProfessorRow } from "@/components/molecules/ManagementProfessorRow";
 import { useNotification } from "@/context/NotificationContext";
 import { useConfirmDialog } from "@/lib/useConfirmDialog";
-import { formatApiDateTime } from "@/lib/dateTime";
 import {
   archiveProfessor,
   bulkArchiveProfessors,
@@ -61,7 +59,7 @@ type ProfessorFormState = {
 
 const PROFESSORS_PER_PAGE = 20;
 const managementTableColumns =
-  "lg:grid-cols-[2rem_minmax(0,1.05fr)_minmax(0,1fr)_minmax(0,1.1fr)_minmax(0,1.45fr)_minmax(0,0.9fr)_220px]";
+  "lg:grid-cols-[2.75rem_minmax(0,1.15fr)_minmax(0,1.08fr)_minmax(0,1.12fr)_minmax(0,1.5fr)_minmax(0,0.82fr)_minmax(12rem,0.92fr)]";
 
 const archiveFilterLabels: Record<ArchiveFilter, string> = {
   active: "正常",
@@ -709,18 +707,19 @@ export const ProfessorsPage = () => {
         </div>
 
         <div
+          data-testid="professor-table-header"
           className={clsx(
             "hidden gap-4 border-b border-stone-100 px-6 py-4 text-xs font-medium uppercase tracking-[0.16em] text-stone-400 lg:grid",
             managementTableColumns,
           )}
         >
-          <div>选择</div>
-          <div>导师</div>
-          <div>邮箱</div>
-          <div>学校 / 学院</div>
-          <div>研究方向</div>
-          <div>更新时间</div>
-          <div className="text-right">操作</div>
+          <div className="flex justify-center text-center">选择</div>
+          <div className="flex justify-center text-center">导师</div>
+          <div className="flex justify-center text-center">邮箱</div>
+          <div className="flex justify-center text-center">学校 / 学院</div>
+          <div className="flex justify-center text-center">研究方向</div>
+          <div className="flex justify-center text-center">更新时间</div>
+          <div className="flex justify-center text-center">操作</div>
         </div>
 
         {loading ? (
@@ -767,117 +766,28 @@ export const ProfessorsPage = () => {
             {paginatedProfessors.map((professor) => {
               const selectable = !professor.archived_at;
               const checked = selectedIds.has(professor.id);
-              const schoolAndCollege = [professor.university, professor.school]
-                .filter(Boolean)
-                .join(" / ");
               return (
-                <article
+                <ManagementProfessorRow
                   key={professor.id}
-                  className={clsx(
-                    "px-6 py-5 transition",
-                    professor.archived_at ? "bg-stone-50/65" : "bg-white",
-                  )}
-                >
-                  <div
-                    className={clsx(
-                      "grid gap-4 lg:items-start",
-                      managementTableColumns,
-                    )}
-                  >
-                    <div className="flex items-start pt-1">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={!selectable}
-                        onChange={() => {
-                          setSelectedIds((previous) => {
-                            const next = new Set(previous);
-                            if (next.has(professor.id)) {
-                              next.delete(professor.id);
-                            } else {
-                              next.add(professor.id);
-                            }
-                            return next;
-                          });
-                        }}
-                        className="mt-1 h-4 w-4 rounded border-stone-300 text-primary focus:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
-                      />
-                    </div>
-
-                    <div className="flex min-w-0 items-start gap-3">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <div className="truncate text-base font-semibold text-stone-900">
-                            {professor.name}
-                          </div>
-                          {professor.archived_at ? (
-                            <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700">
-                              已删除
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="mt-2 text-sm text-stone-500">
-                          {professor.title || "未填写职称"}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="min-w-0 text-sm text-stone-700">
-                      <div className="break-all">
-                        {professor.email || "未填写邮箱"}
-                      </div>
-                    </div>
-
-                    <div className="min-w-0 text-sm text-stone-600">
-                      <div className="break-words">
-                        {schoolAndCollege || "未填写学校 / 学院"}
-                      </div>
-                    </div>
-
-                    <div className="min-w-0 text-sm leading-6 text-stone-600">
-                      {professor.research_direction || "未填写研究方向"}
-                    </div>
-
-                    <div className="min-w-0 text-sm text-stone-500">
-                      <div>{formatApiDateTime(professor.updated_at)}</div>
-                      {professor.archived_at ? (
-                        <div className="mt-2 text-xs text-amber-700">
-                          删除于 {formatApiDateTime(professor.archived_at)}
-                        </div>
-                      ) : null}
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-                      <button
-                        type="button"
-                        onClick={() => openEditModal(professor)}
-                        className="ui-btn-secondary px-3 py-2"
-                      >
-                        <PencilLine className="h-4 w-4" />
-                        编辑
-                      </button>
-                      {professor.archived_at ? (
-                        <button
-                          type="button"
-                          onClick={() => void handleRestoreProfessor(professor)}
-                          className="ui-btn-secondary px-3 py-2"
-                        >
-                          <RotateCcw className="h-4 w-4" />
-                          恢复
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => void handleArchiveProfessor(professor)}
-                          className="ui-btn-danger px-3 py-2"
-                        >
-                          <Archive className="h-4 w-4" />
-                          移入回收站
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </article>
+                  professor={professor}
+                  checked={checked}
+                  selectable={selectable}
+                  tableColumns={managementTableColumns}
+                  onToggleSelection={() => {
+                    setSelectedIds((previous) => {
+                      const next = new Set(previous);
+                      if (next.has(professor.id)) {
+                        next.delete(professor.id);
+                      } else {
+                        next.add(professor.id);
+                      }
+                      return next;
+                    });
+                  }}
+                  onEdit={() => openEditModal(professor)}
+                  onArchive={() => void handleArchiveProfessor(professor)}
+                  onRestore={() => void handleRestoreProfessor(professor)}
+                />
               );
             })}
           </div>

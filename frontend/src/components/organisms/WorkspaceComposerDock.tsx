@@ -20,7 +20,6 @@ type RichEmailValue = { html: string; text: string };
 import { getTaskModeCopy } from '@/features/create-task/client/taskCopy';
 import {
   MATERIAL_TYPE_LABELS,
-  type IdentityMaterialDTO,
   type OutreachGenerationMode,
   type WorkspaceTaskSummaryDTO,
   type WorkspaceThreadDTO,
@@ -39,8 +38,6 @@ type WorkspaceComposerDockProps = {
   selectedMaterialIds: number[];
   scheduledAt: string;
   acting: boolean;
-  primaryMaterialOptions: IdentityMaterialDTO[];
-  canChangePrimaryMaterial: boolean;
   canChangeMode: boolean;
   canCalculateMatch: boolean;
   canGenerateDraft: boolean;
@@ -52,8 +49,6 @@ type WorkspaceComposerDockProps = {
   onSubjectChange: (value: string) => void;
   onContentChange: (value: RichEmailValue) => void;
   onSelectedMaterialIdsChange: (ids: number[]) => void;
-  onScheduledAtChange: (value: string) => void;
-  onSelectPrimaryMaterial: (materialId: number) => void;
   onSendNow: () => void;
   onScheduleSend: () => void;
   onCancelSchedule: () => void;
@@ -164,8 +159,6 @@ export const WorkspaceComposerDock = ({
   selectedMaterialIds,
   scheduledAt,
   acting,
-  primaryMaterialOptions,
-  canChangePrimaryMaterial,
   canChangeMode,
   canCalculateMatch,
   canGenerateDraft,
@@ -177,8 +170,6 @@ export const WorkspaceComposerDock = ({
   onSubjectChange,
   onContentChange,
   onSelectedMaterialIdsChange,
-  onScheduledAtChange,
-  onSelectPrimaryMaterial,
   onSendNow,
   onScheduleSend,
   onCancelSchedule,
@@ -290,38 +281,32 @@ export const WorkspaceComposerDock = ({
 
                 <ComposerSection
                   icon={<Bot className="h-4 w-4" />}
-                  title="生成与模式"
-                  description={limitationHint ?? '选择写信方式。'}
+                  title="生成草稿"
+                  description={limitationHint ?? '选择写信方式，并生成下一版草稿。'}
                 >
-                  <div className="grid grid-cols-2 gap-2">
-                    {MODE_OPTIONS.map((option) => {
-                      const active = currentTaskMode === option.value;
-                      return (
-                        <button
-                          key={option.value}
-                          type="button"
-                          disabled={acting || !canChangeMode}
-                          onClick={() => onChangeMode(option.value)}
-                          className={clsx(
-                            'rounded-2xl border px-3 py-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60',
-                            active
-                              ? 'border-primary bg-primary text-white'
-                              : 'border-stone-200 bg-white text-stone-700 hover:border-primary/30 hover:bg-primary/5',
-                          )}
-                        >
-                          {option.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </ComposerSection>
-
-                <ComposerSection
-                  icon={<RefreshCcw className="h-4 w-4" />}
-                  title="生成辅助"
-                  description="用于匹配分析和草稿生成。"
-                >
-                  <div className="flex flex-wrap gap-2">
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-2">
+                      {MODE_OPTIONS.map((option) => {
+                        const active = currentTaskMode === option.value;
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            disabled={acting || !canChangeMode}
+                            onClick={() => onChangeMode(option.value)}
+                            className={clsx(
+                              'rounded-2xl border px-3 py-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60',
+                              active
+                                ? 'border-primary bg-primary text-white'
+                                : 'border-stone-200 bg-white text-stone-700 hover:border-primary/30 hover:bg-primary/5',
+                            )}
+                          >
+                            {option.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="flex flex-wrap gap-2 border-t border-stone-100 pt-3">
                     <button
                       type="button"
                       disabled={acting || !canCalculateMatch}
@@ -340,57 +325,6 @@ export const WorkspaceComposerDock = ({
                       <RefreshCcw className="h-4 w-4" />
                       生成草稿
                     </button>
-                  </div>
-                  {limitationHint ? (
-                    <div className="mt-3 text-xs leading-5 text-stone-500">
-                      {limitationHint}
-                    </div>
-                  ) : null}
-                </ComposerSection>
-
-                <ComposerSection
-                  icon={<CalendarClock className="h-4 w-4" />}
-                  title="发送设置"
-                >
-                  <div className="space-y-3">
-                    <label className="block">
-                      <div className="mb-2 text-xs font-medium uppercase tracking-[0.12em] text-stone-400">
-                        默认材料
-                      </div>
-                      <select
-                        value={currentTask.primary_material_id ?? ''}
-                        disabled={acting || !canChangePrimaryMaterial || primaryMaterialOptions.length === 0}
-                        onChange={(event) => {
-                          const nextValue = Number(event.target.value);
-                          if (Number.isFinite(nextValue)) {
-                            onSelectPrimaryMaterial(nextValue);
-                          }
-                        }}
-                        className="form-input"
-                      >
-                        <option value="">未选择</option>
-                        {primaryMaterialOptions.map((material) => (
-                          <option key={material.id} value={material.id}>
-                            {material.display_name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label className="block">
-                      <div className="mb-2 text-xs font-medium uppercase tracking-[0.12em] text-stone-400">
-                        定时发送
-                      </div>
-                      <input
-                        type="datetime-local"
-                        value={scheduledAt}
-                        onChange={(event) => onScheduledAtChange(event.target.value)}
-                        className="form-input"
-                      />
-                    </label>
-
-                    <div className="rounded-2xl border border-dashed border-stone-200 bg-white px-3 py-3 text-xs leading-6 text-stone-500">
-                      当前计划：{scheduledSummary}
                     </div>
                   </div>
                 </ComposerSection>
@@ -496,7 +430,7 @@ export const WorkspaceComposerDock = ({
                         <button
                           type="button"
                           onClick={onScheduleSend}
-                          disabled={acting || !draftReady || !scheduledAt}
+                          disabled={acting || !draftReady}
                           className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           <CalendarClock className="h-4 w-4" />
@@ -522,6 +456,7 @@ export const WorkspaceComposerDock = ({
           </div>
         ) : null}
 
+        {!composerExpanded ? (
         <div className="rounded-[28px] border border-stone-200 bg-white/94 px-4 py-4 shadow-[0_18px_40px_-34px_rgba(41,37,36,0.28)]">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">
@@ -612,6 +547,7 @@ export const WorkspaceComposerDock = ({
             <div className="mt-3 text-xs leading-5 text-stone-500">{limitationHint}</div>
           ) : null}
         </div>
+        ) : null}
       </div>
     </div>
   );

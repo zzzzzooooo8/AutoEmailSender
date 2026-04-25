@@ -49,7 +49,7 @@ describe("professor dashboard status helper", () => {
   it("exposes relationship status labels in homepage order", () => {
     expect(PROFESSOR_DASHBOARD_STATUS_LABELS).toEqual({
       not_contacted: "未开始",
-      preparing: "准备中",
+      preparing: "待写信",
       ready_to_send: "待发送",
       contacted: "已联系",
       replied: "已回复",
@@ -57,7 +57,7 @@ describe("professor dashboard status helper", () => {
     });
     expect(PROFESSOR_DASHBOARD_STATUS_OPTIONS).toEqual([
       ["not_contacted", "未开始"],
-      ["preparing", "准备中"],
+      ["preparing", "待写信"],
       ["ready_to_send", "待发送"],
       ["contacted", "已联系"],
       ["replied", "已回复"],

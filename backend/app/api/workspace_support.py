@@ -26,6 +26,7 @@ from app.schemas.workspace import (
     WorkspaceThreadRead,
 )
 from app.services import llm_runtime
+from app.services.mail_runtime import strip_quoted_reply_html, strip_quoted_reply_text
 from app.services.outreach_templates import get_identity_sender_name, resolve_outreach_template_config
 
 
@@ -296,12 +297,17 @@ def _extract_usage(provider_payload: dict[str, object] | None) -> dict[str, int 
 
 def _serialize_workspace_message(log: EmailLog) -> WorkspaceMessageRead:
     usage = _extract_usage(log.provider_payload)
+    is_received = log.direction == "received"
     return WorkspaceMessageRead(
         id=log.id,
         direction=log.direction,
         subject=log.subject,
-        content=log.content,
-        content_html=log.content_html,
+        content=strip_quoted_reply_text(log.content) if is_received else log.content,
+        content_html=(
+            strip_quoted_reply_html(log.content_html)
+            if is_received and log.content_html
+            else log.content_html
+        ),
         rfc_message_id=log.rfc_message_id,
         failure_summary=log.failure_summary,
         reply_headers=log.reply_headers,

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, CalendarClock, Loader2, X } from 'lucide-react';
 import { WorkspaceComposerDock } from '@/components/organisms/WorkspaceComposerDock';
 import { WorkspaceMessageThread } from '@/components/organisms/WorkspaceMessageThread';
 import { WorkspaceSidebar } from '@/components/organisms/WorkspaceSidebar';
@@ -17,7 +17,6 @@ import {
   generateDraft,
   startFollowUp,
   updateTaskOutreachConfig,
-  updateTaskPrimaryMaterial,
 } from '@/lib/api/emailTasksApi';
 import { ensureWorkspaceTask, getWorkspaceThread } from '@/lib/api/workspacesApi';
 import { parseApiDateTime } from '@/lib/dateTime';
@@ -25,7 +24,6 @@ import { textToEmailHtml } from '@/lib/richEmail';
 import { useConfirmDialog } from '@/lib/useConfirmDialog';
 import {
   PROFESSOR_STATUS_LABELS,
-  type IdentityMaterialDTO,
   type OutreachGenerationMode,
   type WorkspaceMessageDTO,
   type WorkspaceTaskStatusLabelKey,
@@ -33,11 +31,9 @@ import {
   type WorkspaceThreadDTO,
 } from '@/types';
 
-const PRIMARY_MATERIAL_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt', '.md'];
-
 const WORKSPACE_STATUS_LABELS: Record<WorkspaceTaskStatusLabelKey, string> = {
   discovered: '待处理',
-  matched: '已算匹配',
+  matched: PROFESSOR_STATUS_LABELS.matched,
   review_required: PROFESSOR_STATUS_LABELS.review_required,
   approved: '待发送',
   scheduled: PROFESSOR_STATUS_LABELS.scheduled,
@@ -47,16 +43,28 @@ const WORKSPACE_STATUS_LABELS: Record<WorkspaceTaskStatusLabelKey, string> = {
   canceled: '已取消',
 };
 
+const WORKSPACE_THREAD_REFRESH_INTERVAL_MS = 60_000;
+
+const getReceivedMessages = (messages: WorkspaceMessageDTO[]) =>
+  messages.filter((message) => message.direction === 'received');
+
+const buildNewReplyNotificationDescription = (
+  professorName: string,
+  message: WorkspaceMessageDTO,
+) => {
+  const subject = message.subject?.trim();
+  if (subject) {
+    return `${professorName}回复了：${subject}`;
+  }
+  const content = message.content.replace(/\s+/g, ' ').trim();
+  return `${professorName}回复了${content ? `：${content.slice(0, 36)}` : ''}`;
+};
+
 const getDefaultScheduledAtValue = () => {
   const local = new Date(Date.now() + 3600_000);
   local.setMinutes(Math.ceil(local.getMinutes() / 5) * 5);
   const adjusted = new Date(local.getTime() - local.getTimezoneOffset() * 60000);
   return adjusted.toISOString().slice(0, 16);
-};
-
-const isPrimaryMaterialCandidate = (material: IdentityMaterialDTO) => {
-  const filename = material.original_filename.toLowerCase();
-  return PRIMARY_MATERIAL_EXTENSIONS.some((suffix) => filename.endsWith(suffix));
 };
 
 const getCurrentTaskOrNull = (
@@ -82,7 +90,16 @@ const shouldBlockDirectDraftActions = (task: WorkspaceTaskSummaryDTO | null) =>
       task?.is_replied,
   );
 
-const getStatusLabel = (currentTask: WorkspaceTaskSummaryDTO | null) => {
+const getStatusLabel = (
+  currentTask: WorkspaceTaskSummaryDTO | null,
+  messages: WorkspaceMessageDTO[] = [],
+) => {
+  if (messages.some((message) => message.direction === 'received')) {
+    return PROFESSOR_STATUS_LABELS.reply_detected;
+  }
+  if (messages.some((message) => message.direction === 'sent')) {
+    return PROFESSOR_STATUS_LABELS.sent;
+  }
   if (!currentTask?.status) {
     return '尚未创建任务';
   }
@@ -147,10 +164,117 @@ const hasMeaningfulBody = ({
   contentHtml: string | null;
 }) => Boolean(deriveBodyTextFromDraft({ content, contentHtml }).trim());
 
+const ScheduleSendDialog = ({
+  open,
+  professorEmail,
+  selectedMaterialCount,
+  value,
+  acting,
+  onChange,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  professorEmail: string | null | undefined;
+  selectedMaterialCount: number;
+  value: string;
+  acting: boolean;
+  onChange: (value: string) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) => {
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onCancel();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onCancel, open]);
+
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-stone-950/35 p-4 backdrop-blur-md"
+      onClick={onCancel}
+    >
+      <div
+        className="relative w-full max-w-md overflow-hidden rounded-[30px] border border-stone-200/80 bg-[linear-gradient(180deg,rgba(255,252,246,0.98),rgba(255,245,233,0.95))] shadow-[0_34px_90px_-32px_rgba(41,37,36,0.5)]"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top,rgba(251,191,36,0.18),transparent_68%)]" />
+        <div className="relative px-6 py-6">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-red-100 text-red-600 shadow-sm shadow-red-100/80">
+                <CalendarClock className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold tracking-[0.01em] text-stone-900">
+                  选择定时发送时间
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-stone-600">
+                  将真实发给 {professorEmail ?? '当前导师邮箱'}，并附带 {selectedMaterialCount} 份附件。
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onCancel}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-stone-200 bg-white/80 text-stone-500 transition hover:border-stone-300 hover:bg-white hover:text-stone-900"
+              aria-label="关闭定时发送弹层"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <label className="mt-5 block">
+            <div className="mb-2 text-sm font-medium text-stone-800">发送时间</div>
+            <input
+              type="datetime-local"
+              value={value}
+              onChange={(event) => onChange(event.target.value)}
+              className="form-input"
+            />
+          </label>
+
+          <div className="mt-6 flex flex-wrap justify-end gap-3">
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={acting}
+              className="inline-flex items-center justify-center rounded-2xl border border-stone-200 bg-white px-4 py-2.5 text-sm font-medium text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 hover:text-stone-900 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              再检查一下
+            </button>
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={acting}
+              className="inline-flex items-center justify-center rounded-2xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-red-200/90 transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              确认定时
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const WorkspacePage = () => {
   const { id } = useParams<{ id: string }>();
   const professorId = Number(id);
-  const { notifyError, notifyFormErrors } = useNotification();
+  const { notifyError, notifyFormErrors, notifySuccess } = useNotification();
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const { selectedIdentityId, selectedLlmProfileId } = useSelectionContext();
   const [thread, setThread] = useState<WorkspaceThreadDTO | null>(null);
@@ -163,12 +287,18 @@ export const WorkspacePage = () => {
   const [composerHasSendableDraft, setComposerHasSendableDraft] = useState(false);
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<number[]>([]);
   const [scheduledAt, setScheduledAt] = useState(getDefaultScheduledAtValue);
+  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
+  const [pendingScheduledAt, setPendingScheduledAt] = useState(getDefaultScheduledAtValue);
   const [composerExpanded, setComposerExpanded] = useState(false);
+  const [threadRefreshing, setThreadRefreshing] = useState(false);
+  const [lastThreadCheckedAt, setLastThreadCheckedAt] = useState<Date | null>(null);
+  const [newReceivedCount, setNewReceivedCount] = useState(0);
   const loadedThreadKeyRef = useRef<string | null>(null);
   const activeThreadRequestKeyRef = useRef<string | null>(null);
   const latestThreadRequestIdRef = useRef(0);
   const currentWorkspaceRequestKeyRef = useRef<string | null>(null);
   const latestActionRequestIdRef = useRef(0);
+  const knownReceivedMessageIdsRef = useRef<Set<number>>(new Set());
   const workspaceRequestKey =
     Number.isFinite(professorId) && selectedIdentityId && selectedLlmProfileId
       ? `${professorId}:${selectedIdentityId}:${selectedLlmProfileId}`
@@ -220,13 +350,18 @@ export const WorkspacePage = () => {
       : hasDraftRecord
         ? draftContentText
         : templateContentText;
+    const sendableDraftContent = hasDraftRecord
+      ? { content: draftContentText, contentHtml: draftContentHtml }
+      : currentTask?.outreach_generation_mode === 'template'
+        ? { content: templateContentText, contentHtml: templateContentHtml }
+        : { content: '', contentHtml: null };
 
     setSubject(nextSubject);
     setContent(nextContentText);
     setContentHtml(nextContentHtml);
     setComposerHasSendableDraft(hasMeaningfulBody({
-      content: blockedDraftActions ? '' : draftContentText,
-      contentHtml: blockedDraftActions ? null : draftContentHtml,
+      content: blockedDraftActions ? '' : sendableDraftContent.content,
+      contentHtml: blockedDraftActions ? null : sendableDraftContent.contentHtml,
     }));
     setSelectedMaterialIds(blockedDraftActions ? [] : currentTask?.selected_material_ids ?? []);
     setScheduledAt(
@@ -242,21 +377,30 @@ export const WorkspacePage = () => {
     );
   }, []);
 
-  const loadThread = useCallback(async () => {
+  const loadThread = useCallback(async (options: { silent?: boolean } = {}) => {
+    const silent = options.silent ?? false;
     if (!workspaceRequestKey || !selectedIdentityId || !selectedLlmProfileId || !Number.isFinite(professorId)) {
       latestThreadRequestIdRef.current += 1;
       activeThreadRequestKeyRef.current = null;
       loadedThreadKeyRef.current = null;
+      knownReceivedMessageIdsRef.current = new Set();
       setThread(null);
       setLoadFailed(false);
       setLoading(false);
+      setThreadRefreshing(false);
+      setLastThreadCheckedAt(null);
+      setNewReceivedCount(0);
       return;
     }
 
     const requestId = latestThreadRequestIdRef.current + 1;
     latestThreadRequestIdRef.current = requestId;
     activeThreadRequestKeyRef.current = workspaceRequestKey;
-    setLoading(true);
+    if (silent) {
+      setThreadRefreshing(true);
+    } else {
+      setLoading(true);
+    }
     try {
       const data = await getWorkspaceThread(
         professorId,
@@ -277,8 +421,27 @@ export const WorkspacePage = () => {
       ) {
         return;
       }
+      const hadLoadedThread = loadedThreadKeyRef.current === workspaceRequestKey;
+      const receivedMessages = getReceivedMessages(workspaceData.messages);
+      const newReceivedMessages = hadLoadedThread
+        ? receivedMessages.filter(
+            (message) => !knownReceivedMessageIdsRef.current.has(message.id),
+          )
+        : [];
+      knownReceivedMessageIdsRef.current = new Set(
+        receivedMessages.map((message) => message.id),
+      );
       setThread(workspaceData);
       setLoadFailed(false);
+      setLastThreadCheckedAt(new Date());
+      if (newReceivedMessages.length > 0) {
+        const latestReceived = newReceivedMessages[newReceivedMessages.length - 1];
+        setNewReceivedCount((current) => current + newReceivedMessages.length);
+        notifySuccess(
+          '收到老师回复',
+          buildNewReplyNotificationDescription(workspaceData.professor.name, latestReceived),
+        );
+      }
       syncComposer(workspaceData);
       loadedThreadKeyRef.current = workspaceRequestKey;
     } catch (loadError) {
@@ -295,25 +458,59 @@ export const WorkspacePage = () => {
       } else {
         setLoadFailed(false);
       }
-      notifyError('加载工作区失败', message);
+      if (!silent) {
+        notifyError('加载工作区失败', message);
+      }
     } finally {
       if (
         latestThreadRequestIdRef.current === requestId &&
         activeThreadRequestKeyRef.current === workspaceRequestKey
       ) {
-        setLoading(false);
+        if (silent) {
+          setThreadRefreshing(false);
+        } else {
+          setLoading(false);
+        }
       }
     }
-  }, [notifyError, professorId, selectedIdentityId, selectedLlmProfileId, syncComposer, workspaceRequestKey]);
+  }, [notifyError, notifySuccess, professorId, selectedIdentityId, selectedLlmProfileId, syncComposer, workspaceRequestKey]);
 
   useEffect(() => {
     void loadThread();
   }, [loadThread]);
 
   useEffect(() => {
+    if (!workspaceRequestKey) {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void loadThread({ silent: true });
+    }, WORKSPACE_THREAD_REFRESH_INTERVAL_MS);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void loadThread({ silent: true });
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [loadThread, workspaceRequestKey]);
+
+  useEffect(() => {
     currentWorkspaceRequestKeyRef.current = workspaceRequestKey;
     latestActionRequestIdRef.current += 1;
+    knownReceivedMessageIdsRef.current = new Set();
     setActing(false);
+    setScheduleDialogOpen(false);
+    setThreadRefreshing(false);
+    setLastThreadCheckedAt(null);
+    setNewReceivedCount(0);
   }, [workspaceRequestKey]);
 
   useEffect(() => {
@@ -323,10 +520,8 @@ export const WorkspacePage = () => {
   const currentTask = getCurrentTaskOrNull(thread);
   const currentTaskId = currentTask?.id ?? null;
   const currentTaskMode = currentTask?.outreach_generation_mode ?? 'llm';
-  const statusLabel = getStatusLabel(currentTask);
+  const statusLabel = getStatusLabel(currentTask, thread?.messages ?? []);
   const blocksDirectDraftActions = shouldBlockDirectDraftActions(currentTask);
-  const canChangePrimaryMaterial =
-    currentTask?.id != null && !blocksDirectDraftActions;
   const canChangeMode =
     currentTask?.id != null && !blocksDirectDraftActions;
   const canCalculateMatch =
@@ -344,14 +539,14 @@ export const WorkspacePage = () => {
       ? hasTemplateConfigured
       : hasTemplateConfigured && Boolean(currentTask?.primary_material_id));
   const canSubmitDraft = Boolean(currentTaskId) && !blocksDirectDraftActions;
-  const primaryMaterialOptions = useMemo(
-    () => (thread?.material_options ?? []).filter(isPrimaryMaterialCandidate),
-    [thread?.material_options],
-  );
   const realMessageCount = useMemo(
     () => thread?.messages.filter((message) => message.direction !== 'draft').length ?? 0,
     [thread?.messages],
   );
+  const handleRefreshThread = useCallback(() => {
+    setNewReceivedCount(0);
+    void loadThread({ silent: true });
+  }, [loadThread]);
   const preparedBodyText = deriveBodyTextFromDraft({ content, contentHtml });
   const hasDraft = composerHasSendableDraft;
   const nextStep = currentTask
@@ -465,49 +660,47 @@ export const WorkspacePage = () => {
       return;
     }
 
-    const scheduleDate = new Date(scheduledAt);
+    setPendingScheduledAt(scheduledAt || getDefaultScheduledAtValue());
+    setScheduleDialogOpen(true);
+  }, [currentTaskId, scheduledAt]);
+
+  const handleConfirmScheduleSend = useCallback(() => {
+    if (!currentTaskId) {
+      return;
+    }
+
+    const scheduleDate = new Date(pendingScheduledAt);
     if (Number.isNaN(scheduleDate.getTime())) {
       notifyFormErrors('请检查表单', ['请先选一个有效的发送时间']);
       return;
     }
 
-    void (async () => {
-      const confirmed = await confirm({
-        title: '确认定时发送这封真实邮件？',
-        description: `会在 ${scheduleDate.toLocaleString('zh-CN')} 自动发给 ${thread?.professor.email ?? '当前导师邮箱'}。`,
-        confirmLabel: '确认定时',
-        cancelLabel: '再检查一下',
-        tone: 'danger',
-      });
-      if (!confirmed) {
-        return;
-      }
-
-      await runAction(
-        () =>
-          approveAndSchedule(currentTaskId, {
-            subject: subject.trim() || null,
-            body_text: preparedBodyText,
-            body_html: contentHtml,
-            selected_material_ids: selectedMaterialIds,
-            scheduled_at: scheduleDate.toISOString(),
-          }),
-        '定时发送失败',
-        '定时发送失败',
-        () => setComposerExpanded(false),
-      );
-    })();
+    void runAction(
+      () =>
+        approveAndSchedule(currentTaskId, {
+          subject: subject.trim() || null,
+          body_text: preparedBodyText,
+          body_html: contentHtml,
+          selected_material_ids: selectedMaterialIds,
+          scheduled_at: scheduleDate.toISOString(),
+        }),
+      '定时发送失败',
+      '定时发送失败',
+      () => {
+        setScheduledAt(pendingScheduledAt);
+        setScheduleDialogOpen(false);
+        setComposerExpanded(false);
+      },
+    );
   }, [
-    confirm,
     contentHtml,
     currentTaskId,
     notifyFormErrors,
+    pendingScheduledAt,
     preparedBodyText,
     runAction,
-    scheduledAt,
     selectedMaterialIds,
     subject,
-    thread?.professor.email,
   ]);
 
   const handleCancelSchedule = useCallback(() => {
@@ -543,21 +736,6 @@ export const WorkspacePage = () => {
       () => setComposerExpanded(true),
     );
   }, [currentTaskId, runAction]);
-
-  const handleSelectPrimaryMaterial = useCallback(
-    (materialId: number) => {
-      if (!currentTaskId) {
-        return;
-      }
-
-      void runAction(
-        () => updateTaskPrimaryMaterial(currentTaskId, materialId),
-        '切换默认材料失败',
-        '切换默认材料失败',
-      );
-    },
-    [currentTaskId, runAction],
-  );
 
   const handleCalculateMatch = useCallback(() => {
     if (!currentTaskId) {
@@ -689,7 +867,14 @@ export const WorkspacePage = () => {
           <section className="order-2 flex min-h-0 flex-col overflow-hidden rounded-[36px] border border-stone-200 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(255,252,247,0.98))] shadow-[0_24px_54px_-36px_rgba(41,37,36,0.34)] lg:order-1">
             {currentTask ? (
               <>
-                <WorkspaceMessageThread messages={thread.messages} />
+                <WorkspaceMessageThread
+                  messages={thread.messages}
+                  monitoringLabel="正在监听回复"
+                  lastCheckedAt={lastThreadCheckedAt}
+                  refreshing={threadRefreshing}
+                  newReceivedCount={newReceivedCount}
+                  onRefresh={handleRefreshThread}
+                />
 
                 <WorkspaceComposerDock
                   thread={thread}
@@ -704,8 +889,6 @@ export const WorkspacePage = () => {
                   selectedMaterialIds={selectedMaterialIds}
                   scheduledAt={scheduledAt}
                   acting={acting}
-                  primaryMaterialOptions={primaryMaterialOptions}
-                  canChangePrimaryMaterial={canChangePrimaryMaterial}
                   canChangeMode={canChangeMode}
                   canCalculateMatch={canCalculateMatch}
                   canGenerateDraft={canGenerateDraft}
@@ -719,8 +902,6 @@ export const WorkspacePage = () => {
                   onSubjectChange={setSubject}
                   onContentChange={handleContentChange}
                   onSelectedMaterialIdsChange={setSelectedMaterialIds}
-                  onScheduledAtChange={setScheduledAt}
-                  onSelectPrimaryMaterial={handleSelectPrimaryMaterial}
                   onSendNow={handleSendNow}
                   onScheduleSend={handleScheduleSend}
                   onCancelSchedule={handleCancelSchedule}
@@ -747,6 +928,20 @@ export const WorkspacePage = () => {
         </div>
         </div>
       </main>
+      <ScheduleSendDialog
+        open={scheduleDialogOpen}
+        professorEmail={thread?.professor.email}
+        selectedMaterialCount={selectedMaterialIds.length}
+        value={pendingScheduledAt}
+        acting={acting}
+        onChange={setPendingScheduledAt}
+        onCancel={() => {
+          if (!acting) {
+            setScheduleDialogOpen(false);
+          }
+        }}
+        onConfirm={handleConfirmScheduleSend}
+      />
       {confirmDialog}
     </>
   );

@@ -269,14 +269,50 @@ describe("HomePage onboarding", () => {
     expect(
       await screen.findByRole("heading", { name: "导师看板" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("准备中")).toBeInTheDocument();
+    expect(screen.getByText("待写信")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "状态" })).toBeInTheDocument();
+  });
+
+  it("renders professors as a compact contact queue on the dashboard", async () => {
+    mockedListProfessors.mockResolvedValue([professor]);
+    mockedUseSelectionContext.mockReturnValue({
+      selectedIdentityId: 1,
+      selectedLlmProfileId: 1,
+      selectedIdentity: createIdentity({
+        current_primary_material_id: 11,
+        outreach_template_body_text: "老师您好",
+      }),
+      selectedLlmProfile,
+    });
+
+    renderPage();
+
+    expect(
+      await screen.findByRole("heading", { name: "导师看板" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("匹配 92%")).toBeInTheDocument();
+    expect(screen.getByText("未发送")).toBeInTheDocument();
+    expect(screen.getByText("待写信")).toBeInTheDocument();
+    const selectButton = screen.getByRole("button", { name: "选择 王教授" });
+    expect(selectButton).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(selectButton).toHaveClass("h-10", "w-10");
+    expect(
+      screen.queryByRole("checkbox", { name: "选择 王教授" }),
+    ).not.toBeInTheDocument();
+    const dashboardRow = screen.getByText("王教授").closest("article");
+    expect(dashboardRow?.firstElementChild).toHaveClass("items-center");
+    expect(screen.queryByText("匹配分数")).not.toBeInTheDocument();
+    expect(screen.queryByText("发送次数")).not.toBeInTheDocument();
+    expect(screen.queryByText("当前状态")).not.toBeInTheDocument();
   });
 
   it("renders six relationship filter options and filters the list through the UI", async () => {
     mockedListProfessors.mockResolvedValue([
       createProfessor(101, "未开始导师", "not_contacted"),
-      createProfessor(102, "准备中导师", "preparing"),
+      createProfessor(102, "待写信导师", "preparing"),
       createProfessor(103, "待发送导师", "ready_to_send"),
       createProfessor(104, "已联系导师", "contacted"),
       createProfessor(105, "已回复导师", "replied"),
@@ -302,7 +338,7 @@ describe("HomePage onboarding", () => {
     fireEvent.click(screen.getByRole("button", { name: "状态" }));
 
     expect(screen.getByRole("option", { name: "未开始" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "准备中" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "待写信" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "待发送" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "已联系" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "已回复" })).toBeInTheDocument();
@@ -313,7 +349,7 @@ describe("HomePage onboarding", () => {
     await waitFor(() => {
       expect(screen.getByText("已联系导师")).toBeInTheDocument();
       expect(screen.queryByText("未开始导师")).not.toBeInTheDocument();
-      expect(screen.queryByText("准备中导师")).not.toBeInTheDocument();
+      expect(screen.queryByText("待写信导师")).not.toBeInTheDocument();
       expect(screen.queryByText("待发送导师")).not.toBeInTheDocument();
       expect(screen.queryByText("已回复导师")).not.toBeInTheDocument();
       expect(screen.queryByText("需处理导师")).not.toBeInTheDocument();

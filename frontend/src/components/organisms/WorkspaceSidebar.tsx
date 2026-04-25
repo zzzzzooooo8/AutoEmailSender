@@ -1,17 +1,13 @@
-import {
-  AtSign,
-  GraduationCap,
-  Microscope,
-} from 'lucide-react';
-import type { ReactNode } from 'react';
-import type { WorkspaceThreadDTO } from '@/types';
+import { AtSign, GraduationCap, Microscope } from "lucide-react";
+import type { ReactNode } from "react";
+import type { WorkspaceThreadDTO } from "@/types";
 
 type WorkspaceSidebarProps = {
   thread: WorkspaceThreadDTO;
 };
 
 const fieldClassName =
-  'rounded-[22px] border border-stone-200/80 bg-white/88 px-4 py-3 shadow-[0_18px_34px_-30px_rgba(41,37,36,0.2)]';
+  "rounded-[22px] border border-stone-200/80 bg-white/88 px-4 py-3 shadow-[0_18px_34px_-30px_rgba(41,37,36,0.2)]";
 
 const ArchiveField = ({
   icon,
@@ -36,7 +32,8 @@ const ArchiveField = ({
 const ArchiveCard = ({ thread }: WorkspaceSidebarProps) => {
   const professor = thread.professor;
   const organization =
-    [professor.university, professor.school].filter(Boolean).join(' / ') || '未填写学校信息';
+    [professor.university, professor.school].filter(Boolean).join(" / ") ||
+    "未填写学校信息";
 
   return (
     <div className="space-y-3">
@@ -54,7 +51,7 @@ const ArchiveCard = ({ thread }: WorkspaceSidebarProps) => {
                 {professor.name}
               </h2>
               <p className="mt-1 text-sm text-stone-500">
-                {professor.title || '未填写职称'}
+                {professor.title || "未填写职称"}
               </p>
             </div>
           </div>
@@ -69,19 +66,15 @@ const ArchiveCard = ({ thread }: WorkspaceSidebarProps) => {
           <ArchiveField
             icon={<Microscope className="h-4 w-4" />}
             label="研究方向"
-            value={professor.research_direction || '暂无研究方向信息'}
+            value={professor.research_direction || "暂无研究方向信息"}
           />
           <ArchiveField
             icon={<AtSign className="h-4 w-4" />}
             label="邮箱"
-            value={professor.email || '暂无邮箱'}
+            value={professor.email || "暂无邮箱"}
           />
         </div>
       </section>
-
-      <div className="rounded-[24px] border border-dashed border-stone-200 bg-white/80 px-4 py-4 text-sm leading-6 text-stone-500">
-        需要继续联系时，展开底部写信区。
-      </div>
     </div>
   );
 };
