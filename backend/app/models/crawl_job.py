@@ -48,6 +48,7 @@ class CrawlJob(Base):
     )
     status: Mapped[str] = mapped_column(
         String(64),
+        index=True,
         nullable=False,
         server_default=text("'queued'"),
     )
@@ -82,7 +83,7 @@ class CrawlPage(Base):
     __tablename__ = "crawl_pages"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    job_id: Mapped[int] = mapped_column(ForeignKey("crawl_jobs.id", ondelete="CASCADE"))
+    job_id: Mapped[int] = mapped_column(ForeignKey("crawl_jobs.id", ondelete="CASCADE"), index=True)
     url: Mapped[str] = mapped_column(String(1000), nullable=False)
     parent_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     fetch_method: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -104,13 +105,13 @@ class CrawlCandidate(Base):
     __tablename__ = "crawl_candidates"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    job_id: Mapped[int] = mapped_column(ForeignKey("crawl_jobs.id", ondelete="CASCADE"))
+    job_id: Mapped[int] = mapped_column(ForeignKey("crawl_jobs.id", ondelete="CASCADE"), index=True)
     professor_id: Mapped[int | None] = mapped_column(
         ForeignKey("professors.id", ondelete="SET NULL"),
         nullable=True,
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     university: Mapped[str | None] = mapped_column(String(255), nullable=True)
     school: Mapped[str | None] = mapped_column(String(255), nullable=True)
