@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import get_settings
+from app.services.crawl_job_runtime import run_queued_crawl_jobs_once
 from app.services.task_runtime import (
     dispatch_due_tasks_once,
     poll_for_replies_once,
@@ -40,6 +41,13 @@ class RuntimeManager:
                     "imap-poller",
                     settings.imap_poll_interval_seconds,
                     poll_for_replies_once,
+                ),
+            ),
+            asyncio.create_task(
+                self._loop(
+                    "crawler-worker",
+                    10,
+                    run_queued_crawl_jobs_once,
                 ),
             ),
         ]
