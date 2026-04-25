@@ -82,10 +82,10 @@ describe("TestComposePage", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByDisplayValue("测试主题")).toBeInTheDocument();
+    expect(await screen.findByRole("textbox", { name: "邮件主题" })).toHaveTextContent("测试主题");
     expect(screen.getByRole("button", { name: "主题占位符菜单" })).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "邮件正文" })).toHaveTextContent("测试正文");
-    expect(screen.getByRole("button", { name: "插入表格" })).toBeInTheDocument();
+    expect(await screen.findByRole("textbox", { name: "邮件正文" })).toHaveTextContent("测试正文");
+    expect(await screen.findByRole("button", { name: "插入表格" })).toBeInTheDocument();
     expect(screen.getAllByText("sender@example.com").length).toBeGreaterThan(0);
     expect(screen.getByText("测试收件邮箱")).toBeInTheDocument();
     expect(

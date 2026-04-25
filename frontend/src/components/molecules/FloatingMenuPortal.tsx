@@ -1,8 +1,8 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
-  useState,
   type CSSProperties,
   type ReactNode,
   type RefObject,
@@ -25,6 +25,65 @@ const VIEWPORT_MARGIN = 12;
 const MENU_GAP = 8;
 const DEFAULT_MAX_HEIGHT = 320;
 
+const getHiddenMenuStyle = (minWidth: number): CSSProperties => ({
+  left: 0,
+  top: 0,
+  minWidth,
+  maxHeight: DEFAULT_MAX_HEIGHT,
+  visibility: "hidden",
+});
+
+type FloatingMenuDomStyle = {
+  left: string;
+  top: string;
+  minWidth: string;
+  maxHeight: string;
+  transform: string;
+  visibility: "hidden" | "visible";
+};
+
+const toPx = (value: number) => `${value}px`;
+
+const getPositionedMenuStyle = (
+  anchor: HTMLElement | null,
+  align: "left" | "right",
+  minWidth: number,
+): FloatingMenuDomStyle => {
+  if (!anchor || typeof window === "undefined") {
+    return {
+      left: "0px",
+      top: "0px",
+      minWidth: toPx(minWidth),
+      maxHeight: toPx(DEFAULT_MAX_HEIGHT),
+      transform: "",
+      visibility: "hidden",
+    };
+  }
+
+  const rect = anchor.getBoundingClientRect();
+  const menuWidth = Math.max(minWidth, rect.width);
+  const viewportWidth = window.innerWidth || 1024;
+  const viewportHeight = window.innerHeight || 768;
+  const preferredLeft = align === "right" ? rect.right - menuWidth : rect.left;
+  const left = Math.min(
+    Math.max(VIEWPORT_MARGIN, preferredLeft),
+    Math.max(VIEWPORT_MARGIN, viewportWidth - menuWidth - VIEWPORT_MARGIN),
+  );
+  const belowSpace = viewportHeight - rect.bottom - VIEWPORT_MARGIN;
+  const aboveSpace = rect.top - VIEWPORT_MARGIN;
+  const openUpward = belowSpace < 220 && aboveSpace > belowSpace;
+  const availableHeight = openUpward ? aboveSpace - MENU_GAP : belowSpace - MENU_GAP;
+
+  return {
+    left: toPx(left),
+    top: toPx(openUpward ? rect.top - MENU_GAP : rect.bottom + MENU_GAP),
+    minWidth: toPx(menuWidth),
+    maxHeight: toPx(Math.max(160, Math.min(DEFAULT_MAX_HEIGHT, availableHeight))),
+    transform: openUpward ? "translateY(-100%)" : "",
+    visibility: "visible",
+  };
+};
+
 export const FloatingMenuPortal = ({
   open,
   anchorRef,
@@ -36,59 +95,33 @@ export const FloatingMenuPortal = ({
   onClose,
 }: FloatingMenuPortalProps) => {
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const [style, setStyle] = useState<CSSProperties>({
-    left: VIEWPORT_MARGIN,
-    top: VIEWPORT_MARGIN,
-    minWidth,
-    maxHeight: DEFAULT_MAX_HEIGHT,
-  });
-
-  const updatePosition = useCallback(() => {
-    const anchor = anchorRef.current;
-    if (!anchor || typeof window === "undefined") {
+  const positionMenu = useCallback(() => {
+    const menu = menuRef.current;
+    if (!menu) {
       return;
     }
 
-    const rect = anchor.getBoundingClientRect();
-    const menuWidth = Math.max(minWidth, rect.width);
-    const viewportWidth = window.innerWidth || 1024;
-    const viewportHeight = window.innerHeight || 768;
-    const preferredLeft = align === "right" ? rect.right - menuWidth : rect.left;
-    const left = Math.min(
-      Math.max(VIEWPORT_MARGIN, preferredLeft),
-      Math.max(VIEWPORT_MARGIN, viewportWidth - menuWidth - VIEWPORT_MARGIN),
+    Object.assign(
+      menu.style,
+      getPositionedMenuStyle(anchorRef.current, align, minWidth),
     );
-    const belowSpace = viewportHeight - rect.bottom - VIEWPORT_MARGIN;
-    const aboveSpace = rect.top - VIEWPORT_MARGIN;
-    const openUpward = belowSpace < 220 && aboveSpace > belowSpace;
-    const availableHeight = openUpward ? aboveSpace - MENU_GAP : belowSpace - MENU_GAP;
-
-    setStyle({
-      left,
-      top: openUpward ? rect.top - MENU_GAP : rect.bottom + MENU_GAP,
-      minWidth: menuWidth,
-      maxHeight: Math.max(160, Math.min(DEFAULT_MAX_HEIGHT, availableHeight)),
-      transform: openUpward ? "translateY(-100%)" : undefined,
-    });
   }, [align, anchorRef, minWidth]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) {
       return;
     }
 
-    updatePosition();
-    const frame = window.requestAnimationFrame(updatePosition);
+    positionMenu();
+    const frame = window.requestAnimationFrame(positionMenu);
 
-    window.addEventListener("resize", updatePosition);
-    document.addEventListener("scroll", updatePosition, true);
+    window.addEventListener("resize", positionMenu);
 
     return () => {
       window.cancelAnimationFrame(frame);
-      window.removeEventListener("resize", updatePosition);
-      document.removeEventListener("scroll", updatePosition, true);
+      window.removeEventListener("resize", positionMenu);
     };
-  }, [open, updatePosition]);
+  }, [open, positionMenu]);
 
   useEffect(() => {
     if (!open) {
@@ -111,6 +144,18 @@ export const FloatingMenuPortal = ({
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [anchorRef, onClose, open]);
 
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    document.addEventListener("scroll", positionMenu, true);
+
+    return () => {
+      document.removeEventListener("scroll", positionMenu, true);
+    };
+  }, [open, positionMenu]);
+
   if (!open || typeof document === "undefined") {
     return null;
   }
@@ -120,10 +165,10 @@ export const FloatingMenuPortal = ({
       ref={menuRef}
       data-testid={testId}
       className={clsx(
-        "fixed z-[80] overflow-hidden rounded-2xl border border-stone-200 bg-white p-2 shadow-[0_18px_40px_-24px_rgba(41,37,36,0.38)]",
+        "fixed z-[80] overflow-y-auto rounded-2xl border border-stone-200 bg-white p-2 shadow-[0_18px_40px_-24px_rgba(41,37,36,0.38)]",
         className,
       )}
-      style={style}
+      style={getHiddenMenuStyle(minWidth)}
     >
       {children}
     </div>,

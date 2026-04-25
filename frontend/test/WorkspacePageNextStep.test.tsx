@@ -14,17 +14,19 @@ const mockedEnsureWorkspaceTask = vi.hoisted(() => vi.fn());
 const mockedWorkspaceComposerDock = vi.hoisted(() => vi.fn());
 const mockedApproveAndSend = vi.hoisted(() => vi.fn());
 const mockedApproveAndSchedule = vi.hoisted(() => vi.fn());
+const mockedGenerateDraft = vi.hoisted(() => vi.fn());
 const mockedConfirm = vi.hoisted(() => vi.fn());
+const mockedNotificationApi = vi.hoisted(() => ({
+  notifyError: vi.fn(),
+  notifyFormErrors: vi.fn(),
+}));
 
 vi.mock("@/context/SelectionContext", () => ({
   useSelectionContext: mockedUseSelectionContext,
 }));
 
 vi.mock("@/context/NotificationContext", () => ({
-  useNotification: () => ({
-    notifyError: vi.fn(),
-    notifyFormErrors: vi.fn(),
-  }),
+  useNotification: () => mockedNotificationApi,
 }));
 
 vi.mock("@/lib/api/workspacesApi", () => ({
@@ -37,7 +39,7 @@ vi.mock("@/lib/api/emailTasksApi", () => ({
   approveAndSend: mockedApproveAndSend,
   calculateMatch: vi.fn(),
   cancelScheduledTask: vi.fn(),
-  generateDraft: vi.fn(),
+  generateDraft: mockedGenerateDraft,
   updateTaskOutreachConfig: vi.fn(),
   updateTaskPrimaryMaterial: vi.fn(),
 }));
@@ -62,9 +64,11 @@ vi.mock("@/components/organisms/WorkspaceComposerDock", () => ({
     nextStepTitle: string;
     nextStepDescription: string;
     draftReady: boolean;
+    subject: string;
     content: string;
     contentHtml: string;
     onContentChange: (value: { html: string; text: string }) => void;
+    onGenerateDraft: () => void;
     onSendNow: () => void;
     onScheduleSend: () => void;
   }) => {
@@ -74,7 +78,12 @@ vi.mock("@/components/organisms/WorkspaceComposerDock", () => ({
         <div>{props.nextStepTitle}</div>
         <div>{props.nextStepDescription}</div>
         <div>{props.draftReady ? "draft-ready" : "draft-empty"}</div>
+        <div>{props.subject ? `draft-subject:${props.subject}` : "draft-subject-empty"}</div>
         <div>{props.content ? `draft-content:${props.content}` : "draft-content-empty"}</div>
+        <div>{props.contentHtml ? `draft-html:${props.contentHtml}` : "draft-html-empty"}</div>
+        <button type="button" onClick={props.onGenerateDraft}>
+          mock-generate-draft
+        </button>
         <button type="button" onClick={props.onSendNow}>
           mock-send-now
         </button>
@@ -187,6 +196,7 @@ describe("WorkspacePage next-step", () => {
     mockedEnsureWorkspaceTask.mockReset();
     mockedApproveAndSend.mockReset();
     mockedApproveAndSchedule.mockReset();
+    mockedGenerateDraft.mockReset();
     mockedConfirm.mockReset();
     mockedConfirm.mockResolvedValue(true);
     mockedApproveAndSend.mockImplementation(async () =>
@@ -198,6 +208,14 @@ describe("WorkspacePage next-step", () => {
       buildThread({
         status: "scheduled",
         generatedContentHtml: "<p>定时后的 HTML 草稿</p>",
+      }),
+    );
+    mockedGenerateDraft.mockImplementation(async () =>
+      buildThread({
+        status: "review_required",
+        generatedSubject: "生成后的主题",
+        generatedContentText: "生成后的正文",
+        generatedContentHtml: "<p>生成后的正文</p>",
       }),
     );
     mockedUseSelectionContext.mockReturnValue({
@@ -249,6 +267,35 @@ describe("WorkspacePage next-step", () => {
     expect(screen.getByText("生成草稿后再人工检查。")).toBeInTheDocument();
     expect(screen.getByText("draft-empty")).toBeInTheDocument();
     expect(screen.queryByText("检查后发送")).not.toBeInTheDocument();
+  });
+
+  it("passes the configured template into the composer before a draft is generated", async () => {
+    mockedGetWorkspaceThread.mockResolvedValue(buildThread());
+
+    renderPage();
+
+    expect(await screen.findByText("draft-subject:测试主题")).toBeInTheDocument();
+    expect(screen.getByText("draft-content:测试正文")).toBeInTheDocument();
+    expect(screen.getByText("draft-empty")).toBeInTheDocument();
+  });
+
+  it("shows the generated draft in the composer after clicking generate", async () => {
+    mockedGetWorkspaceThread.mockResolvedValue(buildThread());
+
+    renderPage();
+
+    await screen.findByText("draft-subject:测试主题");
+    fireEvent.click(screen.getByRole("button", { name: "mock-generate-draft" }));
+
+    await waitFor(() => {
+      expect(mockedGenerateDraft).toHaveBeenCalledWith(301);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("draft-subject:生成后的主题")).toBeInTheDocument();
+      expect(screen.getByText("draft-content:生成后的正文")).toBeInTheDocument();
+      expect(screen.getByText("draft-html:<p>生成后的正文</p>")).toBeInTheDocument();
+    });
   });
 
   it("prompts to select material first when no primary material is set", async () => {

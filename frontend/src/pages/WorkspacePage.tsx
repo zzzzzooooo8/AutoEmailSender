@@ -130,6 +130,14 @@ const deriveBodyTextFromDraft = ({
   return normalizedHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 };
 
+const hasMeaningfulBody = ({
+  content,
+  contentHtml,
+}: {
+  content: string;
+  contentHtml: string | null;
+}) => Boolean(deriveBodyTextFromDraft({ content, contentHtml }).trim());
+
 export const WorkspacePage = () => {
   const { id } = useParams<{ id: string }>();
   const professorId = Number(id);
@@ -143,6 +151,7 @@ export const WorkspacePage = () => {
   const [subject, setSubject] = useState('');
   const [content, setContent] = useState('');
   const [contentHtml, setContentHtml] = useState<string | null>(null);
+  const [composerHasSendableDraft, setComposerHasSendableDraft] = useState(false);
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<number[]>([]);
   const [scheduledAt, setScheduledAt] = useState(getDefaultScheduledAtValue);
   const [composerExpanded, setComposerExpanded] = useState(false);
@@ -163,28 +172,45 @@ export const WorkspacePage = () => {
       currentTask?.status && !['sent', 'reply_detected'].includes(currentTask.status)
         ? latestDraftMessage
         : null;
-    const nextSubject =
+    const draftSubject =
       currentTask?.approved_subject ??
       currentTask?.generated_subject ??
       preferredDraftMessage?.subject ??
       '';
-    const nextContentHtml =
+    const draftContentHtml =
       currentTask?.approved_body_html ??
       currentTask?.generated_content_html ??
       preferredDraftMessage?.content_html ??
       null;
-    const nextContentText = deriveBodyTextFromDraft({
+    const draftContentText = deriveBodyTextFromDraft({
       content:
         currentTask?.approved_body_text ??
         currentTask?.generated_content_text ??
         preferredDraftMessage?.content ??
         '',
-      contentHtml: nextContentHtml,
+      contentHtml: draftContentHtml,
     });
+    const hasDraftRecord = Boolean(
+      draftSubject.trim() || draftContentText.trim() || draftContentHtml?.trim(),
+    );
+    const templateContentHtml = currentTask?.outreach_template_body_html ?? null;
+    const templateContentText = deriveBodyTextFromDraft({
+      content: currentTask?.outreach_template_body_text ?? '',
+      contentHtml: templateContentHtml,
+    });
+    const nextSubject = hasDraftRecord
+      ? draftSubject
+      : currentTask?.outreach_template_subject ?? '';
+    const nextContentHtml = hasDraftRecord ? draftContentHtml : templateContentHtml;
+    const nextContentText = hasDraftRecord ? draftContentText : templateContentText;
 
     setSubject(nextSubject);
     setContent(nextContentText);
     setContentHtml(nextContentHtml);
+    setComposerHasSendableDraft(hasMeaningfulBody({
+      content: draftContentText,
+      contentHtml: draftContentHtml,
+    }));
     setSelectedMaterialIds(currentTask?.selected_material_ids ?? []);
     setScheduledAt(
       currentTask?.scheduled_at
@@ -304,7 +330,7 @@ export const WorkspacePage = () => {
     [thread?.messages],
   );
   const preparedBodyText = deriveBodyTextFromDraft({ content, contentHtml });
-  const hasDraft = Boolean(preparedBodyText);
+  const hasDraft = composerHasSendableDraft;
   const nextStep = currentTask
     ? getWorkspaceNextStep({
         status: currentTask.status ?? 'discovered',
@@ -361,6 +387,10 @@ export const WorkspacePage = () => {
   const handleContentChange = useCallback((value: { html: string; text: string }) => {
     setContent(value.text);
     setContentHtml(value.html);
+    setComposerHasSendableDraft(hasMeaningfulBody({
+      content: value.text,
+      contentHtml: value.html,
+    }));
   }, []);
 
   const handleSendNow = useCallback(() => {

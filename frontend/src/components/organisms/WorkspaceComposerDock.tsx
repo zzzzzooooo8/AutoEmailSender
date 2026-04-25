@@ -1,11 +1,15 @@
 import { useMemo, type ReactNode } from 'react';
 import clsx from 'clsx';
 import {
+  Bot,
   CalendarClock,
   Check,
   ChevronDown,
   ChevronUp,
+  ClipboardCheck,
+  MailCheck,
   Paperclip,
+  PenLine,
   RefreshCcw,
   Send,
   TimerReset,
@@ -63,22 +67,66 @@ const MODE_OPTIONS: Array<{
   { value: 'template', label: getTaskModeCopy('template').title },
 ];
 
-const Panel = ({
+const ComposerSection = ({
+  icon,
   title,
   description,
   children,
 }: {
+  icon: ReactNode;
   title: string;
   description?: string;
   children: ReactNode;
 }) => (
-  <section className="rounded-[24px] border border-stone-200 bg-stone-50/70 px-4 py-4">
-    <div className="text-sm font-semibold text-stone-900">{title}</div>
-    {description ? (
-      <div className="mt-1 text-xs leading-5 text-stone-500">{description}</div>
-    ) : null}
-    <div className="mt-3">{children}</div>
+  <section className="rounded-[22px] border border-stone-200/80 bg-white px-4 py-4 shadow-[0_18px_34px_-32px_rgba(41,37,36,0.2)]">
+    <div className="flex items-start gap-3">
+      <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary/8 text-primary">
+        {icon}
+      </span>
+      <div className="min-w-0">
+        <div className="text-sm font-semibold text-stone-900">{title}</div>
+        {description ? (
+          <div className="mt-1 text-xs leading-5 text-stone-500">{description}</div>
+        ) : null}
+      </div>
+    </div>
+    <div className="mt-4">{children}</div>
   </section>
+);
+
+const SectionHeading = ({
+  icon,
+  title,
+  description,
+}: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+}) => (
+  <div className="flex items-start gap-3">
+    <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary text-white shadow-sm shadow-primary/20">
+      {icon}
+    </span>
+    <div className="min-w-0">
+      <div className="text-sm font-semibold text-stone-950">{title}</div>
+      <div className="mt-1 text-xs leading-5 text-stone-500">{description}</div>
+    </div>
+  </div>
+);
+
+const SummaryLine = ({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) => (
+  <div className="flex items-start justify-between gap-3 rounded-xl border border-stone-100 bg-stone-50/70 px-3 py-2">
+    <span className="shrink-0 text-xs font-medium text-stone-500">{label}</span>
+    <span className="min-w-0 text-right text-xs font-semibold text-stone-800">
+      {children}
+    </span>
+  </div>
 );
 
 const formatScheduleSummary = (value: string) => {
@@ -155,15 +203,25 @@ export const WorkspaceComposerDock = ({
           : '请选择用于匹配的材料。';
 
   return (
-    <div className="border-t border-stone-200/80 bg-[linear-gradient(180deg,rgba(255,252,246,0.94),rgba(255,248,240,0.98))] px-4 py-4 backdrop-blur-xl sm:px-6">
-      <div className="mx-auto w-full max-w-4xl">
+    <div className="relative z-20 overflow-visible border-t border-stone-200/80 bg-[linear-gradient(180deg,rgba(255,252,246,0.94),rgba(255,248,240,0.98))] px-4 py-4 backdrop-blur-xl sm:px-6">
+      <div className="mx-auto w-full max-w-5xl overflow-visible">
         {composerExpanded ? (
-          <div className="mb-4 rounded-[32px] border border-stone-200 bg-white/96 p-5 shadow-[0_24px_54px_-34px_rgba(41,37,36,0.3)]">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <div className="text-sm font-semibold text-stone-900">写信区</div>
-                <div className="mt-1 text-xs leading-5 text-stone-500">
-                  编辑草稿、附件和发送时间。
+          <div className="mb-4 overflow-visible rounded-[32px] border border-stone-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(255,250,244,0.98))] p-4 shadow-[0_28px_70px_-42px_rgba(41,37,36,0.42)] sm:p-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex min-w-0 items-start gap-3">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary text-white shadow-sm shadow-primary/20">
+                  <PenLine className="h-5 w-5" />
+                </span>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="text-lg font-semibold text-stone-950">写信区</div>
+                    <span className="rounded-full border border-stone-200 bg-white px-2.5 py-1 text-xs font-medium text-stone-600">
+                      {draftReady ? '草稿可发送' : '等待草稿'}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-sm leading-6 text-stone-500">
+                    {nextStepTitle} · {nextStepDescription}
+                  </div>
                 </div>
               </div>
 
@@ -177,26 +235,53 @@ export const WorkspaceComposerDock = ({
               </button>
             </div>
 
-            <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
-              <div className="space-y-4">
-                <SubjectTemplateInput
-                  label="邮件主题"
-                  value={subject}
-                  onChange={onSubjectChange}
-                  placeholder="给老师的邮件主题"
+            <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_330px]">
+              <section className="min-w-0 overflow-visible rounded-[28px] border border-stone-200/80 bg-stone-50/70 p-4 sm:p-5">
+                <SectionHeading
+                  icon={<PenLine className="h-4 w-4" />}
+                  title="正文编辑"
+                  description="主题、正文和占位符都在这里处理。"
                 />
 
-                <EmailTemplateEditor
-                  label="邮件正文"
-                  html={contentHtml}
-                  onChange={onContentChange}
-                />
-              </div>
+                <div className="mt-5 space-y-4">
+                  <SubjectTemplateInput
+                    label="邮件主题"
+                    value={subject}
+                    onChange={onSubjectChange}
+                    placeholder="给老师的邮件主题"
+                  />
 
-              <div className="space-y-4">
-                <Panel
-                  title="草稿方式"
-                  description="选择写信方式。"
+                  <EmailTemplateEditor
+                    label="邮件正文"
+                    html={contentHtml}
+                    onChange={onContentChange}
+                  />
+                </div>
+              </section>
+
+              <aside className="space-y-3">
+                <ComposerSection
+                  icon={<ClipboardCheck className="h-4 w-4" />}
+                  title="发送前核对"
+                  description="发送前快速确认关键项。"
+                >
+                  <div className="space-y-2">
+                    <SummaryLine label="方式">
+                      {getTaskModeCopy(currentTaskMode).title}
+                    </SummaryLine>
+                    <SummaryLine label="附件">
+                      {selectedAttachmentNames.length > 0
+                        ? `${selectedAttachmentNames.length} 份`
+                        : '未选择'}
+                    </SummaryLine>
+                    <SummaryLine label="定时">{scheduledSummary}</SummaryLine>
+                  </div>
+                </ComposerSection>
+
+                <ComposerSection
+                  icon={<Bot className="h-4 w-4" />}
+                  title="生成与模式"
+                  description={limitationHint ?? '选择写信方式。'}
                 >
                   <div className="grid grid-cols-2 gap-2">
                     {MODE_OPTIONS.map((option) => {
@@ -219,9 +304,10 @@ export const WorkspaceComposerDock = ({
                       );
                     })}
                   </div>
-                </Panel>
+                </ComposerSection>
 
-                <Panel
+                <ComposerSection
+                  icon={<RefreshCcw className="h-4 w-4" />}
                   title="生成辅助"
                   description="用于匹配分析和草稿生成。"
                 >
@@ -250,9 +336,12 @@ export const WorkspaceComposerDock = ({
                       {limitationHint}
                     </div>
                   ) : null}
-                </Panel>
+                </ComposerSection>
 
-                <Panel title="发送设置">
+                <ComposerSection
+                  icon={<CalendarClock className="h-4 w-4" />}
+                  title="发送设置"
+                >
                   <div className="space-y-3">
                     <label className="block">
                       <div className="mb-2 text-xs font-medium uppercase tracking-[0.12em] text-stone-400">
@@ -294,9 +383,12 @@ export const WorkspaceComposerDock = ({
                       当前计划：{scheduledSummary}
                     </div>
                   </div>
-                </Panel>
+                </ComposerSection>
 
-                <Panel title="随信附件">
+                <ComposerSection
+                  icon={<Paperclip className="h-4 w-4" />}
+                  title="随信附件"
+                >
                   {thread.material_options.length === 0 ? (
                     <div className="text-sm text-stone-500">暂无可发送材料。</div>
                   ) : (
@@ -340,51 +432,59 @@ export const WorkspaceComposerDock = ({
                       })}
                     </div>
                   )}
-                </Panel>
-              </div>
+                </ComposerSection>
+              </aside>
             </div>
 
-            <div className="mt-5 flex flex-col gap-3 border-t border-stone-200 pt-4 md:flex-row md:items-end md:justify-between">
-              <div className="space-y-1 text-xs text-stone-500">
-                <div>
-                  附件：{selectedAttachmentNames.length > 0 ? selectedAttachmentNames.join('、') : '未选择'}
+            <div className="mt-4">
+              <ComposerSection
+                icon={<MailCheck className="h-4 w-4" />}
+                title="发送动作"
+                description="确认无误后发送，或保留定时。"
+              >
+                <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                  <div className="min-w-0 space-y-1 text-xs text-stone-500">
+                    <div className="truncate">
+                      附件：{selectedAttachmentNames.length > 0 ? selectedAttachmentNames.join('、') : '未选择'}
+                    </div>
+                    <div>定时：{scheduledSummary}</div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-3">
+                    {currentTask.status === 'scheduled' ? (
+                      <button
+                        type="button"
+                        onClick={onCancelSchedule}
+                        disabled={acting}
+                        className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <TimerReset className="h-4 w-4" />
+                        取消定时
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={onScheduleSend}
+                        disabled={acting || !draftReady || !scheduledAt}
+                        className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <CalendarClock className="h-4 w-4" />
+                        定时发送
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={onSendNow}
+                      disabled={acting || !draftReady}
+                      className="ui-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <Send className="h-4 w-4" />
+                      立即发送
+                    </button>
+                  </div>
                 </div>
-                <div>定时：{scheduledSummary}</div>
-              </div>
-
-              <div className="flex flex-wrap gap-3">
-                {currentTask.status === 'scheduled' ? (
-                  <button
-                    type="button"
-                    onClick={onCancelSchedule}
-                    disabled={acting}
-                    className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <TimerReset className="h-4 w-4" />
-                    取消定时
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={onScheduleSend}
-                    disabled={acting || !draftReady || !scheduledAt}
-                    className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <CalendarClock className="h-4 w-4" />
-                    定时发送
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  onClick={onSendNow}
-                  disabled={acting || !draftReady}
-                  className="ui-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <Send className="h-4 w-4" />
-                  立即发送
-                </button>
-              </div>
+              </ComposerSection>
             </div>
           </div>
         ) : null}

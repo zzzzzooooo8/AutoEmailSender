@@ -208,9 +208,51 @@ describe("WorkspaceComposerDock copy", () => {
     );
 
     expect(screen.getByRole("textbox", { name: "邮件正文" })).toHaveTextContent("老师您好");
-    expect(screen.getByRole("textbox", { name: "邮件主题" })).toHaveValue("测试主题");
+    expect(screen.getByRole("textbox", { name: "邮件主题" })).toHaveTextContent("测试主题");
     expect(screen.getByRole("button", { name: "主题占位符菜单" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "插入表格" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "HTML 预览" })).not.toBeInTheDocument();
+  });
+
+  it("organizes the expanded composer around an editing canvas and a sending rail", () => {
+    render(
+      <WorkspaceComposerDock
+        thread={thread}
+        currentTask={currentTask}
+        currentTaskMode="llm"
+        draftReady={true}
+        subject="测试主题"
+        content="老师您好"
+        contentHtml="<p>老师您好</p>"
+        selectedMaterialIds={[material.id]}
+        scheduledAt="2026-04-22T18:30"
+        acting={false}
+        primaryMaterialOptions={[material]}
+        canChangePrimaryMaterial={true}
+        canChangeMode={true}
+        canCalculateMatch={true}
+        canGenerateDraft={true}
+        composerExpanded={true}
+        nextStepTitle="检查后发送"
+        nextStepDescription="检查主题、正文和附件后发送。"
+        onToggleExpanded={vi.fn()}
+        onSubjectChange={vi.fn()}
+        onContentChange={vi.fn()}
+        onSelectedMaterialIdsChange={vi.fn()}
+        onScheduledAtChange={vi.fn()}
+        onSelectPrimaryMaterial={vi.fn()}
+        onSendNow={vi.fn()}
+        onScheduleSend={vi.fn()}
+        onCancelSchedule={vi.fn()}
+        onCalculateMatch={vi.fn()}
+        onGenerateDraft={vi.fn()}
+        onChangeMode={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("正文编辑")).toBeInTheDocument();
+    expect(screen.getByText("发送前核对")).toBeInTheDocument();
+    expect(screen.getByText("生成与模式")).toBeInTheDocument();
+    expect(screen.getByText("发送动作")).toBeInTheDocument();
   });
 });

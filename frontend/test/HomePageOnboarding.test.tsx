@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getOnboardingState } from "@/features/onboarding/client/getOnboardingState";
@@ -231,5 +231,51 @@ describe("HomePage onboarding", () => {
     expect(
       screen.queryByRole("heading", { name: "完成首次配置" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("shows concise homepage status groups instead of every task state", async () => {
+    mockedListProfessors.mockResolvedValue([
+      professor,
+      {
+        ...professor,
+        id: 102,
+        name: "李教授",
+        status: "sent",
+      },
+      {
+        ...professor,
+        id: 103,
+        name: "赵教授",
+        status: "replied",
+      },
+    ]);
+    mockedUseSelectionContext.mockReturnValue({
+      selectedIdentityId: 1,
+      selectedLlmProfileId: 1,
+      selectedIdentity: createIdentity({
+        current_primary_material_id: 11,
+        outreach_template_body_text: "老师您好",
+      }),
+      selectedLlmProfile,
+    });
+
+    renderPage();
+
+    expect(
+      await screen.findByRole("heading", { name: "导师看板" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "状态" }));
+
+    expect(screen.getAllByRole("option").map((item) => item.textContent)).toEqual([
+      "全部状态",
+      "未开始",
+      "准备中",
+      "已发送",
+      "已回复",
+      "需处理",
+    ]);
+    expect(screen.queryByRole("option", { name: "待审核" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "已排程" })).not.toBeInTheDocument();
   });
 });

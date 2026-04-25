@@ -335,7 +335,7 @@ export const EmailTemplateEditor = ({
             editor
               .chain()
               .focus()
-              .insertTable({ rows: 2, cols: 2, withHeaderRow: true })
+              .insertTable({ rows: 2, cols: 2, withHeaderRow: false })
               .run()
           }
           className="rounded-xl p-2 text-stone-600 hover:bg-white"

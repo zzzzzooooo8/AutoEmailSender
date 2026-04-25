@@ -15,6 +15,15 @@ export type TemplatePlaceholderOption = {
   token: string;
 };
 
+export type TemplatePlaceholderSegment =
+  | { type: "text"; value: string }
+  | {
+      type: "placeholder";
+      key: TemplatePlaceholderKey;
+      label: string;
+      token: string;
+    };
+
 export const TEMPLATE_PLACEHOLDER_OPTIONS: TemplatePlaceholderOption[] = [
   { key: "name", label: "导师姓名", token: "{{name}}" },
   { key: "email", label: "导师邮箱", token: "{{email}}" },
@@ -30,11 +39,46 @@ export const TEMPLATE_PLACEHOLDER_OPTIONS: TemplatePlaceholderOption[] = [
 export const getTemplatePlaceholder = (key: string | null | undefined) =>
   TEMPLATE_PLACEHOLDER_OPTIONS.find((option) => option.key === key);
 
-const tokenPattern =
+const createTemplateTokenPattern = () =>
   /\{\{\s*(name|email|title|university|school|department|research_direction|sender_name|sender_email)\s*\}\}/g;
 
+export const parseTemplatePlaceholderText = (text: string) => {
+  const segments: TemplatePlaceholderSegment[] = [];
+  const tokenPattern = createTemplateTokenPattern();
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = tokenPattern.exec(text)) !== null) {
+    const [token, key] = match as RegExpExecArray & [string, TemplatePlaceholderKey];
+
+    if (match.index > cursor) {
+      segments.push({ type: "text", value: text.slice(cursor, match.index) });
+    }
+
+    const option = getTemplatePlaceholder(key);
+    if (option) {
+      segments.push({
+        type: "placeholder",
+        key,
+        label: option.label,
+        token: option.token,
+      });
+    } else {
+      segments.push({ type: "text", value: token });
+    }
+
+    cursor = match.index + token.length;
+  }
+
+  if (cursor < text.length) {
+    segments.push({ type: "text", value: text.slice(cursor) });
+  }
+
+  return segments;
+};
+
 export const prepareTemplatePlaceholderHtml = (html: string) =>
-  html.replace(tokenPattern, (_match, key: TemplatePlaceholderKey) => {
+  html.replace(createTemplateTokenPattern(), (_match, key: TemplatePlaceholderKey) => {
     const option = getTemplatePlaceholder(key);
     return `<span data-template-placeholder="${key}">${option?.label ?? key}</span>`;
   });

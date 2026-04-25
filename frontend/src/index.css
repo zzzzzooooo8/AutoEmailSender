@@ -228,6 +228,8 @@ select.form-input,
   border-collapse: collapse;
   table-layout: fixed;
   background: white;
+  font-size: inherit !important;
+  line-height: inherit;
 }
 
 .email-editor-content :where(th, td) {
@@ -235,6 +237,8 @@ select.form-input,
   border: 1px solid rgb(214 211 209);
   padding: 0.55rem 0.65rem;
   vertical-align: top;
+  font-size: inherit !important;
+  line-height: inherit;
 }
 
 .email-editor-content :where(th) {
@@ -244,6 +248,8 @@ select.form-input,
 
 .email-editor-content :where(th, td) > * {
   margin: 0;
+  font-size: inherit !important;
+  line-height: inherit;
 }
 
 .email-editor-content .selectedCell {

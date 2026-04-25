@@ -1,4 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { EmailTemplateEditor } from "@/components/molecules/EmailTemplateEditor";
 
@@ -57,6 +59,35 @@ describe("EmailTemplateEditor", () => {
     expect(screen.getByRole("button", { name: "上方插入行" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "右侧插入列" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "删除表格" })).toBeInTheDocument();
+  });
+
+  it("inserts regular table cells so table text matches body typography", () => {
+    const handleChange = vi.fn();
+    render(
+      <EmailTemplateEditor
+        label="邮件正文"
+        html="<p>老师您好</p>"
+        onChange={handleChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "插入表格" }));
+
+    const latestHtml = handleChange.mock.lastCall?.[0].html as string;
+    expect(latestHtml).toContain("<table");
+    expect(latestHtml).toContain("<td");
+    expect(latestHtml).not.toContain("<th");
+  });
+
+  it("prevents pasted table cell font sizes from overriding editor typography", () => {
+    const editorCss = readFileSync(resolve(process.cwd(), "src/index.css"), "utf8");
+
+    expect(editorCss).toMatch(
+      /\.email-editor-content :where\(th, td\) \{[\s\S]*font-size: inherit !important;/,
+    );
+    expect(editorCss).toMatch(
+      /\.email-editor-content :where\(th, td\) > \* \{[\s\S]*font-size: inherit !important;/,
+    );
   });
 
   it("renders known template tokens as inline placeholder chips", () => {
