@@ -231,6 +231,14 @@ async def save_candidates(
     ctx: CrawlToolContext,
     candidates: Sequence[ProfessorCandidatePayload],
 ) -> list[CrawlCandidate]:
+    payloads = [
+        normalize_candidate_payload(
+            candidate,
+            university=ctx.university,
+            school=ctx.school,
+        )
+        for candidate in candidates
+    ]
     saved: list[CrawlCandidate] = []
     async with ctx.session_factory() as session:
         if await _is_crawl_job_canceled(session, ctx.job_id):
@@ -238,12 +246,7 @@ async def save_candidates(
 
         existing_emails = await _load_existing_candidate_emails(session, ctx.job_id)
         seen_emails = set(existing_emails)
-        for candidate in candidates:
-            payload = normalize_candidate_payload(
-                candidate,
-                university=ctx.university,
-                school=ctx.school,
-            )
+        for payload in payloads:
             email = payload["email"]
             if email and email.lower() in seen_emails:
                 continue
@@ -254,6 +257,10 @@ async def save_candidates(
             if email:
                 seen_emails.add(email.lower())
 
+        if await _is_crawl_job_canceled(session, ctx.job_id):
+            await session.rollback()
+            return []
+
         await session.commit()
         for row in saved:
             await session.refresh(row)
@@ -261,22 +268,26 @@ async def save_candidates(
 
 
 async def record_page_snapshot(ctx: CrawlToolContext, snapshot: PageSnapshot) -> CrawlPage | None:
+    row = CrawlPage(
+        job_id=ctx.job_id,
+        url=snapshot.url,
+        parent_url=None,
+        fetch_method=snapshot.fetch_method,
+        page_type="unknown",
+        status=snapshot.status,
+        title=snapshot.title,
+        text_excerpt=snapshot.text[:MAX_TEXT_CHARS] or None,
+        error_message=snapshot.error_message,
+    )
     async with ctx.session_factory() as session:
         if await _is_crawl_job_canceled(session, ctx.job_id):
             return None
 
-        row = CrawlPage(
-            job_id=ctx.job_id,
-            url=snapshot.url,
-            parent_url=None,
-            fetch_method=snapshot.fetch_method,
-            page_type="unknown",
-            status=snapshot.status,
-            title=snapshot.title,
-            text_excerpt=snapshot.text[:MAX_TEXT_CHARS] or None,
-            error_message=snapshot.error_message,
-        )
         session.add(row)
+        if await _is_crawl_job_canceled(session, ctx.job_id):
+            await session.rollback()
+            return None
+
         await session.commit()
         await session.refresh(row)
         return row

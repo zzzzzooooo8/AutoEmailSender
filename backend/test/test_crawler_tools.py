@@ -5,10 +5,12 @@ from unittest.mock import patch
 
 from app.services.crawler_tools import (
     CrawlToolContext,
+    PageSnapshot,
     ProfessorCandidatePayload,
     crawl_page_with_http,
     is_allowed_crawl_url,
     normalize_candidate_payload,
+    record_page_snapshot,
     save_candidates,
 )
 
@@ -84,6 +86,79 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved, [])
         self.assertEqual(session_factory.added, [])
 
+    async def test_save_candidates_rolls_back_when_job_is_canceled_before_commit(self) -> None:
+        session_factory = _FakeSessionFactory(job_statuses=["running", "canceled"])
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://cs.example.edu/faculty",
+            university="示例大学",
+            school="计算机学院",
+            session_factory=session_factory,  # type: ignore[arg-type]
+        )
+
+        saved = await save_candidates(
+            ctx,
+            [
+                ProfessorCandidatePayload(
+                    name="张三",
+                    email="zhang@example.edu",
+                ),
+            ],
+        )
+
+        self.assertEqual(saved, [])
+        self.assertEqual(session_factory.added, [])
+        self.assertEqual(session_factory.rollback_count, 1)
+
+    async def test_record_page_snapshot_skips_canceled_job(self) -> None:
+        session_factory = _FakeSessionFactory(job_status="canceled")
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://cs.example.edu/faculty",
+            university="示例大学",
+            school="计算机学院",
+            session_factory=session_factory,  # type: ignore[arg-type]
+        )
+
+        row = await record_page_snapshot(
+            ctx,
+            PageSnapshot(
+                url="https://cs.example.edu/faculty",
+                title="Faculty",
+                text="Faculty page",
+                fetch_method="http",
+                status="succeeded",
+            ),
+        )
+
+        self.assertIsNone(row)
+        self.assertEqual(session_factory.added, [])
+
+    async def test_record_page_snapshot_rolls_back_when_job_is_canceled_before_commit(self) -> None:
+        session_factory = _FakeSessionFactory(job_statuses=["running", "canceled"])
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://cs.example.edu/faculty",
+            university="示例大学",
+            school="计算机学院",
+            session_factory=session_factory,  # type: ignore[arg-type]
+        )
+
+        row = await record_page_snapshot(
+            ctx,
+            PageSnapshot(
+                url="https://cs.example.edu/faculty",
+                title="Faculty",
+                text="Faculty page",
+                fetch_method="http",
+                status="succeeded",
+            ),
+        )
+
+        self.assertIsNone(row)
+        self.assertEqual(session_factory.added, [])
+        self.assertEqual(session_factory.rollback_count, 1)
+
     async def test_crawl_page_with_http_rejects_cross_host_final_url(self) -> None:
         session_factory = _FakeSessionFactory()
         ctx = CrawlToolContext(
@@ -115,18 +190,24 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
 
 
 class _FakeSessionFactory:
-    def __init__(self, *, job_status: str = "running") -> None:
+    def __init__(self, *, job_status: str = "running", job_statuses: list[str] | None = None) -> None:
         self.added: list[object] = []
-        self.job_status = job_status
+        self._job_statuses = list(job_statuses or [job_status])
+        self.rollback_count = 0
 
     def __call__(self) -> "_FakeSession":
-        return _FakeSession(self.added, self.job_status)
+        return _FakeSession(self)
+
+    def next_job_status(self) -> str:
+        if len(self._job_statuses) > 1:
+            return self._job_statuses.pop(0)
+        return self._job_statuses[0]
 
 
 class _FakeSession:
-    def __init__(self, added: list[object], job_status: str) -> None:
-        self._added = added
-        self._job_status = job_status
+    def __init__(self, factory: _FakeSessionFactory) -> None:
+        self._factory = factory
+        self._staged: list[object] = []
 
     async def __aenter__(self) -> "_FakeSession":
         return self
@@ -135,17 +216,35 @@ class _FakeSession:
         return None
 
     def add(self, row: object) -> None:
-        self._added.append(row)
+        self._staged.append(row)
 
     async def get(self, model: object, key: object) -> object:
         _ = model, key
-        return _FakeJob(status=self._job_status)
+        return _FakeJob(status=self._factory.next_job_status())
+
+    async def scalars(self, statement: object) -> "_FakeScalarResult":
+        _ = statement
+        return _FakeScalarResult([])
 
     async def commit(self) -> None:
+        self._factory.added.extend(self._staged)
+        self._staged.clear()
         return None
+
+    async def rollback(self) -> None:
+        self._staged.clear()
+        self._factory.rollback_count += 1
 
     async def refresh(self, row: object) -> None:
         return None
+
+
+class _FakeScalarResult:
+    def __init__(self, items: list[object]) -> None:
+        self._items = items
+
+    def __iter__(self):
+        return iter(self._items)
 
 
 class _FakeJob:
