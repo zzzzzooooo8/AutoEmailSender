@@ -13,7 +13,7 @@ from app.services.outreach_templates import import_outreach_template_file
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "4c1a2b3d4e5f"
+HEAD_REVISION = "7b9c2d4e6f10"
 LEGACY_RUNTIME_REVISION = "7a1d5e42c9bd"
 
 
@@ -87,6 +87,16 @@ class DatabaseSchemaTests(unittest.TestCase):
         self.assertIn("reply_headers", log_columns)
         self.assertNotIn("mail_delivery_mode", settings_columns)
         self.assertNotIn("signature", identity_columns)
+
+    def test_crawl_job_tables_exist(self) -> None:
+        rows = self.connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'",
+        ).fetchall()
+        table_names = {row[0] for row in rows}
+
+        self.assertIn("crawl_jobs", table_names)
+        self.assertIn("crawl_pages", table_names)
+        self.assertIn("crawl_candidates", table_names)
 
     def test_html_template_import_derives_text_from_sanitized_html(self) -> None:
         imported = import_outreach_template_file(
