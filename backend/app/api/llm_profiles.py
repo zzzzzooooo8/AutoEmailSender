@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
@@ -121,6 +122,25 @@ async def fetch_models_for_llm_profile(
 ) -> LLMProfileModelsResult:
     profile = await _get_profile(session, profile_id)
     result = await fetch_llm_profile_models(profile)
+    await _record_llm_profile_log(
+        session,
+        profile,
+        "llm_profile.models_fetched",
+        level="info" if result.ok else "warning",
+        metadata={
+            "ok": result.ok,
+            "result": "ok" if result.ok else "failed",
+            "status_code": result.status_code,
+            "duration_ms": result.duration_ms,
+            "endpoint_kind": result.endpoint_kind,
+            "resolved_base_url": _strip_url_query_and_fragment(result.resolved_base_url),
+            "request_url": _strip_url_query_and_fragment(result.request_url),
+            "attempted_urls": _strip_url_list_query_and_fragment(result.attempted_urls),
+            "model_count": len(result.models),
+            "selected_model_available": result.selected_model_available,
+        },
+    )
+    await session.commit()
     return LLMProfileModelsResult(
         ok=result.ok,
         message=result.message,
@@ -154,11 +174,10 @@ async def test_llm_profile(
             "status_code": result.status_code,
             "duration_ms": result.duration_ms,
             "endpoint_kind": result.endpoint_kind,
-            "resolved_base_url": result.resolved_base_url,
+            "resolved_base_url": _strip_url_query_and_fragment(result.resolved_base_url),
+            "request_url": _strip_url_query_and_fragment(result.request_url),
+            "attempted_urls": _strip_url_list_query_and_fragment(result.attempted_urls),
             "consumes_tokens": result.consumes_tokens,
-            "prompt_tokens": result.prompt_tokens,
-            "completion_tokens": result.completion_tokens,
-            "total_tokens": result.total_tokens,
         },
     )
     await session.commit()
@@ -211,7 +230,7 @@ async def _record_llm_profile_log(
         "name": profile.name,
         "provider": profile.provider,
         "model_name": profile.model_name,
-        "api_base_url": profile.api_base_url,
+        "api_base_url": _strip_url_query_and_fragment(profile.api_base_url),
         "is_default": profile.is_default,
     }
     if metadata:
@@ -225,3 +244,18 @@ async def _record_llm_profile_log(
         entity_id=str(profile.id),
         metadata=base_metadata,
     )
+
+
+def _strip_url_query_and_fragment(url: str | None) -> str | None:
+    if url is None:
+        return None
+    parsed = urlsplit(url)
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+
+
+def _strip_url_list_query_and_fragment(urls: list[str]) -> list[str]:
+    return [
+        sanitized
+        for url in urls
+        if (sanitized := _strip_url_query_and_fragment(url)) is not None
+    ]

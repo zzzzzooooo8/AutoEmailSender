@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,21 +10,18 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 
-BACKEND_DIR = Path(__file__).resolve().parents[1]
-
-
 class OperationLogIntegrationTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.temp_dir.name) / "operation_log_integration.db"
-        os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{self.db_path.as_posix()}"
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.temp_dir = tempfile.TemporaryDirectory()
+        cls.db_path = Path(cls.temp_dir.name) / "operation_log_integration.db"
+        os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{cls.db_path.as_posix()}"
         os.environ["ENABLE_BACKGROUND_WORKERS"] = "0"
-        self._run_alembic_upgrade()
-        self.getaddrinfo_patcher = patch(
+        cls.getaddrinfo_patcher = patch(
             "app.services.crawler_tools.socket.getaddrinfo",
             return_value=[(0, 0, 0, "", ("93.184.216.34", 443))],
         )
-        self.getaddrinfo_patcher.start()
+        cls.getaddrinfo_patcher.start()
 
         from app.core.config import get_settings
         from app.core.database import dispose_engine, get_engine, get_session_factory
@@ -38,10 +33,12 @@ class OperationLogIntegrationTests(unittest.TestCase):
         get_session_factory.cache_clear()
         get_settings.cache_clear()
 
-        self.client = TestClient(create_app())
+        asyncio.run(cls._create_schema())
+        cls.client = TestClient(create_app())
 
-    def tearDown(self) -> None:
-        self.client.close()
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.client.close()
 
         from app.core.config import get_settings
         from app.core.database import dispose_engine, get_engine, get_session_factory
@@ -52,8 +49,11 @@ class OperationLogIntegrationTests(unittest.TestCase):
         get_settings.cache_clear()
         os.environ.pop("DATABASE_URL", None)
         os.environ.pop("ENABLE_BACKGROUND_WORKERS", None)
-        self.getaddrinfo_patcher.stop()
-        self.temp_dir.cleanup()
+        cls.getaddrinfo_patcher.stop()
+        cls.temp_dir.cleanup()
+
+    def setUp(self) -> None:
+        asyncio.run(self._clear_database())
 
     def test_create_crawl_job_records_operation_log_with_response_request_id(self) -> None:
         response = self.client.post(
@@ -134,8 +134,32 @@ class OperationLogIntegrationTests(unittest.TestCase):
         self.assertEqual(create_logs[0]["category"], "user_action")
         self.assertEqual(archive_logs[0]["metadata"]["affected_count"], 1)
 
+    def test_smtp_test_records_result_without_sensitive_fields(self) -> None:
+        identity_id = self._create_identity("smtp-log@example.com")
+
+        with patch(
+            "app.api.identities.test_smtp_connection",
+            AsyncMock(return_value=(True, "SMTP 连接测试成功")),
+        ):
+            response = self.client.post(f"/api/identities/{identity_id}/smtp-test")
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        logs = self._list_logs("identity.smtp_tested", entity_id=str(identity_id))
+
+        self.assertEqual(len(logs), 1)
+        metadata = logs[0]["metadata"]
+        self.assertTrue(metadata["ok"])
+        self.assertEqual(metadata["result"], "ok")
+        self.assertEqual(metadata["host"], "smtp.example.com")
+        self.assertNotIn("smtp_password", metadata)
+        self.assertNotIn("smtp-secret", str(metadata))
+
     def test_llm_profile_test_records_failed_result_without_sensitive_fields(self) -> None:
-        llm_profile_id = self._create_llm_profile("测试模型", api_key="sk-sensitive-test-key")
+        llm_profile_id = self._create_llm_profile(
+            "测试模型",
+            api_key="sk-sensitive-test-key",
+            api_base_url="https://api.example.com/v1?api_key=secret#x",
+        )
 
         with patch(
             "app.api.llm_profiles.probe_llm_profile",
@@ -154,6 +178,36 @@ class OperationLogIntegrationTests(unittest.TestCase):
         self.assertEqual(metadata["provider"], "openai")
         self.assertNotIn("api_key", metadata)
         self.assertNotIn("sk-sensitive-test-key", str(metadata))
+        self.assertNotIn("secret", str(metadata))
+        self.assertNotIn("?api_key=", str(metadata))
+        self.assertNotIn("#x", str(metadata))
+
+    def test_llm_profile_models_fetch_records_result_without_sensitive_urls(self) -> None:
+        llm_profile_id = self._create_llm_profile(
+            "模型列表配置",
+            api_base_url="https://api.example.com/v1?api_key=secret#x",
+        )
+
+        with patch(
+            "app.api.llm_profiles.fetch_llm_profile_models",
+            AsyncMock(return_value=self._build_model_catalog_result()),
+        ):
+            response = self.client.get(f"/api/llm-profiles/{llm_profile_id}/models")
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        logs = self._list_logs("llm_profile.models_fetched", entity_id=str(llm_profile_id))
+
+        self.assertEqual(len(logs), 1)
+        metadata = logs[0]["metadata"]
+        self.assertFalse(metadata["ok"])
+        self.assertEqual(metadata["status_code"], 503)
+        self.assertEqual(metadata["duration_ms"], 34)
+        self.assertEqual(metadata["model_count"], 2)
+        self.assertEqual(metadata["endpoint_kind"], "models")
+        self.assertNotIn("secret", str(metadata))
+        self.assertNotIn("token=", str(metadata))
+        self.assertNotIn("?api_key=", str(metadata))
+        self.assertNotIn("#x", str(metadata))
 
     def _list_logs(
         self,
@@ -201,13 +255,19 @@ class OperationLogIntegrationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201, msg=response.text)
         return response.json()["id"]
 
-    def _create_llm_profile(self, name: str, *, api_key: str = "sk-test-key") -> int:
+    def _create_llm_profile(
+        self,
+        name: str,
+        *,
+        api_key: str = "sk-test-key",
+        api_base_url: str = "https://api.example.com/v1",
+    ) -> int:
         response = self.client.post(
             "/api/llm-profiles",
             json={
                 "name": name,
                 "provider": "openai",
-                "api_base_url": "https://api.example.com/v1",
+                "api_base_url": api_base_url,
                 "api_key": api_key,
                 "model_name": "gpt-4o-mini",
                 "matcher_prompt_template": "matcher",
@@ -247,9 +307,9 @@ class OperationLogIntegrationTests(unittest.TestCase):
         return LLMProbeResult(
             ok=False,
             message="认证失败",
-            resolved_base_url="https://api.example.com/v1",
-            request_url="https://api.example.com/v1/chat/completions?api_key=secret",
-            attempted_urls=["https://api.example.com/v1/chat/completions?api_key=secret"],
+            resolved_base_url="https://api.example.com/v1?token=secret#frag",
+            request_url="https://api.example.com/v1/chat/completions?api_key=secret#frag",
+            attempted_urls=["https://api.example.com/v1/chat/completions?api_key=secret#frag"],
             endpoint_kind="chat",
             status_code=401,
             duration_ms=12,
@@ -260,21 +320,68 @@ class OperationLogIntegrationTests(unittest.TestCase):
             response_preview=None,
         )
 
-    def _run_alembic_upgrade(self) -> None:
-        result = subprocess.run(
-            [sys.executable, "-m", "alembic", "upgrade", "head"],
-            cwd=BACKEND_DIR,
-            env=os.environ.copy(),
-            capture_output=True,
-            text=True,
-            check=False,
+    @staticmethod
+    def _build_model_catalog_result():
+        from app.services.llm_runtime import LLMModelCatalogResult
+
+        return LLMModelCatalogResult(
+            ok=False,
+            message="模型列表获取失败",
+            resolved_base_url="https://api.example.com/v1?token=secret#frag",
+            request_url="https://api.example.com/v1/models?api_key=secret#frag",
+            attempted_urls=["https://api.example.com/v1/models?api_key=secret#frag"],
+            endpoint_kind="models",
+            status_code=503,
+            duration_ms=34,
+            consumes_tokens=False,
+            models=["gpt-a", "gpt-b"],
+            selected_model_available=False,
         )
-        if result.returncode != 0:
-            self.fail(
-                "Alembic migration failed.\n"
-                f"stdout:\n{result.stdout}\n"
-                f"stderr:\n{result.stderr}",
-            )
+
+    async def _clear_database(self) -> None:
+        from sqlalchemy import delete
+
+        from app.core.database import get_session_factory
+        from app.models import (
+            BatchTask,
+            EmailLog,
+            EmailTask,
+            IdentityMaterial,
+            IdentityProfile,
+            LLMProfile,
+            OperationLog,
+            Professor,
+            TestComposeMessage,
+            TestComposeSession,
+        )
+        from app.models.crawl_job import CrawlCandidate, CrawlJob, CrawlPage
+
+        async with get_session_factory()() as session:
+            for model in [
+                OperationLog,
+                TestComposeMessage,
+                TestComposeSession,
+                EmailLog,
+                EmailTask,
+                BatchTask,
+                CrawlCandidate,
+                CrawlPage,
+                CrawlJob,
+                IdentityMaterial,
+                IdentityProfile,
+                LLMProfile,
+                Professor,
+            ]:
+                await session.execute(delete(model))
+            await session.commit()
+
+    @classmethod
+    async def _create_schema(cls) -> None:
+        from app.core.database import get_engine
+        from app.models import Base
+
+        async with get_engine().begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
 
 
 if __name__ == "__main__":
