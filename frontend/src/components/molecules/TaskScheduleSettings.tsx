@@ -55,13 +55,13 @@ export const TaskScheduleSettings: React.FC<TaskScheduleSettingsProps> = ({
 
       {/* 定时配置 */}
       {isScheduled && (
-        <div className="flex flex-col gap-4 rounded-xl border border-stone-200 bg-stone-50 p-4">
+        <div className="flex flex-col gap-5 border-t border-stone-200 pt-4">
           <TaskDateSelector
             selectedDates={schedule.scheduledDates ?? []}
             onChange={onScheduledDatesChange}
           />
 
-          <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
+          <div className="flex flex-col gap-4 border-t border-stone-200 pt-4 sm:flex-row sm:flex-wrap sm:items-end">
             <div className="flex flex-col gap-1.5">
               <span className="text-xs font-medium text-stone-500">开始时间</span>
               <TaskTimePicker

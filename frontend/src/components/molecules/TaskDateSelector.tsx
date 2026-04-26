@@ -85,14 +85,14 @@ export const TaskDateSelector: React.FC<TaskDateSelectorProps> = ({
       return;
     }
 
-    onChange(normalizeScheduledDates([...normalizedSelectedDates, dateToAdd]));
+    onChange(toggleScheduledDate(normalizedSelectedDates, dateToAdd));
     const addedDate = fromIsoDate(dateToAdd);
     setVisibleMonth(new Date(Date.UTC(addedDate.getUTCFullYear(), addedDate.getUTCMonth(), 1)));
     setDateToAdd('');
   };
 
   return (
-    <div className="flex flex-col gap-4 rounded-lg border border-stone-200 bg-white p-4">
+    <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <p className="text-sm font-semibold text-stone-700">发送日期</p>
@@ -209,7 +209,7 @@ export const TaskDateSelector: React.FC<TaskDateSelectorProps> = ({
           onClick={handleAddDate}
           className="h-9 rounded-lg bg-primary px-4 text-sm font-medium text-white shadow-sm transition-all hover:bg-primary/90"
         >
-          添加日期
+          添加/切换日期
         </button>
       </div>
     </div>
