@@ -32,6 +32,7 @@ from app.services.outreach_templates import (
     get_outreach_template_defaults_validation_error,
     resolve_outreach_template_config,
 )
+from app.services.batch_schedule import normalize_scheduled_dates
 
 
 router = APIRouter(prefix="/api/batch-tasks", tags=["batch-tasks"])
@@ -64,6 +65,20 @@ async def create_batch_task(
 ) -> BatchTaskCardRead:
     if not payload.professor_ids:
         raise HTTPException(status_code=400, detail="请至少选择一位导师")
+
+    try:
+        scheduled_dates = normalize_scheduled_dates(payload.scheduled_dates)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if payload.schedule_type == "scheduled":
+        if not scheduled_dates:
+            raise HTTPException(status_code=400, detail="请至少选择一个发送日期")
+        if not payload.window_start_time or not payload.window_end_time:
+            raise HTTPException(status_code=400, detail="请填写发送时间窗口")
+        if payload.window_end_time <= payload.window_start_time:
+            raise HTTPException(status_code=400, detail="结束时间必须晚于开始时间")
+        if not payload.emails_per_window or payload.emails_per_window <= 0:
+            raise HTTPException(status_code=400, detail="请输入每天发送数量")
 
     identity = await session.scalar(
         select(IdentityProfile)
@@ -138,6 +153,7 @@ async def create_batch_task(
         window_start_time=payload.window_start_time,
         window_end_time=payload.window_end_time,
         emails_per_window=payload.emails_per_window,
+        scheduled_dates=scheduled_dates or None,
         status=BatchTaskStatus.RUNNING.value,
         primary_material_id=primary_material_id,
         email_subject=_normalize_nullable_text(outreach_config.subject_template),
@@ -340,6 +356,7 @@ def _serialize_batch_task(task: BatchTask) -> BatchTaskCardRead:
         window_start_time=task.window_start_time,
         window_end_time=task.window_end_time,
         emails_per_window=task.emails_per_window,
+        scheduled_dates=task.scheduled_dates,
         email_subject=task.email_subject,
         target_count=task.target_count,
         completed_count=completed_count,

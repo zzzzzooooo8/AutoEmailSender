@@ -46,6 +46,7 @@ class BatchTask(Base):
     window_start_time: Mapped[str | None] = mapped_column(String(5), nullable=True)
     window_end_time: Mapped[str | None] = mapped_column(String(5), nullable=True)
     emails_per_window: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    scheduled_dates: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(
         String(32),
         nullable=False,

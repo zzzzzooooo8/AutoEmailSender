@@ -14,6 +14,7 @@ class CreateBatchTaskRequest(BaseModel):
     window_start_time: str | None = None
     window_end_time: str | None = None
     emails_per_window: int | None = None
+    scheduled_dates: list[str] | None = None
     primary_material_id: int | None = None
     email_subject: str | None = None
     email_body: str | None = None
@@ -32,6 +33,7 @@ class BatchTaskCardRead(BaseModel):
     window_start_time: str | None
     window_end_time: str | None
     emails_per_window: int | None
+    scheduled_dates: list[str] | None
     email_subject: str | None
     target_count: int
     completed_count: int
