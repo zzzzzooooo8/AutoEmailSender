@@ -298,6 +298,80 @@ export interface ProfessorActionResultDTO {
   message: string;
 }
 
+export type CrawlJobStatusDTO =
+  | 'queued'
+  | 'running'
+  | 'needs_review'
+  | 'completed'
+  | 'failed'
+  | 'canceled';
+
+export type CrawlCandidateReviewStatusDTO = 'pending' | 'accepted' | 'rejected' | 'merged';
+
+export interface CrawlJobCreatePayloadDTO {
+  university: string;
+  school: string;
+  start_url: string;
+  llm_profile_id: number | null;
+}
+
+export interface CrawlJobDTO {
+  id: number;
+  university: string;
+  school: string;
+  start_url: string;
+  llm_profile_id: number | null;
+  status: CrawlJobStatusDTO;
+  progress_current: number;
+  progress_total: number;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CrawlCandidateDTO {
+  id: number;
+  job_id: number;
+  professor_id: number | null;
+  name: string;
+  email: string | null;
+  title: string | null;
+  university: string | null;
+  school: string | null;
+  department: string | null;
+  research_direction: string | null;
+  recent_papers: string[];
+  profile_url: string | null;
+  source_url: string | null;
+  confidence: number;
+  field_confidence: Record<string, number> | null;
+  evidence: Record<string, unknown> | null;
+  review_status: CrawlCandidateReviewStatusDTO;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CrawlCandidateUpdatePayloadDTO {
+  name: string;
+  email: string | null;
+  title: string | null;
+  university: string | null;
+  school: string | null;
+  department: string | null;
+  research_direction: string | null;
+  recent_papers: string[];
+  profile_url: string | null;
+  source_url: string | null;
+  review_status: CrawlCandidateReviewStatusDTO;
+}
+
+export interface CrawlJobApproveResultDTO {
+  inserted_count: number;
+  updated_count: number;
+  skipped_count: number;
+  message: string;
+}
+
 export interface CreateBatchTaskRequestDTO {
   identity_id: number;
   llm_profile_id: number;

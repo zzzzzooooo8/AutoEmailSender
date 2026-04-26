@@ -26,6 +26,7 @@ import { NativeSelectField } from "@/components/atoms/NativeSelectField";
 import { ManagementProfessorRow } from "@/components/molecules/ManagementProfessorRow";
 import { useNotification } from "@/context/NotificationContext";
 import { useConfirmDialog } from "@/lib/useConfirmDialog";
+import { createCrawlJob } from "@/lib/api/crawlJobsApi";
 import {
   archiveProfessor,
   bulkArchiveProfessors,
@@ -35,7 +36,6 @@ import {
   importSampleProfessors,
   listProfessorsForManagement,
   restoreProfessor,
-  triggerCrawler,
   updateProfessor,
 } from "@/lib/api/professorsApi";
 import type {
@@ -56,6 +56,11 @@ type ProfessorFormState = {
   recent_papers_text: string;
   profile_url: string;
   source_url: string;
+};
+type CrawlerJobFormState = {
+  university: string;
+  school: string;
+  start_url: string;
 };
 
 const PROFESSORS_PER_PAGE = 20;
@@ -80,6 +85,12 @@ const emptyProfessorForm = (): ProfessorFormState => ({
   recent_papers_text: "",
   profile_url: "",
   source_url: "",
+});
+
+const emptyCrawlerJobForm = (): CrawlerJobFormState => ({
+  university: "",
+  school: "",
+  start_url: "",
 });
 
 const toProfessorForm = (
@@ -261,6 +272,9 @@ const ModalShell = ({
 
   return (
     <div
+      role="dialog"
+      aria-label={title}
+      aria-modal="true"
       className="fixed inset-0 z-[80] flex items-center justify-center bg-stone-950/35 p-4 backdrop-blur-md"
       onClick={onClose}
     >
@@ -316,7 +330,11 @@ export const ProfessorsPage = () => {
   const [importingFile, setImportingFile] = useState(false);
   const [importResult, setImportResult] =
     useState<ProfessorImportFileResultDTO | null>(null);
-  const [devBusy, setDevBusy] = useState<"sample" | "crawler" | null>(null);
+  const [devBusy, setDevBusy] = useState<"sample" | null>(null);
+  const [crawlerModalOpen, setCrawlerModalOpen] = useState(false);
+  const [crawlerFormState, setCrawlerFormState] =
+    useState<CrawlerJobFormState>(emptyCrawlerJobForm());
+  const [creatingCrawlJob, setCreatingCrawlJob] = useState(false);
   const loadProfessors = useCallback(
     async (filter: ArchiveFilter = archiveFilter) => {
       setLoading(true);
@@ -625,20 +643,41 @@ export const ProfessorsPage = () => {
     }
   };
 
-  const handleTriggerCrawler = async () => {
-    setDevBusy("crawler");
+  const closeCrawlerModal = () => {
+    if (creatingCrawlJob) {
+      return;
+    }
+    setCrawlerModalOpen(false);
+  };
+
+  const handleCreateCrawlJob = async () => {
+    const payload = {
+      university: crawlerFormState.university.trim(),
+      school: crawlerFormState.school.trim(),
+      start_url: crawlerFormState.start_url.trim(),
+      llm_profile_id: null,
+    };
+    setCreatingCrawlJob(true);
     try {
-      const result = await triggerCrawler();
-      notifySuccess("请求已提交", result.message);
+      await createCrawlJob(payload);
+      setCrawlerModalOpen(false);
+      setCrawlerFormState(emptyCrawlerJobForm());
+      notifySuccess("抓取任务已创建");
     } catch (crawlerError) {
       notifyError(
-        "智能抓取请求失败",
-        getActionErrorMessage(crawlerError, "智能抓取请求失败"),
+        "创建抓取任务失败",
+        getActionErrorMessage(crawlerError, "创建抓取任务失败"),
       );
     } finally {
-      setDevBusy(null);
+      setCreatingCrawlJob(false);
     }
   };
+
+  const crawlerSubmitDisabled =
+    creatingCrawlJob ||
+    !crawlerFormState.university.trim() ||
+    !crawlerFormState.school.trim() ||
+    !crawlerFormState.start_url.trim();
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-8">
@@ -991,10 +1030,10 @@ export const ProfessorsPage = () => {
               开发辅助
             </div>
             <div className="mt-3 text-sm font-medium text-stone-900">
-              样例导入与抓取占位
+              样例导入与智能抓取
             </div>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-stone-500">
-              这两项保留在导师管理页的次级区域，避免首页继续变重。样例导入会写入内置导师数据，智能抓取目前仍是占位能力。
+              这两项保留在导师管理页的次级区域，避免首页继续变重。样例导入会写入内置导师数据，智能抓取会创建一个导师列表抓取任务。
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
@@ -1011,13 +1050,10 @@ export const ProfessorsPage = () => {
             </button>
             <button
               type="button"
-              onClick={() => void handleTriggerCrawler()}
+              onClick={() => setCrawlerModalOpen(true)}
               disabled={devBusy !== null}
               className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {devBusy === "crawler" ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : null}
               智能抓取
             </button>
           </div>
@@ -1354,6 +1390,82 @@ export const ProfessorsPage = () => {
               </button>
             </div>
           </div>
+        </div>
+      </ModalShell>
+
+      <ModalShell
+        open={crawlerModalOpen}
+        title="创建抓取任务"
+        description="填写学校、学院和教师列表页面 URL，系统会创建抓取任务，候选审核将在后续版本补齐。"
+        onClose={closeCrawlerModal}
+        maxWidthClassName="max-w-2xl"
+      >
+        <div className="mt-6 grid gap-4">
+          <label className="block">
+            {renderFieldLabel("学校", true)}
+            <input
+              aria-label="学校"
+              value={crawlerFormState.university}
+              onChange={(event) =>
+                setCrawlerFormState((previous) => ({
+                  ...previous,
+                  university: event.target.value,
+                }))
+              }
+              className={inputClassName}
+              placeholder="示例：示例大学"
+            />
+          </label>
+          <label className="block">
+            {renderFieldLabel("学院", true)}
+            <input
+              aria-label="学院"
+              value={crawlerFormState.school}
+              onChange={(event) =>
+                setCrawlerFormState((previous) => ({
+                  ...previous,
+                  school: event.target.value,
+                }))
+              }
+              className={inputClassName}
+              placeholder="示例：计算机学院"
+            />
+          </label>
+          <label className="block">
+            {renderFieldLabel("教师列表页面 URL", true)}
+            <input
+              aria-label="教师列表页面 URL"
+              value={crawlerFormState.start_url}
+              onChange={(event) =>
+                setCrawlerFormState((previous) => ({
+                  ...previous,
+                  start_url: event.target.value,
+                }))
+              }
+              className={inputClassName}
+              placeholder="示例：https://example.edu/faculty"
+            />
+          </label>
+        </div>
+        <div className="mt-6 flex flex-wrap justify-end gap-3">
+          <button
+            type="button"
+            onClick={closeCrawlerModal}
+            className="ui-btn-secondary"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleCreateCrawlJob()}
+            disabled={crawlerSubmitDisabled}
+            className="ui-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {creatingCrawlJob ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : null}
+            开始抓取
+          </button>
         </div>
       </ModalShell>
 

@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
     batch_tasks_router,
+    crawl_jobs_router,
     email_tasks_router,
     identities_router,
     llm_profiles_router,
@@ -55,6 +56,7 @@ def create_app() -> FastAPI:
     app.include_router(llm_profiles_router)
     app.include_router(professors_router)
     app.include_router(test_compose_router)
+    app.include_router(crawl_jobs_router)
     app.include_router(batch_tasks_router)
     app.include_router(email_tasks_router)
     app.include_router(workspaces_router)
