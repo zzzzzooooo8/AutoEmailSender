@@ -32,6 +32,7 @@ interface DiagnosticExport {
 const diagnosticsStorageKey = "auto-email-diagnostics:v1";
 const diagnosticsSessionStorageKey = "auto-email-diagnostics-session:v1";
 const maxStoredEvents = 500;
+const maxDiagnosticStringLength = 300;
 const redactedValue = "[Redacted]";
 const unserializableValue = "[Unserializable]";
 const sensitiveKeys = new Set([
@@ -45,6 +46,7 @@ const sensitiveKeys = new Set([
   "cookie",
   "smtppassword",
 ]);
+const payloadKeys = new Set(["body", "requestbody", "responsebody", "rawbody", "payload"]);
 
 let memoryEvents: DiagnosticEvent[] = [];
 let memorySessionId: string | undefined;
@@ -60,7 +62,7 @@ export function recordDiagnosticEvent(input: DiagnosticEventInput): DiagnosticEv
   };
 
   if (input.message !== undefined) {
-    event.message = input.message;
+    event.message = sanitizeDiagnosticString(input.message);
   }
 
   if (Object.prototype.hasOwnProperty.call(input, "data")) {
@@ -189,7 +191,7 @@ function createId(): string {
 
 function safeToJsonValue(value: unknown, seen: WeakSet<object>, key?: string): JsonValue {
   try {
-    if (key && isSensitiveKey(key)) {
+    if (key && shouldRedactKey(key)) {
       return redactedValue;
     }
 
@@ -282,16 +284,19 @@ function readObjectValue(value: object, key: string): unknown {
   }
 }
 
-function isSensitiveKey(key: string): boolean {
-  return sensitiveKeys.has(key.toLowerCase().replace(/[^a-z0-9]/g, ""));
+function shouldRedactKey(key: string): boolean {
+  const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return sensitiveKeys.has(normalizedKey) || payloadKeys.has(normalizedKey);
 }
 
 function sanitizeStringValue(value: string, key?: string): string {
-  if ((key && key.toLowerCase().includes("url")) || looksLikeUrl(value)) {
-    return stripUrlQueryAndHash(value);
+  const sanitizedValue = sanitizeDiagnosticString(value);
+
+  if ((key && key.toLowerCase().includes("url")) || looksLikeUrl(sanitizedValue)) {
+    return stripUrlQueryAndHash(sanitizedValue);
   }
 
-  return value;
+  return sanitizedValue;
 }
 
 function looksLikeUrl(value: string): boolean {
@@ -306,5 +311,25 @@ function stripUrlQueryAndHash(value: string): string {
     return url.toString();
   } catch {
     return value;
+  }
+}
+
+function sanitizeDiagnosticString(value: string): string {
+  try {
+    const withoutSensitiveUrls = value.replace(/https?:\/\/[^\s"'<>]+/gi, (url) => stripUrlQueryAndHash(url));
+    const withoutAuthHeaders = withoutSensitiveUrls.replace(
+      /\bauthorization\s*[:=]\s*Bearer\s+[^\s,;&]+/gi,
+      redactedValue,
+    );
+    const withoutSensitiveKeyValues = withoutAuthHeaders.replace(
+      /\b(?:token|access[_-]?token|refresh[_-]?token|api[_-]?key|apikey|password|secret|authorization|cookie|smtp[_-]?password|smtppassword)\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;&]+)/gi,
+      redactedValue,
+    );
+
+    return withoutSensitiveKeyValues.length > maxDiagnosticStringLength
+      ? `${withoutSensitiveKeyValues.slice(0, maxDiagnosticStringLength)}...`
+      : withoutSensitiveKeyValues;
+  } catch {
+    return unserializableValue;
   }
 }

@@ -244,6 +244,77 @@ describe("diagnostics", () => {
     expect(serializedData).not.toContain("#debug");
   });
 
+  it("sanitizes top-level messages before storing and exporting diagnostics", async () => {
+    const { exportDiagnosticEvents, getDiagnosticEvents, recordDiagnosticEvent } = await loadDiagnostics();
+
+    recordDiagnosticEvent({
+      level: "error",
+      category: "api",
+      eventName: "api.request_failed",
+      message:
+        "Failed https://example.com/path?a=secret#x token=secret-token Authorization: Bearer abc " +
+        "cookie=sid=secret password=hunter2 apiKey=secret-key smtpPassword=mail-secret",
+    });
+
+    const [event] = getDiagnosticEvents();
+    expect(event.message).toContain("https://example.com/path");
+    expect(event.message).toContain("[Redacted]");
+
+    const stored = JSON.stringify(event);
+    const exported = exportDiagnosticEvents();
+    for (const value of [
+      "secret-token",
+      "Bearer abc",
+      "sid=secret",
+      "hunter2",
+      "secret-key",
+      "mail-secret",
+      "?a=secret",
+      "#x",
+    ]) {
+      expect(stored).not.toContain(value);
+      expect(exported).not.toContain(value);
+    }
+  });
+
+  it("redacts request and response body payload fields", async () => {
+    const { getDiagnosticEvents, recordDiagnosticEvent } = await loadDiagnostics();
+
+    recordDiagnosticEvent({
+      level: "error",
+      category: "api",
+      eventName: "api.request_failed",
+      data: {
+        body: "raw request body with secret",
+        requestBody: { email: "user@example.com", token: "secret-token" },
+        request_body: "raw snake request body",
+        responseBody: "raw response body",
+        response_body: "raw snake response body",
+        rawBody: "raw body",
+        payload: { nested: "large payload" },
+        safe: "visible",
+      },
+    });
+
+    const [event] = getDiagnosticEvents();
+    expect(event.data).toMatchObject({
+      body: "[Redacted]",
+      requestBody: "[Redacted]",
+      request_body: "[Redacted]",
+      responseBody: "[Redacted]",
+      response_body: "[Redacted]",
+      rawBody: "[Redacted]",
+      payload: "[Redacted]",
+      safe: "visible",
+    });
+
+    const serializedData = JSON.stringify(event.data);
+    expect(serializedData).not.toContain("raw request body");
+    expect(serializedData).not.toContain("raw response body");
+    expect(serializedData).not.toContain("secret-token");
+    expect(serializedData).not.toContain("large payload");
+  });
+
   it("exports formatted JSON with metadata", async () => {
     const { exportDiagnosticEvents, getDiagnosticSessionId, recordDiagnosticEvent } = await loadDiagnostics();
     recordDiagnosticEvent({
