@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, apiFetch, buildApiPath, buildApiUrl } from "@/lib/api/client";
+import { clearDiagnosticEvents, getDiagnosticEvents } from "@/lib/diagnostics";
 
 describe("api client", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    clearDiagnosticEvents();
   });
 
   it("builds encoded API paths while skipping empty query values", () => {
@@ -40,6 +42,19 @@ describe("api client", () => {
         headers: { "Content-Type": "application/json" },
       }),
     );
+    expect(getDiagnosticEvents()).toEqual([
+      expect.objectContaining({
+        level: "info",
+        category: "api",
+        eventName: "api.request_succeeded",
+        data: expect.objectContaining({
+          method: "POST",
+          path: "/api/ping",
+          status: 200,
+          durationMs: expect.any(Number),
+        }),
+      }),
+    ]);
   });
 
   it("does not force JSON content type when the request body is FormData", async () => {
@@ -73,5 +88,82 @@ describe("api client", () => {
         message,
       });
     }
+  });
+
+  it("records failed HTTP responses without sensitive query details", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ detail: "Invalid token" }), {
+        status: 401,
+      }),
+    );
+
+    await expect(apiFetch("/api/professors", undefined, { token: "secret", page: 1 })).rejects.toMatchObject<ApiError>(
+      {
+        status: 401,
+        message: "Invalid token",
+      },
+    );
+
+    expect(getDiagnosticEvents()).toEqual([
+      expect.objectContaining({
+        level: "error",
+        category: "api",
+        eventName: "api.request_failed",
+        data: expect.objectContaining({
+          method: "GET",
+          path: "/api/professors",
+          status: 401,
+          durationMs: expect.any(Number),
+          message: "Invalid token",
+        }),
+      }),
+    ]);
+    expect(JSON.stringify(getDiagnosticEvents()[0].data)).not.toContain("secret");
+  });
+
+  it("records fetch errors and rethrows the original error", async () => {
+    const networkError = new TypeError("Failed to fetch");
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(networkError);
+
+    await expect(apiFetch("/api/professors?token=secret")).rejects.toBe(networkError);
+
+    expect(getDiagnosticEvents()).toEqual([
+      expect.objectContaining({
+        level: "error",
+        category: "api",
+        eventName: "api.request_errored",
+        data: expect.objectContaining({
+          method: "GET",
+          path: "/api/professors",
+          durationMs: expect.any(Number),
+          error: "Failed to fetch",
+        }),
+      }),
+    ]);
+    expect(JSON.stringify(getDiagnosticEvents()[0].data)).not.toContain("secret");
+  });
+
+  it("uses readable FastAPI validation detail messages", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          detail: [{ loc: ["body", "email"], msg: "value is not a valid email address" }],
+        }),
+        { status: 422 },
+      ),
+    );
+
+    await expect(apiFetch("/api/send")).rejects.toMatchObject<ApiError>({
+      status: 422,
+      message: "body.email: value is not a valid email address",
+    });
+    expect(getDiagnosticEvents()[0]).toEqual(
+      expect.objectContaining({
+        eventName: "api.request_failed",
+        data: expect.objectContaining({
+          message: "body.email: value is not a valid email address",
+        }),
+      }),
+    );
   });
 });
