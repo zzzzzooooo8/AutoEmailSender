@@ -324,9 +324,35 @@ export interface CrawlJobDTO {
   status: CrawlJobStatusDTO;
   progress_current: number;
   progress_total: number;
+  page_count: number;
+  candidate_count: number;
+  latest_event_message: string | null;
   error_message: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface CrawlPageDTO {
+  id: number;
+  job_id: number;
+  url: string;
+  parent_url: string | null;
+  fetch_method: string;
+  page_type: string;
+  status: string;
+  title: string | null;
+  text_excerpt: string | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface CrawlJobEventDTO {
+  id: string;
+  job_id: number;
+  event_type: string;
+  message: string;
+  created_at: string | null;
+  raw: Record<string, unknown> | null;
 }
 
 export interface CrawlCandidateDTO {

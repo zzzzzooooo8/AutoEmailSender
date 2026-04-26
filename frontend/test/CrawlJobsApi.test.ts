@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createCrawlJob } from '@/lib/api/crawlJobsApi';
+import {
+  createCrawlJob,
+  getCrawlJobEvents,
+  listCrawlJobs,
+  listCrawlPages,
+} from '@/lib/api/crawlJobsApi';
 import type { CrawlJobCreatePayloadDTO } from '@/types';
 
 const mockedApiFetch = vi.hoisted(() => vi.fn());
@@ -26,6 +31,9 @@ describe('crawlJobsApi', () => {
       status: 'queued',
       progress_current: 0,
       progress_total: 0,
+      page_count: 0,
+      candidate_count: 0,
+      latest_event_message: null,
       error_message: null,
       created_at: '2026-04-26T10:00:00Z',
       updated_at: '2026-04-26T10:00:00Z',
@@ -38,5 +46,29 @@ describe('crawlJobsApi', () => {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+  });
+
+  it('lists crawl jobs from the expected URL', async () => {
+    mockedApiFetch.mockResolvedValue([]);
+
+    await listCrawlJobs();
+
+    expect(mockedApiFetch).toHaveBeenCalledWith('/api/crawl-jobs');
+  });
+
+  it('lists crawl pages from the expected job URL', async () => {
+    mockedApiFetch.mockResolvedValue([]);
+
+    await listCrawlPages(7);
+
+    expect(mockedApiFetch).toHaveBeenCalledWith('/api/crawl-jobs/7/pages');
+  });
+
+  it('gets crawl job events from the expected job URL', async () => {
+    mockedApiFetch.mockResolvedValue([]);
+
+    await getCrawlJobEvents(7);
+
+    expect(mockedApiFetch).toHaveBeenCalledWith('/api/crawl-jobs/7/events');
   });
 });
