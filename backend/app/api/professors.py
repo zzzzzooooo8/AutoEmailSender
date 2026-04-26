@@ -19,6 +19,7 @@ from app.schemas.professor import (
     ProfessorRead,
     ProfessorUpsertPayload,
 )
+from app.services.operation_logs import record_operation_log
 from app.services.professor_management import (
     build_professor_template,
     is_valid_professor_email,
@@ -185,7 +186,20 @@ async def import_professors_from_file(
             professor.updated_at = datetime.now(UTC)
             updated_count += 1
 
-        await session.commit()
+    await record_operation_log(
+        session,
+        category="user_action",
+        event_name="professor.import_file",
+        entity_type="professor",
+        metadata={
+            "filename": file.filename,
+            "inserted_count": inserted_count,
+            "updated_count": updated_count,
+            "failed_count": parsed.failed_count,
+            "row_count": len(parsed.data),
+        },
+    )
+    await session.commit()
 
     return ProfessorImportFileResult(
         inserted_count=inserted_count,
@@ -213,6 +227,8 @@ async def create_professor(
 
     professor = Professor(**professor_data)
     session.add(professor)
+    await session.flush()
+    await _record_professor_log(session, professor, "professor.created")
     await session.commit()
     await session.refresh(professor)
     return _serialize_management_professor(professor)
@@ -263,6 +279,7 @@ async def update_professor(
     professor.source_url = professor_data["source_url"]
     professor.updated_at = datetime.now(UTC)
 
+    await _record_professor_log(session, professor, "professor.updated")
     await session.commit()
     await session.refresh(professor)
     return _serialize_management_professor(professor)
@@ -282,7 +299,13 @@ async def archive_professor(
         professor.archived_at = datetime.now(UTC)
         professor.updated_at = datetime.now(UTC)
         affected_count = 1
-        await session.commit()
+    await _record_professor_log(
+        session,
+        professor,
+        "professor.archived",
+        metadata={"affected_count": affected_count},
+    )
+    await session.commit()
 
     return ProfessorActionResult(
         ok=True,
@@ -315,6 +338,17 @@ async def bulk_archive_professors(
             professor.updated_at = archive_time
             affected_count += 1
 
+    await record_operation_log(
+        session,
+        category="user_action",
+        event_name="professor.bulk_archived",
+        entity_type="professor",
+        metadata={
+            "requested_count": len(payload.ids),
+            "affected_count": affected_count,
+            "ids": payload.ids,
+        },
+    )
     await session.commit()
     return ProfessorActionResult(
         ok=True,
@@ -337,7 +371,13 @@ async def restore_professor(
         professor.archived_at = None
         professor.updated_at = datetime.now(UTC)
         affected_count = 1
-        await session.commit()
+    await _record_professor_log(
+        session,
+        professor,
+        "professor.restored",
+        metadata={"affected_count": affected_count},
+    )
+    await session.commit()
 
     return ProfessorActionResult(
         ok=True,
@@ -401,6 +441,32 @@ def _apply_archived_filter(statement, archived: str):
 def _ensure_professor_email_valid(email: str) -> None:
     if not is_valid_professor_email(email):
         raise HTTPException(status_code=400, detail="邮箱格式不正确")
+
+
+async def _record_professor_log(
+    session: AsyncSession,
+    professor: Professor,
+    event_name: str,
+    *,
+    metadata: dict[str, object] | None = None,
+) -> None:
+    base_metadata: dict[str, object] = {
+        "name": professor.name,
+        "email": professor.email,
+        "university": professor.university,
+        "school": professor.school,
+        "archived": professor.archived_at is not None,
+    }
+    if metadata:
+        base_metadata.update(metadata)
+    await record_operation_log(
+        session,
+        category="user_action",
+        event_name=event_name,
+        entity_type="professor",
+        entity_id=str(professor.id),
+        metadata=base_metadata,
+    )
 
 
 def _serialize_management_professor(professor: Professor) -> ProfessorManagementItemRead:

@@ -26,6 +26,7 @@ from app.schemas.batch_task import (
     CreateBatchTaskRequest,
 )
 from app.services.materials import material_can_be_primary
+from app.services.operation_logs import record_operation_log
 from app.services.outreach_templates import (
     get_outreach_template_defaults_validation_error,
     resolve_outreach_template_config,
@@ -164,6 +165,19 @@ async def create_batch_task(
             ),
         )
 
+    await record_operation_log(
+        session,
+        category="email",
+        event_name="batch_task.created",
+        entity_type="batch_task",
+        entity_id=str(batch_task.id),
+        metadata={
+            "target_count": batch_task.target_count,
+            "identity_id": batch_task.identity_id,
+            "llm_profile_id": batch_task.llm_profile_id,
+            "schedule_type": batch_task.schedule_type,
+        },
+    )
     await session.commit()
     await session.refresh(batch_task, attribute_names=["email_tasks"])
     return _serialize_batch_task(batch_task)
@@ -177,6 +191,7 @@ async def pause_batch_task(
     task = await _get_batch_task(session, task_id)
     task.status = BatchTaskStatus.PAUSED.value
     task.updated_at = datetime.now(UTC)
+    await _record_batch_task_action(session, task, "batch_task.paused")
     await session.commit()
     await session.refresh(task, attribute_names=["email_tasks"])
     return BatchTaskActionResponse(ok=True, task=_serialize_batch_task(task))
@@ -190,6 +205,7 @@ async def resume_batch_task(
     task = await _get_batch_task(session, task_id)
     task.status = BatchTaskStatus.RUNNING.value
     task.updated_at = datetime.now(UTC)
+    await _record_batch_task_action(session, task, "batch_task.resumed")
     await session.commit()
     await session.refresh(task, attribute_names=["email_tasks"])
     return BatchTaskActionResponse(ok=True, task=_serialize_batch_task(task))
@@ -212,6 +228,7 @@ async def stop_batch_task(
             email_task.status = EmailTaskStatus.CANCELED.value
             email_task.cancellation_reason = EmailTaskCancellationReason.BATCH_STOPPED.value
             email_task.updated_at = datetime.now(UTC)
+    await _record_batch_task_action(session, task, "batch_task.stopped")
     await session.commit()
     await session.refresh(task, attribute_names=["email_tasks"])
     return BatchTaskActionResponse(ok=True, task=_serialize_batch_task(task))
@@ -226,6 +243,26 @@ async def _get_batch_task(session: AsyncSession, task_id: int) -> BatchTask:
     if not task:
         raise HTTPException(status_code=404, detail="未找到批量任务")
     return task
+
+
+async def _record_batch_task_action(
+    session: AsyncSession,
+    task: BatchTask,
+    event_name: str,
+) -> None:
+    await record_operation_log(
+        session,
+        category="email",
+        event_name=event_name,
+        entity_type="batch_task",
+        entity_id=str(task.id),
+        metadata={
+            "status": task.status,
+            "target_count": task.target_count,
+            "identity_id": task.identity_id,
+            "llm_profile_id": task.llm_profile_id,
+        },
+    )
 
 
 def _serialize_batch_task(task: BatchTask) -> BatchTaskCardRead:
