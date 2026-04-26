@@ -208,6 +208,12 @@ describe("diagnostics", () => {
         authorization: "Bearer secret",
         cookie: "sid=secret",
         smtpPassword: "smtp-secret",
+        api_token: "secret-api-token",
+        client_secret: "secret-client",
+        session_cookie: "sid=secret-session",
+        authToken: "secret-auth",
+        school: "Engineering",
+        status: "active",
         nested: {
           url: "https://example.com/callback?token=secret#session",
           safe: "visible",
@@ -228,6 +234,12 @@ describe("diagnostics", () => {
       authorization: "[Redacted]",
       cookie: "[Redacted]",
       smtpPassword: "[Redacted]",
+      api_token: "[Redacted]",
+      client_secret: "[Redacted]",
+      session_cookie: "[Redacted]",
+      authToken: "[Redacted]",
+      school: "Engineering",
+      status: "active",
       nested: {
         url: "https://example.com/callback",
         safe: "visible",
@@ -237,6 +249,10 @@ describe("diagnostics", () => {
     const serializedData = JSON.stringify(event.data);
     expect(serializedData).not.toContain("secret-token");
     expect(serializedData).not.toContain("secret-access");
+    expect(serializedData).not.toContain("secret-api-token");
+    expect(serializedData).not.toContain("secret-client");
+    expect(serializedData).not.toContain("secret-session");
+    expect(serializedData).not.toContain("secret-auth");
     expect(serializedData).not.toContain("Bearer secret");
     expect(serializedData).not.toContain("?token=secret");
     expect(serializedData).not.toContain("?api_key=secret");
@@ -253,7 +269,13 @@ describe("diagnostics", () => {
       eventName: "api.request_failed",
       message:
         "Failed https://example.com/path?a=secret#x token=secret-token Authorization: Bearer abc " +
-        "cookie=sid=secret password=hunter2 apiKey=secret-key smtpPassword=mail-secret",
+        'cookie=sid=secret password=hunter2 apiKey=secret-key smtpPassword=mail-secret ' +
+        '{"token":"json-secret","authorization":"Bearer json-abc","cookie":"sid=json-secret"}',
+      data: {
+        detail:
+          '{"token":"data-secret","authorization":"Bearer data-abc","cookie":"sid=data-secret"} ' +
+          "client_secret=data-client-secret status=active school=Engineering",
+      },
     });
 
     const [event] = getDiagnosticEvents();
@@ -269,6 +291,11 @@ describe("diagnostics", () => {
       "hunter2",
       "secret-key",
       "mail-secret",
+      "json-secret",
+      "json-abc",
+      "data-secret",
+      "data-abc",
+      "data-client-secret",
       "?a=secret",
       "#x",
     ]) {

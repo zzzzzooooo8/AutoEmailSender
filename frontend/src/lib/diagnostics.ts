@@ -46,6 +46,17 @@ const sensitiveKeys = new Set([
   "cookie",
   "smtppassword",
 ]);
+const sensitiveKeyFragments = [
+  "token",
+  "secret",
+  "password",
+  "authorization",
+  "cookie",
+  "apikey",
+  "accesstoken",
+  "refreshtoken",
+  "smtppassword",
+];
 const payloadKeys = new Set(["body", "requestbody", "responsebody", "rawbody", "payload"]);
 
 let memoryEvents: DiagnosticEvent[] = [];
@@ -286,7 +297,11 @@ function readObjectValue(value: object, key: string): unknown {
 
 function shouldRedactKey(key: string): boolean {
   const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, "");
-  return sensitiveKeys.has(normalizedKey) || payloadKeys.has(normalizedKey);
+  return (
+    sensitiveKeys.has(normalizedKey) ||
+    payloadKeys.has(normalizedKey) ||
+    sensitiveKeyFragments.some((fragment) => normalizedKey.includes(fragment))
+  );
 }
 
 function sanitizeStringValue(value: string, key?: string): string {
@@ -317,12 +332,16 @@ function stripUrlQueryAndHash(value: string): string {
 function sanitizeDiagnosticString(value: string): string {
   try {
     const withoutSensitiveUrls = value.replace(/https?:\/\/[^\s"'<>]+/gi, (url) => stripUrlQueryAndHash(url));
-    const withoutAuthHeaders = withoutSensitiveUrls.replace(
+    const withoutJsonSensitiveValues = withoutSensitiveUrls.replace(
+      /(["'])(token|access[_-]?token|refresh[_-]?token|api[_-]?key|apikey|password|secret|authorization|cookie|smtp[_-]?password|smtppassword|client[_-]?secret|session[_-]?cookie|authToken)\1\s*:\s*(["'])(?:\\.|(?!\3).)*\3/gi,
+      (_match, quote: string, key: string) => `${quote}${key}${quote}:${quote}${redactedValue}${quote}`,
+    );
+    const withoutAuthHeaders = withoutJsonSensitiveValues.replace(
       /\bauthorization\s*[:=]\s*Bearer\s+[^\s,;&]+/gi,
       redactedValue,
     );
     const withoutSensitiveKeyValues = withoutAuthHeaders.replace(
-      /\b(?:token|access[_-]?token|refresh[_-]?token|api[_-]?key|apikey|password|secret|authorization|cookie|smtp[_-]?password|smtppassword)\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;&]+)/gi,
+      /\b(?:token|access[_-]?token|refresh[_-]?token|api[_-]?key|apikey|password|secret|authorization|cookie|smtp[_-]?password|smtppassword|client[_-]?secret|session[_-]?cookie|authToken)\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;&]+)/gi,
       redactedValue,
     );
 
