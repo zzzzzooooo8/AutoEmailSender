@@ -71,53 +71,73 @@ async def dispatch_due_tasks_once(
     now: datetime | None = None,
 ) -> int:
     now = now or datetime.now(UTC)
+    if limit <= 0:
+        return 0
+
     async with session_factory() as session:
-        candidates = list(
-            (
-                await session.execute(
-                    select(EmailTask)
-                    .options(selectinload(EmailTask.batch_task))
-                    .join(BatchTask, EmailTask.batch_task_id == BatchTask.id, isouter=True)
-                    .where(
-                        EmailTask.status.in_(
-                            [
-                                EmailTaskStatus.APPROVED.value,
-                                EmailTaskStatus.SCHEDULED.value,
-                            ],
-                        ),
-                        or_(
-                            EmailTask.scheduled_at.is_(None),
-                            EmailTask.scheduled_at <= now,
-                        ),
-                        or_(
-                            BatchTask.id.is_(None),
-                            BatchTask.status == BatchTaskStatus.RUNNING.value,
-                        ),
-                    )
-                    .order_by(EmailTask.approved_at.asc(), EmailTask.created_at.asc())
-                    .limit(limit),
-                )
-            ).scalars()
-        )
         sent_counts: dict[int, int] = {}
         task_ids: list[int] = []
-        for task in candidates:
-            batch_task = task.batch_task
-            if not _batch_task_allows_dispatch(batch_task, now):
-                continue
-            if (
-                batch_task is not None
-                and batch_task.schedule_type == "scheduled"
-                and batch_task.emails_per_window is not None
-            ):
-                count = sent_counts.get(batch_task.id)
-                if count is None:
-                    count = await _batch_task_sent_count_on_date(session, batch_task.id, now)
-                if count >= batch_task.emails_per_window:
-                    sent_counts[batch_task.id] = count
+        page_size = max(limit, 10)
+        offset = 0
+        while len(task_ids) < limit:
+            candidates = list(
+                (
+                    await session.execute(
+                        select(EmailTask)
+                        .options(selectinload(EmailTask.batch_task))
+                        .join(BatchTask, EmailTask.batch_task_id == BatchTask.id, isouter=True)
+                        .where(
+                            EmailTask.status.in_(
+                                [
+                                    EmailTaskStatus.APPROVED.value,
+                                    EmailTaskStatus.SCHEDULED.value,
+                                ],
+                            ),
+                            or_(
+                                EmailTask.scheduled_at.is_(None),
+                                EmailTask.scheduled_at <= now,
+                            ),
+                            or_(
+                                BatchTask.id.is_(None),
+                                BatchTask.status == BatchTaskStatus.RUNNING.value,
+                            ),
+                        )
+                        .order_by(
+                            EmailTask.approved_at.asc(),
+                            EmailTask.created_at.asc(),
+                            EmailTask.id.asc(),
+                        )
+                        .offset(offset)
+                        .limit(page_size),
+                    )
+                ).scalars()
+            )
+            if not candidates:
+                break
+            offset += len(candidates)
+
+            for task in candidates:
+                if len(task_ids) >= limit:
+                    break
+                batch_task = task.batch_task
+                if not _batch_task_allows_dispatch(batch_task, now):
                     continue
-                sent_counts[batch_task.id] = count + 1
-            task_ids.append(task.id)
+                if (
+                    batch_task is not None
+                    and batch_task.schedule_type == "scheduled"
+                    and batch_task.emails_per_window is not None
+                ):
+                    count = sent_counts.get(batch_task.id)
+                    if count is None:
+                        count = await _batch_task_sent_count_on_date(session, batch_task.id, now)
+                    if count >= batch_task.emails_per_window:
+                        sent_counts[batch_task.id] = count
+                        continue
+                    sent_counts[batch_task.id] = count + 1
+                task_ids.append(task.id)
+
+            if len(candidates) < page_size:
+                break
 
     processed = 0
     for task_id in task_ids:

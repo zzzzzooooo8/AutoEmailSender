@@ -136,6 +136,34 @@ class BatchTaskDispatchScheduleTests(unittest.TestCase):
         self.assertEqual(self._run_async(self._get_task_status(task_id)), EmailTaskStatus.SENT.value)
         mocked_send.assert_awaited_once()
 
+    def test_dispatch_due_tasks_does_not_let_blocked_scheduled_task_consume_limit(self) -> None:
+        blocked_task_id, dispatchable_task_id = self._run_async(
+            self._create_blocked_scheduled_task_before_dispatchable_task(),
+        )
+
+        with patch(
+            "app.services.task_runtime.mail_runtime.send_email",
+            AsyncMock(return_value=self._build_send_result()),
+        ) as mocked_send:
+            processed = self._run_async(
+                dispatch_due_tasks_once(
+                    self.session_factory,
+                    limit=1,
+                    now=datetime(2026, 5, 5, 10, 0, tzinfo=UTC),
+                ),
+            )
+
+        self.assertEqual(processed, 1)
+        self.assertEqual(
+            self._run_async(self._get_task_status(blocked_task_id)),
+            EmailTaskStatus.APPROVED.value,
+        )
+        self.assertEqual(
+            self._run_async(self._get_task_status(dispatchable_task_id)),
+            EmailTaskStatus.SENT.value,
+        )
+        mocked_send.assert_awaited_once()
+
     async def _create_schema(self) -> None:
         async with self.engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
@@ -217,25 +245,103 @@ class BatchTaskDispatchScheduleTests(unittest.TestCase):
             await session.commit()
             return approved_task.id
 
+    async def _create_blocked_scheduled_task_before_dispatchable_task(self) -> tuple[int, int]:
+        async with self.session_factory() as session:
+            identity = IdentityProfile(
+                name="测试身份",
+                profile_name="测试身份",
+                sender_name="王同学",
+                email_address=f"sender-limit-{datetime.now(UTC).timestamp()}@example.com",
+                smtp_host="smtp.example.com",
+                smtp_port=465,
+                smtp_username="sender@example.com",
+                smtp_password="secret",
+                default_language="zh-CN",
+                outreach_generation_mode="template",
+                outreach_template_subject="申请与{{name}}老师交流",
+                outreach_template_body_text="老师您好，我是{{sender_name}}。",
+                is_default=True,
+            )
+            llm_profile = LLMProfile(
+                name=f"默认模型-limit-{datetime.now(UTC).timestamp()}",
+                provider="openai",
+                api_base_url="https://api.example.com/v1",
+                api_key="sk-test-key",
+                model_name="gpt-test",
+                is_default=True,
+            )
+            blocked_professor = Professor(
+                name="前置导师",
+                email=f"blocked-{datetime.now(UTC).timestamp()}@example.edu",
+                title="Professor",
+                university="Example University",
+                school="School of AI",
+                department="Computer Science",
+                research_direction="Large language models",
+                recent_papers=[],
+            )
+            dispatchable_professor = Professor(
+                name="后置导师",
+                email=f"dispatchable-{datetime.now(UTC).timestamp()}@example.edu",
+                title="Professor",
+                university="Example University",
+                school="School of AI",
+                department="Computer Science",
+                research_direction="Large language models",
+                recent_papers=[],
+            )
+            blocked_batch_task = BatchTask(
+                identity=identity,
+                llm_profile=llm_profile,
+                name="非当天定时批量任务",
+                schedule_type="scheduled",
+                window_start_time="09:00",
+                window_end_time="18:00",
+                emails_per_window=20,
+                scheduled_dates=["2026-05-04"],
+                status=BatchTaskStatus.RUNNING.value,
+                target_count=1,
+            )
+            blocked_task = self._build_email_task(
+                batch_task=blocked_batch_task,
+                identity=identity,
+                llm_profile=llm_profile,
+                professor=blocked_professor,
+                status=EmailTaskStatus.APPROVED.value,
+                approved_at=datetime(2026, 5, 3, 9, 0, tzinfo=UTC),
+            )
+            dispatchable_task = self._build_email_task(
+                batch_task=None,
+                identity=identity,
+                llm_profile=llm_profile,
+                professor=dispatchable_professor,
+                status=EmailTaskStatus.APPROVED.value,
+                approved_at=datetime(2026, 5, 3, 10, 0, tzinfo=UTC),
+            )
+            session.add_all([blocked_batch_task, blocked_task, dispatchable_task])
+            await session.commit()
+            return blocked_task.id, dispatchable_task.id
+
     def _build_email_task(
         self,
         *,
-        batch_task: BatchTask,
+        batch_task: BatchTask | None,
         identity: IdentityProfile,
         llm_profile: LLMProfile,
         professor: Professor,
         status: str,
+        approved_at: datetime | None = None,
         sent_at: datetime | None = None,
     ) -> EmailTask:
         return EmailTask(
-            source=EmailTaskSource.BATCH.value,
+            source=EmailTaskSource.BATCH.value if batch_task is not None else EmailTaskSource.MANUAL.value,
             batch_task=batch_task,
             identity=identity,
             llm_profile=llm_profile,
             professor=professor,
             status=status,
             outreach_generation_mode="template",
-            approved_at=datetime(2026, 5, 3, 10, 0, tzinfo=UTC),
+            approved_at=approved_at or datetime(2026, 5, 3, 10, 0, tzinfo=UTC),
             approved_subject="申请与{{name}}老师交流",
             approved_body_text="老师您好，我是{{sender_name}}。",
             approved_body_html="<p>老师您好，我是{{sender_name}}。</p>",
