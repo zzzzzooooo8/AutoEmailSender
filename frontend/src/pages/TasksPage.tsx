@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Loader2, Pause, Play, Square } from "lucide-react";
+import { Loader2, Pause, Play, Square, X } from "lucide-react";
 import { useNotification } from "@/context/NotificationContext";
 import { useSelectionContext } from "@/context/SelectionContext";
 import { useConfirmDialog } from "@/lib/useConfirmDialog";
@@ -10,12 +10,21 @@ import {
   resumeBatchTask,
   stopBatchTask,
 } from "@/lib/api/batchTasksApi";
-import { cancelCrawlJob, listCrawlJobs } from "@/lib/api/crawlJobsApi";
+import {
+  cancelCrawlJob,
+  getCrawlJobEvents,
+  listCrawlCandidates,
+  listCrawlJobs,
+  listCrawlPages,
+} from "@/lib/api/crawlJobsApi";
 import {
   BATCH_TASK_STATUS_LABELS,
   type BatchTaskCardDTO,
+  type CrawlCandidateDTO,
+  type CrawlJobEventDTO,
   type CrawlJobStatusDTO,
   type CrawlJobSummaryDTO,
+  type CrawlPageDTO,
 } from "@/types";
 
 type TasksTab = "batch" | "crawl";
@@ -45,12 +54,19 @@ export const TasksPage = () => {
   const [loading, setLoading] = useState(false);
   const [crawlJobs, setCrawlJobs] = useState<CrawlJobSummaryDTO[]>([]);
   const [crawlJobsLoading, setCrawlJobsLoading] = useState(false);
+  const [selectedCrawlJob, setSelectedCrawlJob] = useState<CrawlJobSummaryDTO | null>(null);
+  const [crawlJobPages, setCrawlJobPages] = useState<CrawlPageDTO[]>([]);
+  const [crawlJobCandidates, setCrawlJobCandidates] = useState<CrawlCandidateDTO[]>([]);
+  const [crawlJobEvents, setCrawlJobEvents] = useState<CrawlJobEventDTO[]>([]);
+  const [crawlJobDetailsLoading, setCrawlJobDetailsLoading] = useState(false);
   const lastLoadErrorRef = useRef<string | null>(null);
   const lastCrawlJobsLoadErrorRef = useRef<string | null>(null);
+  const lastCrawlJobDetailsLoadErrorRef = useRef<string | null>(null);
   const loadedTasksKeyRef = useRef<string | null>(null);
   const activeTasksRequestKeyRef = useRef<string | null>(null);
   const latestTasksRequestIdRef = useRef(0);
   const latestCrawlJobsRequestIdRef = useRef(0);
+  const latestCrawlJobDetailsRequestIdRef = useRef(0);
   const tasksRequestKey =
     selectedIdentityId && selectedLlmProfileId
       ? `${selectedIdentityId}:${selectedLlmProfileId}`
@@ -136,6 +152,42 @@ export const TasksPage = () => {
     }
   }, [notifyError]);
 
+  const loadCrawlJobDetails = useCallback(
+    async (jobId: number) => {
+      const requestId = latestCrawlJobDetailsRequestIdRef.current + 1;
+      latestCrawlJobDetailsRequestIdRef.current = requestId;
+      setCrawlJobDetailsLoading(true);
+      try {
+        const [pages, candidates, events] = await Promise.all([
+          listCrawlPages(jobId),
+          listCrawlCandidates(jobId),
+          getCrawlJobEvents(jobId),
+        ]);
+        if (latestCrawlJobDetailsRequestIdRef.current !== requestId) {
+          return;
+        }
+        setCrawlJobPages(pages);
+        setCrawlJobCandidates(candidates);
+        setCrawlJobEvents(events);
+        lastCrawlJobDetailsLoadErrorRef.current = null;
+      } catch (loadError) {
+        if (latestCrawlJobDetailsRequestIdRef.current !== requestId) {
+          return;
+        }
+        const message = loadError instanceof Error ? loadError.message : "加载抓取任务日志失败";
+        if (lastCrawlJobDetailsLoadErrorRef.current !== message) {
+          notifyError("加载抓取任务日志失败", message);
+          lastCrawlJobDetailsLoadErrorRef.current = message;
+        }
+      } finally {
+        if (latestCrawlJobDetailsRequestIdRef.current === requestId) {
+          setCrawlJobDetailsLoading(false);
+        }
+      }
+    },
+    [notifyError],
+  );
+
   useEffect(() => {
     if (activeTab !== "batch") {
       return undefined;
@@ -157,6 +209,21 @@ export const TasksPage = () => {
     }, 2000);
     return () => window.clearInterval(timer);
   }, [activeTab, loadCrawlJobs]);
+
+  useEffect(() => {
+    if (!selectedCrawlJob) {
+      return undefined;
+    }
+    lastCrawlJobDetailsLoadErrorRef.current = null;
+    void loadCrawlJobDetails(selectedCrawlJob.id);
+    const timer = window.setInterval(() => {
+      void loadCrawlJobDetails(selectedCrawlJob.id);
+    }, 2000);
+    return () => {
+      latestCrawlJobDetailsRequestIdRef.current += 1;
+      window.clearInterval(timer);
+    };
+  }, [loadCrawlJobDetails, selectedCrawlJob]);
 
   const handleAction = async (
     taskId: number,
@@ -206,6 +273,16 @@ export const TasksPage = () => {
       const message = actionError instanceof Error ? actionError.message : "抓取任务操作失败";
       notifyError("抓取任务操作失败", message);
     }
+  };
+
+  const closeCrawlJobDetails = () => {
+    latestCrawlJobDetailsRequestIdRef.current += 1;
+    setSelectedCrawlJob(null);
+    setCrawlJobPages([]);
+    setCrawlJobCandidates([]);
+    setCrawlJobEvents([]);
+    setCrawlJobDetailsLoading(false);
+    lastCrawlJobDetailsLoadErrorRef.current = null;
   };
 
   if (!selectedIdentityId || !selectedLlmProfileId) {
@@ -434,8 +511,8 @@ export const TasksPage = () => {
               <div className="mt-6 flex flex-wrap gap-3">
                 <button
                   type="button"
-                  disabled
-                  className="ui-btn-secondary cursor-not-allowed opacity-60"
+                  onClick={() => setSelectedCrawlJob(job)}
+                  className="ui-btn-secondary"
                 >
                   查看日志
                 </button>
@@ -454,6 +531,103 @@ export const TasksPage = () => {
           ))}
         </div>
       )}
+      {selectedCrawlJob ? (
+        <div className="fixed inset-0 z-50 flex items-stretch justify-end bg-stone-950/30 p-0 sm:p-6">
+          <section
+            role="dialog"
+            aria-label="抓取任务日志"
+            className="flex h-full w-full flex-col overflow-hidden bg-white shadow-xl sm:max-w-3xl sm:rounded-3xl"
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-stone-200 px-6 py-5">
+              <div>
+                <h2 className="text-xl font-semibold text-stone-900">
+                  {selectedCrawlJob.university} / {selectedCrawlJob.school}
+                </h2>
+                <p className="mt-2 break-all text-sm text-stone-500">
+                  {selectedCrawlJob.start_url}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeCrawlJobDetails}
+                className="ui-btn-secondary shrink-0"
+                aria-label="关闭"
+              >
+                <X className="h-4 w-4" />
+                关闭
+              </button>
+            </div>
+
+            <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
+              {crawlJobDetailsLoading ? (
+                <div className="flex items-center gap-2 text-sm text-stone-500">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  正在加载日志详情...
+                </div>
+              ) : null}
+
+              <section>
+                <h3 className="text-sm font-semibold text-stone-900">执行日志</h3>
+                <div className="mt-3 space-y-2">
+                  {crawlJobEvents.length > 0 ? (
+                    crawlJobEvents.map((event) => (
+                      <div key={event.id} className="rounded-2xl border border-stone-100 px-4 py-3">
+                        <p className="text-sm text-stone-800">{event.message}</p>
+                        <p className="mt-1 text-xs text-stone-500">{event.created_at ?? "--"}</p>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="rounded-2xl border border-dashed border-stone-200 px-4 py-3 text-sm text-stone-500">
+                      暂无执行日志。
+                    </p>
+                  )}
+                </div>
+              </section>
+
+              <section>
+                <h3 className="text-sm font-semibold text-stone-900">已抓页面</h3>
+                <div className="mt-3 space-y-2">
+                  {crawlJobPages.length > 0 ? (
+                    crawlJobPages.map((page) => (
+                      <div key={page.id} className="rounded-2xl border border-stone-100 px-4 py-3">
+                        <p className="text-sm font-medium text-stone-800">{page.title ?? page.url}</p>
+                        <p className="mt-1 break-all text-xs text-stone-500">{page.url}</p>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="rounded-2xl border border-dashed border-stone-200 px-4 py-3 text-sm text-stone-500">
+                      暂无已抓页面。
+                    </p>
+                  )}
+                </div>
+              </section>
+
+              <section>
+                <h3 className="text-sm font-semibold text-stone-900">候选导师</h3>
+                <div className="mt-3 space-y-2">
+                  {crawlJobCandidates.length > 0 ? (
+                    crawlJobCandidates.map((candidate) => (
+                      <div key={candidate.id} className="rounded-2xl border border-stone-100 px-4 py-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-sm font-medium text-stone-800">{candidate.name}</p>
+                          <span className="rounded-full bg-stone-100 px-3 py-1 text-xs text-stone-700">
+                            置信度 {Math.round(candidate.confidence * 100)}%
+                          </span>
+                        </div>
+                        <p className="mt-1 text-sm text-stone-500">{candidate.email ?? "暂无邮箱"}</p>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="rounded-2xl border border-dashed border-stone-200 px-4 py-3 text-sm text-stone-500">
+                      暂无候选导师。
+                    </p>
+                  )}
+                </div>
+              </section>
+            </div>
+          </section>
+        </div>
+      ) : null}
       {confirmDialog}
     </main>
   );
