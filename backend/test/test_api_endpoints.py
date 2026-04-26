@@ -1187,6 +1187,38 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["scheduled_dates"], ["2026-04-28", "2026-05-04"])
 
+    def test_create_scheduled_batch_task_rejects_invalid_window_time_format(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_profile_id = self._create_llm()
+        self.client.post("/api/professors/import-sample")
+        professor_id = self.client.get("/api/professors").json()[0]["id"]
+
+        response = self.client.post(
+            "/api/batch-tasks",
+            json={
+                "identity_id": identity_id,
+                "llm_profile_id": llm_profile_id,
+                "name": "时间格式校验",
+                "professor_ids": [professor_id],
+                "schedule_type": "scheduled",
+                "scheduled_dates": ["2026-05-04"],
+                "window_start_time": "9:00",
+                "window_end_time": "18:00",
+                "emails_per_window": 20,
+                "primary_material_id": None,
+                "email_subject": "Hello {{导师姓名}}",
+                "email_body": "Body",
+                "selected_material_ids": None,
+                "outreach_generation_mode": "template",
+                "outreach_template_subject": "Hello {{导师姓名}}",
+                "outreach_template_body_text": "Body",
+                "outreach_template_body_html": None,
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("HH:mm", response.json()["detail"])
+
     def test_batch_task_worker_and_workspace_flow(self) -> None:
         identity_id = self._create_identity(with_imap=False)
         llm_id = self._create_llm()

@@ -1,7 +1,8 @@
 ﻿from __future__ import annotations
 
+import re
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -26,13 +27,13 @@ from app.schemas.batch_task import (
     BatchTaskItemRead,
     CreateBatchTaskRequest,
 )
+from app.services.batch_schedule import normalize_scheduled_dates
 from app.services.materials import material_can_be_primary
 from app.services.operation_logs import record_operation_log
 from app.services.outreach_templates import (
     get_outreach_template_defaults_validation_error,
     resolve_outreach_template_config,
 )
-from app.services.batch_schedule import normalize_scheduled_dates
 
 
 router = APIRouter(prefix="/api/batch-tasks", tags=["batch-tasks"])
@@ -73,10 +74,7 @@ async def create_batch_task(
     if payload.schedule_type == "scheduled":
         if not scheduled_dates:
             raise HTTPException(status_code=400, detail="请至少选择一个发送日期")
-        if not payload.window_start_time or not payload.window_end_time:
-            raise HTTPException(status_code=400, detail="请填写发送时间窗口")
-        if payload.window_end_time <= payload.window_start_time:
-            raise HTTPException(status_code=400, detail="结束时间必须晚于开始时间")
+        _validate_time_window(payload.window_start_time, payload.window_end_time)
         if not payload.emails_per_window or payload.emails_per_window <= 0:
             raise HTTPException(status_code=400, detail="请输入每天发送数量")
 
@@ -371,6 +369,20 @@ def _serialize_batch_task(task: BatchTask) -> BatchTaskCardRead:
         created_at=task.created_at,
         updated_at=task.updated_at,
     )
+
+
+def _validate_time_window(start_time: str | None, end_time: str | None) -> None:
+    if not start_time or not end_time:
+        raise HTTPException(status_code=400, detail="请填写发送时间窗口")
+    if not re.fullmatch(r"\d{2}:\d{2}", start_time) or not re.fullmatch(r"\d{2}:\d{2}", end_time):
+        raise HTTPException(status_code=400, detail="发送时间必须使用 HH:mm 格式")
+    try:
+        start = time.fromisoformat(start_time)
+        end = time.fromisoformat(end_time)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="发送时间必须使用 HH:mm 格式") from exc
+    if end <= start:
+        raise HTTPException(status_code=400, detail="结束时间必须晚于开始时间")
 
 
 def _normalize_nullable_text(value: str | None) -> str | None:

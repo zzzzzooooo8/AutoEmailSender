@@ -13,7 +13,7 @@ from app.services.outreach_templates import import_outreach_template_file
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "8a6d2f4c9b31"
+HEAD_REVISION = "6d7e8f9a0b12"
 LEGACY_RUNTIME_REVISION = "7a1d5e42c9bd"
 
 
@@ -76,6 +76,7 @@ class DatabaseSchemaTests(unittest.TestCase):
         self.assertNotIn("resume_text", identity_columns)
         self.assertIn("primary_material_id", batch_columns)
         self.assertIn("selected_material_ids", batch_columns)
+        self.assertIn("scheduled_dates", batch_columns)
         self.assertNotIn("selected_attachment_ids", batch_columns)
         self.assertIn("primary_material_id", task_columns)
         self.assertIn("selected_material_ids", task_columns)
