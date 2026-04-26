@@ -25,6 +25,7 @@ import {
 import { NativeSelectField } from "@/components/atoms/NativeSelectField";
 import { ManagementProfessorRow } from "@/components/molecules/ManagementProfessorRow";
 import { useNotification } from "@/context/NotificationContext";
+import { safeRecordUserAction } from "@/lib/diagnosticUserActions";
 import { useConfirmDialog } from "@/lib/useConfirmDialog";
 import { createCrawlJob } from "@/lib/api/crawlJobsApi";
 import {
@@ -657,16 +658,36 @@ export const ProfessorsPage = () => {
       start_url: crawlerFormState.start_url.trim(),
       llm_profile_id: null,
     };
+    const diagnosticData = {
+      university: payload.university,
+      school: payload.school,
+      start_url: payload.start_url,
+    };
+    safeRecordUserAction({
+      eventName: "professors.crawl_job_create_submitted",
+      data: diagnosticData,
+    });
     setCreatingCrawlJob(true);
     try {
       await createCrawlJob(payload);
+      safeRecordUserAction({
+        eventName: "professors.crawl_job_create_succeeded",
+        data: diagnosticData,
+      });
       setCrawlerModalOpen(false);
       setCrawlerFormState(emptyCrawlerJobForm());
       notifySuccess("抓取任务已创建");
     } catch (crawlerError) {
+      const message = getActionErrorMessage(crawlerError, "创建抓取任务失败");
+      safeRecordUserAction({
+        eventName: "professors.crawl_job_create_failed",
+        data: diagnosticData,
+        message,
+        level: "error",
+      });
       notifyError(
         "创建抓取任务失败",
-        getActionErrorMessage(crawlerError, "创建抓取任务失败"),
+        message,
       );
     } finally {
       setCreatingCrawlJob(false);
@@ -1050,7 +1071,12 @@ export const ProfessorsPage = () => {
             </button>
             <button
               type="button"
-              onClick={() => setCrawlerModalOpen(true)}
+              onClick={() => {
+                safeRecordUserAction({
+                  eventName: "professors.crawler_dialog_opened",
+                });
+                setCrawlerModalOpen(true);
+              }}
               disabled={devBusy !== null}
               className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
             >

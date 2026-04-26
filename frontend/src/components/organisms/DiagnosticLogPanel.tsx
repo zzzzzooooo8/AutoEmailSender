@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Download, Loader2, RefreshCw, Trash2 } from "lucide-react";
 import { useNotification } from "@/context/NotificationContext";
+import { safeRecordUserAction } from "@/lib/diagnosticUserActions";
 import {
   clearDiagnosticEvents,
   exportDiagnosticEvents,
@@ -113,7 +114,10 @@ export const DiagnosticLogPanel = () => {
     }
 
     clearDiagnosticEvents();
-    setFrontendEvents([]);
+    safeRecordUserAction({
+      eventName: "diagnostics.local_logs_cleared",
+    });
+    refreshLocalEvents();
     notifySuccess("本地诊断日志已清空");
   };
 
@@ -154,9 +158,25 @@ export const DiagnosticLogPanel = () => {
       link.click();
       link.remove();
       URL.revokeObjectURL(objectUrl);
+      safeRecordUserAction({
+        eventName: "diagnostics.export_succeeded",
+        data: {
+          frontendCount: frontend.events?.length ?? 0,
+          backendCount:
+            typeof backend === "object" && backend !== null && "total" in backend
+              ? Number((backend as { total?: unknown }).total ?? 0)
+              : 0,
+        },
+      });
       notifySuccess("诊断日志已导出");
     } catch (error) {
-      notifyError("导出诊断日志失败", getErrorMessage(error, "请稍后重试"));
+      const message = getErrorMessage(error, "请稍后重试");
+      safeRecordUserAction({
+        eventName: "diagnostics.export_failed",
+        message,
+        level: "error",
+      });
+      notifyError("导出诊断日志失败", message);
     } finally {
       setExporting(false);
     }

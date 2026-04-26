@@ -5,6 +5,7 @@ import { Loader2 } from 'lucide-react';
 import { NativeSelectField } from '@/components/atoms/NativeSelectField';
 import { SubjectTemplateInput } from '@/components/molecules/SubjectTemplateInput';
 import { useNotification } from '@/context/NotificationContext';
+import { safeRecordUserAction } from '@/lib/diagnosticUserActions';
 import { createBatchTask } from '@/lib/api/batchTasksApi';
 import { listProfessors } from '@/lib/api/professorsApi';
 import { useSelectionContext } from '@/context/SelectionContext';
@@ -208,6 +209,16 @@ export const CreateTaskPage = () => {
       return;
     }
 
+    const diagnosticData = {
+      selectedCount: professors.length,
+      identityId,
+      llmProfileId,
+      scheduleType,
+    };
+    safeRecordUserAction({
+      eventName: 'tasks.batch_create_submitted',
+      data: diagnosticData,
+    });
     setSubmitting(true);
     try {
       const llmTemplateSubject = subject.trim() || null;
@@ -237,10 +248,20 @@ export const CreateTaskPage = () => {
         outreach_template_body_text: taskTemplateBodyText,
         outreach_template_body_html: taskTemplateBodyHtml,
       });
+      safeRecordUserAction({
+        eventName: 'tasks.batch_create_succeeded',
+        data: diagnosticData,
+      });
       window.sessionStorage.removeItem(SESSION_KEY);
       navigate('/tasks');
     } catch (submitError) {
       const message = submitError instanceof Error ? submitError.message : '创建任务失败';
+      safeRecordUserAction({
+        eventName: 'tasks.batch_create_failed',
+        data: diagnosticData,
+        message,
+        level: 'error',
+      });
       notifyError('创建任务失败', message);
     } finally {
       setSubmitting(false);

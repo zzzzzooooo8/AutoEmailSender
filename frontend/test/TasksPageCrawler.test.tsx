@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TasksPage } from "@/pages/TasksPage";
+import { clearDiagnosticEvents, getDiagnosticEvents } from "@/lib/diagnostics";
 import { listBatchTasks } from "@/lib/api/batchTasksApi";
 import {
   cancelCrawlJob,
@@ -72,6 +73,7 @@ const renderPage = () =>
 
 describe("TasksPage crawler jobs tab", () => {
   beforeEach(() => {
+    clearDiagnosticEvents();
     vi.clearAllMocks();
     mockedUseSelectionContext.mockReturnValue({
       selectedIdentityId: 1,
@@ -161,6 +163,18 @@ describe("TasksPage crawler jobs tab", () => {
     expect(listCrawlPages).toHaveBeenCalledWith(7);
     expect(listCrawlCandidates).toHaveBeenCalledWith(7);
     expect(getCrawlJobEvents).toHaveBeenCalledWith(7);
+    expect(getDiagnosticEvents()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "user_action",
+          eventName: "tasks.crawl_job_detail_opened",
+          data: {
+            jobId: 7,
+            status: "running",
+          },
+        }),
+      ]),
+    );
     expect(screen.getByText("调用 crawl_page 抓取入口页面")).toBeInTheDocument();
     expect(screen.getByText("Faculty")).toBeInTheDocument();
     expect(screen.getByText("张教授")).toBeInTheDocument();
@@ -183,5 +197,20 @@ describe("TasksPage crawler jobs tab", () => {
     await waitFor(() => {
       expect(cancelCrawlJob).toHaveBeenCalledWith(7);
     });
+
+    expect(getDiagnosticEvents()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "user_action",
+          eventName: "tasks.crawl_job_cancel_submitted",
+          data: { jobId: 7 },
+        }),
+        expect.objectContaining({
+          category: "user_action",
+          eventName: "tasks.crawl_job_cancel_succeeded",
+          data: { jobId: 7 },
+        }),
+      ]),
+    );
   });
 });

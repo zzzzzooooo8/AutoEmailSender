@@ -169,6 +169,14 @@ describe("DiagnosticLogPanel", () => {
     });
     expect(notificationApi.notifySuccess).toHaveBeenCalledWith("诊断日志已导出");
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:diagnostics");
+    expect(getDiagnosticEvents()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "user_action",
+          eventName: "diagnostics.export_succeeded",
+        }),
+      ]),
+    );
   });
 
   it("清空本地日志会调用清理逻辑并更新数量", async () => {
@@ -180,8 +188,13 @@ describe("DiagnosticLogPanel", () => {
     expect(screen.getByText("本地日志 2 条")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "清空本地日志" }));
 
-    expect(getDiagnosticEvents()).toEqual([]);
-    expect(screen.getByText("本地日志 0 条")).toBeInTheDocument();
+    expect(getDiagnosticEvents()).toEqual([
+      expect.objectContaining({
+        category: "user_action",
+        eventName: "diagnostics.local_logs_cleared",
+      }),
+    ]);
+    expect(screen.getByText("本地日志 1 条")).toBeInTheDocument();
     expect(notificationApi.notifySuccess).toHaveBeenCalledWith("本地诊断日志已清空");
   });
 });

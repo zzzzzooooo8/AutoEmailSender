@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Loader2, Pause, Play, Square, X } from "lucide-react";
 import { useNotification } from "@/context/NotificationContext";
 import { useSelectionContext } from "@/context/SelectionContext";
+import { safeRecordUserAction } from "@/lib/diagnosticUserActions";
 import { useConfirmDialog } from "@/lib/useConfirmDialog";
 import {
   listBatchTasks,
@@ -229,10 +230,19 @@ export const TasksPage = () => {
     taskId: number,
     action: "pause" | "resume" | "stop",
   ) => {
+    const diagnosticData = { taskId, action };
     try {
       if (action === "pause") {
+        safeRecordUserAction({
+          eventName: "tasks.batch_task_pause_submitted",
+          data: diagnosticData,
+        });
         await pauseBatchTask(taskId);
       } else if (action === "resume") {
+        safeRecordUserAction({
+          eventName: "tasks.batch_task_resume_submitted",
+          data: diagnosticData,
+        });
         await resumeBatchTask(taskId);
       } else {
         const confirmed = await confirm({
@@ -245,11 +255,25 @@ export const TasksPage = () => {
         if (!confirmed) {
           return;
         }
+        safeRecordUserAction({
+          eventName: "tasks.batch_task_stop_submitted",
+          data: diagnosticData,
+        });
         await stopBatchTask(taskId);
       }
+      safeRecordUserAction({
+        eventName: `tasks.batch_task_${action}_succeeded`,
+        data: diagnosticData,
+      });
       await loadTasks();
     } catch (actionError) {
       const message = actionError instanceof Error ? actionError.message : "任务操作失败";
+      safeRecordUserAction({
+        eventName: `tasks.batch_task_${action}_failed`,
+        data: diagnosticData,
+        message,
+        level: "error",
+      });
       notifyError("任务操作失败", message);
     }
   };
@@ -266,11 +290,26 @@ export const TasksPage = () => {
       return;
     }
 
+    const diagnosticData = { jobId };
+    safeRecordUserAction({
+      eventName: "tasks.crawl_job_cancel_submitted",
+      data: diagnosticData,
+    });
     try {
       await cancelCrawlJob(jobId);
+      safeRecordUserAction({
+        eventName: "tasks.crawl_job_cancel_succeeded",
+        data: diagnosticData,
+      });
       await loadCrawlJobs();
     } catch (actionError) {
       const message = actionError instanceof Error ? actionError.message : "抓取任务操作失败";
+      safeRecordUserAction({
+        eventName: "tasks.crawl_job_cancel_failed",
+        data: diagnosticData,
+        message,
+        level: "error",
+      });
       notifyError("抓取任务操作失败", message);
     }
   };
@@ -511,7 +550,13 @@ export const TasksPage = () => {
               <div className="mt-6 flex flex-wrap gap-3">
                 <button
                   type="button"
-                  onClick={() => setSelectedCrawlJob(job)}
+                  onClick={() => {
+                    safeRecordUserAction({
+                      eventName: "tasks.crawl_job_detail_opened",
+                      data: { jobId: job.id, status: job.status },
+                    });
+                    setSelectedCrawlJob(job);
+                  }}
                   className="ui-btn-secondary"
                 >
                   查看日志
