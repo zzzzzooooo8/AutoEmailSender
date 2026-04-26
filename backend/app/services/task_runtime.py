@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
@@ -23,6 +23,7 @@ from app.models import (
 )
 from app.schemas.email_task import EmailTaskApprovalRequest, EmailTaskScheduleRequest
 from app.services import llm_runtime, mail_runtime
+from app.services.batch_schedule import is_datetime_in_batch_window
 from app.services.mail_runtime import MailAttachment, ReceivedEmail
 from app.services.materials import (
     build_material_download_name,
@@ -66,13 +67,16 @@ async def process_pending_drafts_once(
 async def dispatch_due_tasks_once(
     session_factory: async_sessionmaker[AsyncSession],
     limit: int = 10,
+    *,
+    now: datetime | None = None,
 ) -> int:
-    now = datetime.now(UTC)
+    now = now or datetime.now(UTC)
     async with session_factory() as session:
-        task_ids = list(
+        candidates = list(
             (
                 await session.execute(
-                    select(EmailTask.id)
+                    select(EmailTask)
+                    .options(selectinload(EmailTask.batch_task))
                     .join(BatchTask, EmailTask.batch_task_id == BatchTask.id, isouter=True)
                     .where(
                         EmailTask.status.in_(
@@ -95,12 +99,71 @@ async def dispatch_due_tasks_once(
                 )
             ).scalars()
         )
+        sent_counts: dict[int, int] = {}
+        task_ids: list[int] = []
+        for task in candidates:
+            batch_task = task.batch_task
+            if not _batch_task_allows_dispatch(batch_task, now):
+                continue
+            if (
+                batch_task is not None
+                and batch_task.schedule_type == "scheduled"
+                and batch_task.emails_per_window is not None
+            ):
+                count = sent_counts.get(batch_task.id)
+                if count is None:
+                    count = await _batch_task_sent_count_on_date(session, batch_task.id, now)
+                if count >= batch_task.emails_per_window:
+                    sent_counts[batch_task.id] = count
+                    continue
+                sent_counts[batch_task.id] = count + 1
+            task_ids.append(task.id)
 
     processed = 0
     for task_id in task_ids:
         await dispatch_email_task(session_factory, task_id)
         processed += 1
     return processed
+
+
+def _batch_task_allows_dispatch(batch_task: BatchTask | None, now: datetime) -> bool:
+    if batch_task is None:
+        return True
+    if batch_task.status != BatchTaskStatus.RUNNING.value:
+        return False
+    if batch_task.schedule_type != "scheduled":
+        return True
+    return is_datetime_in_batch_window(
+        now,
+        scheduled_dates=batch_task.scheduled_dates,
+        window_start_time=batch_task.window_start_time,
+        window_end_time=batch_task.window_end_time,
+    )
+
+
+async def _batch_task_sent_count_on_date(
+    session: AsyncSession,
+    batch_task_id: int,
+    now: datetime,
+) -> int:
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = start + timedelta(days=1)
+    return int(
+        await session.scalar(
+            select(func.count(EmailTask.id)).where(
+                EmailTask.batch_task_id == batch_task_id,
+                EmailTask.status.in_(
+                    [
+                        EmailTaskStatus.SENT.value,
+                        EmailTaskStatus.REPLY_DETECTED.value,
+                    ],
+                ),
+                EmailTask.sent_at >= start,
+                EmailTask.sent_at < end,
+            ),
+        )
+        or 0
+    )
 
 
 async def poll_for_replies_once(
