@@ -42,6 +42,9 @@ export const validateTaskForm = (data: CreateTaskFormData): ValidationResult => 
     if (!data.schedule.emailsToSend || data.schedule.emailsToSend <= 0) {
       errors.emailsToSend = '请输入要发送的邮件数量';
     }
+    if (!data.schedule.scheduledDates?.length) {
+      errors.scheduledDates = '请至少选择一个发送日期';
+    }
   }
 
   return { valid: Object.keys(errors).length === 0, errors };

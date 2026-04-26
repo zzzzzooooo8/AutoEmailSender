@@ -27,6 +27,7 @@ export const CreateTaskClient: React.FC<CreateTaskClientProps> = ({ mentors }) =
     setStartTime,
     setEndTime,
     setEmailsToSend,
+    setScheduledDates,
     emailContent,
     updateEmailContent,
     attachments,
@@ -90,6 +91,7 @@ export const CreateTaskClient: React.FC<CreateTaskClientProps> = ({ mentors }) =
               onStartTimeChange={setStartTime}
               onEndTimeChange={setEndTime}
               onEmailsToSendChange={setEmailsToSend}
+              onScheduledDatesChange={setScheduledDates}
             />
           </div>
 

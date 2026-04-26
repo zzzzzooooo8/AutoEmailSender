@@ -1,4 +1,5 @@
 import { TaskTimePicker } from '../atoms/TaskTimePicker';
+import { TaskDateSelector } from './TaskDateSelector';
 import type { TaskScheduleConfig } from '@/features/create-task/types';
 
 interface TaskScheduleSettingsProps {
@@ -7,6 +8,7 @@ interface TaskScheduleSettingsProps {
   onStartTimeChange: (time: string) => void;
   onEndTimeChange: (time: string) => void;
   onEmailsToSendChange: (count: number) => void;
+  onScheduledDatesChange: (dates: string[]) => void;
 }
 
 export const TaskScheduleSettings: React.FC<TaskScheduleSettingsProps> = ({
@@ -15,6 +17,7 @@ export const TaskScheduleSettings: React.FC<TaskScheduleSettingsProps> = ({
   onStartTimeChange,
   onEndTimeChange,
   onEmailsToSendChange,
+  onScheduledDatesChange,
 }) => {
   const isScheduled = schedule.type === 'scheduled';
 
@@ -53,7 +56,12 @@ export const TaskScheduleSettings: React.FC<TaskScheduleSettingsProps> = ({
       {/* 定时配置 */}
       {isScheduled && (
         <div className="flex flex-col gap-4 rounded-xl border border-stone-200 bg-stone-50 p-4">
-          <div className="flex items-end gap-4">
+          <TaskDateSelector
+            selectedDates={schedule.scheduledDates ?? []}
+            onChange={onScheduledDatesChange}
+          />
+
+          <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
             <div className="flex flex-col gap-1.5">
               <span className="text-xs font-medium text-stone-500">开始时间</span>
               <TaskTimePicker
@@ -85,7 +93,8 @@ export const TaskScheduleSettings: React.FC<TaskScheduleSettingsProps> = ({
 
           {schedule.startTime && schedule.endTime && schedule.emailsToSend && (
             <p className="text-xs text-stone-500">
-              将在 {schedule.startTime} 至 {schedule.endTime} 之间，均匀发送 {schedule.emailsToSend} 封邮件
+              已选 {schedule.scheduledDates?.length ?? 0} 天，将在 {schedule.startTime} 至{' '}
+              {schedule.endTime} 之间动态发送，每天最多 {schedule.emailsToSend} 封
             </p>
           )}
         </div>

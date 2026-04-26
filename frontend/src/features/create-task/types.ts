@@ -10,6 +10,8 @@ export interface TaskScheduleConfig {
   endTime?: string;
   /** 在开始至结束时间内，发送多少封 */
   emailsToSend?: number;
+  /** 定时发送时最终选中的发送日期，YYYY-MM-DD */
+  scheduledDates?: string[];
 }
 
 export interface Attachment {

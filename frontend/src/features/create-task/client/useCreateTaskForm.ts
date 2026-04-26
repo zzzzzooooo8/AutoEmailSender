@@ -22,6 +22,7 @@ export const useCreateTaskForm = (initialMentors: Mentor[]) => {
         : {
             startTime: prev.startTime ?? '09:00',
             endTime: prev.endTime ?? '18:00',
+            scheduledDates: prev.scheduledDates ?? [],
           }),
     }));
   }, []);
@@ -36,6 +37,10 @@ export const useCreateTaskForm = (initialMentors: Mentor[]) => {
 
   const setEmailsToSend = useCallback((count: number) => {
     setSchedule((prev) => ({ ...prev, emailsToSend: count }));
+  }, []);
+
+  const setScheduledDates = useCallback((dates: string[]) => {
+    setSchedule((prev) => ({ ...prev, scheduledDates: dates }));
   }, []);
 
   const updateEmailContent = useCallback((field: keyof EmailContent, value: string) => {
@@ -66,6 +71,7 @@ export const useCreateTaskForm = (initialMentors: Mentor[]) => {
     setStartTime,
     setEndTime,
     setEmailsToSend,
+    setScheduledDates,
     emailContent,
     updateEmailContent,
     attachments,
