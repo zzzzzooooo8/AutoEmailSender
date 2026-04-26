@@ -432,7 +432,11 @@ export const TasksPage = () => {
               ) : null}
 
               <div className="mt-6 flex flex-wrap gap-3">
-                <button type="button" className="ui-btn-secondary">
+                <button
+                  type="button"
+                  disabled
+                  className="ui-btn-secondary cursor-not-allowed opacity-60"
+                >
                   查看日志
                 </button>
                 {job.status === "queued" || job.status === "running" ? (

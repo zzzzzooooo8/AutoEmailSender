@@ -88,6 +88,7 @@ describe("TasksPage crawler jobs tab", () => {
     expect(screen.getByText("已抓页面 12")).toBeInTheDocument();
     expect(screen.getByText("候选导师 34")).toBeInTheDocument();
     expect(screen.getByText("正在分析教师列表")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "查看日志" })).toBeDisabled();
   });
 
   it("cancels a running crawl job from the crawler tab", async () => {
