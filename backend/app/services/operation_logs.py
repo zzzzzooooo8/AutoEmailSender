@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from types import FunctionType, MethodType
+from urllib.parse import urlsplit, urlunsplit
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +21,11 @@ SENSITIVE_KEY_PARTS = {
 }
 SENSITIVE_KEYS = {
     "body",
+    "bodyhtml",
+    "bodytext",
+    "content",
+    "emailbody",
+    "generatedcontenttext",
     "payload",
     "requestbody",
     "responsebody",
@@ -26,6 +33,17 @@ SENSITIVE_KEYS = {
 MAX_STRING_LENGTH = 1000
 MAX_DEPTH = 10
 REDACTED = "[REDACTED]"
+MESSAGE_KEY_VALUE_PATTERN = re.compile(
+    r"(?P<key>\b(?:api[_-]?key|authorization|cookie|password|secret|smtpPassword|token)\b)"
+    r"(?P<separator>\s*[:=]\s*)"
+    r"(?P<value>\"[^\"]*\"|'[^']*'|[^\s,;]+)",
+    re.IGNORECASE,
+)
+MESSAGE_BEARER_PATTERN = re.compile(
+    r"(?P<prefix>\bAuthorization\s*:\s*Bearer\s+)(?P<value>[^\s,;]+)",
+    re.IGNORECASE,
+)
+URL_PATTERN = re.compile(r"https?://[^\s<>'\"]+")
 
 
 async def record_operation_log(
@@ -45,7 +63,7 @@ async def record_operation_log(
         category=category,
         event_name=event_name,
         level=level,
-        message=message,
+        message=_safe_message(message),
         entity_type=entity_type,
         entity_id=entity_id,
         event_metadata=_safe_json(metadata),
@@ -110,6 +128,33 @@ def _to_jsonable(value: object, *, seen: set[int], depth: int) -> object:
 def _is_sensitive_key(key: str) -> bool:
     normalized = "".join(char for char in key.lower() if char.isalnum())
     return normalized in SENSITIVE_KEYS or any(part in normalized for part in SENSITIVE_KEY_PARTS)
+
+
+def _safe_message(message: str | None) -> str | None:
+    if message is None:
+        return None
+    try:
+        return _sanitize_message(message)
+    except Exception:
+        return "[MessageSanitizationFailed]"
+
+
+def _sanitize_message(message: str) -> str:
+    sanitized = URL_PATTERN.sub(_strip_url_query_and_fragment, message)
+    sanitized = MESSAGE_BEARER_PATTERN.sub(r"\g<prefix>[REDACTED]", sanitized)
+
+    def replace_value(match: re.Match[str]) -> str:
+        key = match.group("key")
+        separator = match.group("separator")
+        return f"{key}{separator}{REDACTED}"
+
+    return _truncate_string(MESSAGE_KEY_VALUE_PATTERN.sub(replace_value, sanitized))
+
+
+def _strip_url_query_and_fragment(match: re.Match[str]) -> str:
+    raw_url = match.group(0)
+    parsed = urlsplit(raw_url)
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
 
 
 def _truncate_string(value: str) -> str:

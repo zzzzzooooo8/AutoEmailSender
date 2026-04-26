@@ -120,11 +120,18 @@ class OperationLogTests(unittest.TestCase):
                         "token": "secret-token",
                         "smtpPassword": "smtp-secret",
                         "body": "private body",
+                        "body_text": "private body text",
+                        "bodyHtml": "<p>private body html</p>",
+                        "email_body": "private email body",
+                        "generated_content_text": "private generated content",
+                        "content": "private content",
                         "requestBody": {"nested": "private request"},
                         "error": RuntimeError("smtp timeout"),
                         "callback": lambda: None,
                         "recursive": recursive,
                         "long_text": "x" * 5000,
+                        "status": "failed",
+                        "school": "School of Computing",
                     },
                     request_id="manual-request",
                 )
@@ -152,11 +159,54 @@ class OperationLogTests(unittest.TestCase):
         self.assertEqual(metadata["token"], "[REDACTED]")
         self.assertEqual(metadata["smtpPassword"], "[REDACTED]")
         self.assertEqual(metadata["body"], "[REDACTED]")
+        self.assertEqual(metadata["body_text"], "[REDACTED]")
+        self.assertEqual(metadata["bodyHtml"], "[REDACTED]")
+        self.assertEqual(metadata["email_body"], "[REDACTED]")
+        self.assertEqual(metadata["generated_content_text"], "[REDACTED]")
+        self.assertEqual(metadata["content"], "[REDACTED]")
         self.assertEqual(metadata["requestBody"], "[REDACTED]")
         self.assertIn("RuntimeError", metadata["error"])
         self.assertIn("function", metadata["callback"])
         self.assertEqual(metadata["recursive"]["self"], "[Circular]")
         self.assertLessEqual(len(metadata["long_text"]), 1200)
+        self.assertEqual(metadata["status"], "failed")
+        self.assertEqual(metadata["school"], "School of Computing")
+
+    def test_record_operation_log_sanitizes_message(self) -> None:
+        from app.core.database import get_session_factory
+        from app.models import OperationLog
+        from app.services.operation_logs import record_operation_log
+
+        async def scenario() -> str | None:
+            async with get_session_factory()() as session:
+                log = await record_operation_log(
+                    session,
+                    category="backend",
+                    event_name="smtp.probe_failed",
+                    message=(
+                        "failed url=https://api.example.test/send?token=url-secret#debug "
+                        "token=message-secret Authorization: Bearer auth-secret "
+                        "api_key=sk-secret smtpPassword=smtp-secret status=failed"
+                    ),
+                )
+                flushed = await session.scalar(
+                    select(OperationLog).where(OperationLog.id == log.id)
+                )
+                self.assertIsNotNone(flushed)
+                return flushed.message
+
+        message = asyncio.run(scenario())
+
+        self.assertIsNotNone(message)
+        assert message is not None
+        self.assertIn("https://api.example.test/send", message)
+        self.assertNotIn("url-secret", message)
+        self.assertNotIn("#debug", message)
+        self.assertNotIn("message-secret", message)
+        self.assertNotIn("auth-secret", message)
+        self.assertNotIn("sk-secret", message)
+        self.assertNotIn("smtp-secret", message)
+        self.assertIn("status=failed", message)
 
     def _run_alembic_upgrade(self) -> None:
         result = subprocess.run(
