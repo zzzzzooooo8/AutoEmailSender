@@ -92,7 +92,7 @@ describe("api client", () => {
 
   it("records failed HTTP responses without sensitive query details", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ detail: "Invalid token" }), {
+      new Response(JSON.stringify({ detail: "Unauthorized" }), {
         status: 401,
       }),
     );
@@ -100,7 +100,7 @@ describe("api client", () => {
     await expect(apiFetch("/api/professors", undefined, { token: "secret", page: 1 })).rejects.toMatchObject<ApiError>(
       {
         status: 401,
-        message: "Invalid token",
+        message: "Unauthorized",
       },
     );
 
@@ -114,15 +114,44 @@ describe("api client", () => {
           path: "/api/professors",
           status: 401,
           durationMs: expect.any(Number),
-          message: "Invalid token",
+          message: "Unauthorized",
         }),
       }),
     ]);
     expect(JSON.stringify(getDiagnosticEvents()[0].data)).not.toContain("secret");
   });
 
+  it("keeps raw HTTP error messages for ApiError but sanitizes diagnostics", async () => {
+    const rawMessage =
+      "Failed with token=secret-token api_key=secret-key password=hunter2 secret=hidden " +
+      "authorization=Bearer abc cookie=sid=abc smtpPassword=mail-secret " +
+      "callback=https://example.test/callback?token=secret-token#session";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ detail: rawMessage }), {
+        status: 400,
+      }),
+    );
+
+    await expect(apiFetch("/api/send")).rejects.toMatchObject<ApiError>({
+      status: 400,
+      message: rawMessage,
+    });
+
+    const diagnosticData = JSON.stringify(getDiagnosticEvents()[0].data);
+    expect(diagnosticData).not.toContain("secret-token");
+    expect(diagnosticData).not.toContain("secret-key");
+    expect(diagnosticData).not.toContain("hunter2");
+    expect(diagnosticData).not.toContain("Bearer abc");
+    expect(diagnosticData).not.toContain("sid=abc");
+    expect(diagnosticData).not.toContain("mail-secret");
+    expect(diagnosticData).not.toContain("?token=");
+    expect(diagnosticData).not.toContain("#session");
+  });
+
   it("records fetch errors and rethrows the original error", async () => {
-    const networkError = new TypeError("Failed to fetch");
+    const networkError = new TypeError(
+      "Failed to fetch https://example.test/api?token=secret-token#debug with password=hunter2",
+    );
     vi.spyOn(globalThis, "fetch").mockRejectedValue(networkError);
 
     await expect(apiFetch("/api/professors?token=secret")).rejects.toBe(networkError);
@@ -136,11 +165,16 @@ describe("api client", () => {
           method: "GET",
           path: "/api/professors",
           durationMs: expect.any(Number),
-          error: "Failed to fetch",
+          errorType: "TypeError",
+          error: "Failed to fetch https://example.test/api with [Redacted]",
         }),
       }),
     ]);
-    expect(JSON.stringify(getDiagnosticEvents()[0].data)).not.toContain("secret");
+    const diagnosticData = JSON.stringify(getDiagnosticEvents()[0].data);
+    expect(diagnosticData).not.toContain("secret-token");
+    expect(diagnosticData).not.toContain("?token=");
+    expect(diagnosticData).not.toContain("#debug");
+    expect(diagnosticData).not.toContain("hunter2");
   });
 
   it("uses readable FastAPI validation detail messages", async () => {

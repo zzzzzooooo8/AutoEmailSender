@@ -81,7 +81,7 @@ export const apiFetch = async <T>(
           ...diagnosticData,
           status: response.status,
           durationMs: elapsedMs(startedAt),
-          message,
+          message: sanitizeDiagnosticMessage(message),
         },
       });
       throw new ApiError(response.status, message);
@@ -105,7 +105,8 @@ export const apiFetch = async <T>(
         data: {
           ...diagnosticData,
           durationMs: elapsedMs(startedAt),
-          error: getThrownErrorMessage(error),
+          errorType: getThrownErrorType(error),
+          error: sanitizeDiagnosticMessage(getThrownErrorMessage(error)),
         },
       });
     }
@@ -145,7 +146,7 @@ function formatDetailMessage(detail: unknown): string | undefined {
     if (typeof item === 'object' && item !== null && 'msg' in item && typeof item.msg === 'string') {
       const location =
         'loc' in item && Array.isArray(item.loc)
-          ? item.loc.filter((part) => typeof part === 'string' || typeof part === 'number').join('.')
+          ? item.loc.filter(isLocationPart).join('.')
           : '';
       return location ? `${location}: ${item.msg}` : item.msg;
     }
@@ -158,12 +159,46 @@ function formatDetailMessage(detail: unknown): string | undefined {
   return undefined;
 }
 
+function isLocationPart(part: unknown): part is string | number {
+  return typeof part === 'string' || typeof part === 'number';
+}
+
 function getThrownErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) {
     return error.message;
   }
 
   return String(error);
+}
+
+function getThrownErrorType(error: unknown): string {
+  if (error instanceof Error && error.name) {
+    return error.name;
+  }
+
+  return typeof error;
+}
+
+function sanitizeDiagnosticMessage(message: string): string {
+  try {
+    const withoutSensitiveUrls = message.replace(/https?:\/\/[^\s"'<>]+/gi, (value) =>
+      stripUrlQueryAndHash(value),
+    );
+    const withoutAuthHeaders = withoutSensitiveUrls.replace(
+      /\bauthorization\s*[:=]\s*Bearer\s+[^\s,;&]+/gi,
+      '[Redacted]',
+    );
+    const withoutSensitiveKeyValues = withoutAuthHeaders.replace(
+      /\b(?:token|api[_-]?key|password|secret|authorization|cookie|smtpPassword)\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;&]+)/gi,
+      '[Redacted]',
+    );
+
+    return withoutSensitiveKeyValues.length > 300
+      ? `${withoutSensitiveKeyValues.slice(0, 300)}...`
+      : withoutSensitiveKeyValues;
+  } catch {
+    return '[Unserializable]';
+  }
 }
 
 function recordApiDiagnosticEvent(input: {
@@ -194,4 +229,11 @@ function now(): number {
 function stripQueryAndHash(path: string): string {
   const url = new URL(path, window.location.origin);
   return url.pathname;
+}
+
+function stripUrlQueryAndHash(value: string): string {
+  const url = new URL(value);
+  url.search = '';
+  url.hash = '';
+  return url.toString();
 }
