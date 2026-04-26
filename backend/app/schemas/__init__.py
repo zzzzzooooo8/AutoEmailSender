@@ -8,6 +8,11 @@ from app.schemas.email_task import (
     EmailTaskPrimaryMaterialRequest,
     EmailTaskScheduleRequest,
 )
+from app.schemas.diagnostics import (
+    OperationLogExportResponse,
+    OperationLogListResponse,
+    OperationLogRead,
+)
 from app.schemas.identity import (
     ConnectionTestResult,
     IdentityMaterialRead,
@@ -41,6 +46,9 @@ __all__ = [
     "EmailTaskApprovalRequest",
     "EmailTaskPrimaryMaterialRequest",
     "EmailTaskScheduleRequest",
+    "OperationLogExportResponse",
+    "OperationLogListResponse",
+    "OperationLogRead",
     "IdentityMaterialRead",
     "IdentityProfileCreate",
     "IdentityProfileRead",
