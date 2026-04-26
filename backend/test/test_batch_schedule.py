@@ -19,6 +19,12 @@ class BatchScheduleTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "YYYY-MM-DD"):
             normalize_scheduled_dates(["2026-02-30"])
 
+    def test_normalize_scheduled_dates_rejects_non_yyyy_mm_dd_format(self) -> None:
+        for value in ["20260504", "2026-W19-1"]:
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "YYYY-MM-DD"):
+                    normalize_scheduled_dates([value])
+
     def test_is_datetime_in_batch_window_requires_selected_date_and_time_window(self) -> None:
         now = datetime(2026, 5, 4, 10, 30, tzinfo=UTC)
 

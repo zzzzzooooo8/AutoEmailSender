@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
+
+
+DATE_FORMAT_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def normalize_scheduled_dates(values: list[str] | None) -> list[str]:
@@ -9,6 +13,8 @@ def normalize_scheduled_dates(values: list[str] | None) -> list[str]:
 
     normalized: set[str] = set()
     for value in values:
+        if not DATE_FORMAT_PATTERN.fullmatch(value):
+            raise ValueError("发送日期必须使用 YYYY-MM-DD 格式")
         try:
             parsed = date.fromisoformat(value)
         except ValueError as exc:
