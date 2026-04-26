@@ -324,12 +324,15 @@ export interface CrawlJobDTO {
   status: CrawlJobStatusDTO;
   progress_current: number;
   progress_total: number;
-  page_count: number;
-  candidate_count: number;
-  latest_event_message: string | null;
   error_message: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface CrawlJobSummaryDTO extends CrawlJobDTO {
+  page_count: number;
+  candidate_count: number;
+  latest_event_message: string | null;
 }
 
 export interface CrawlPageDTO {

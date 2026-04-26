@@ -6,6 +6,7 @@ import type {
   CrawlJobCreatePayloadDTO,
   CrawlJobDTO,
   CrawlJobEventDTO,
+  CrawlJobSummaryDTO,
   CrawlPageDTO,
 } from '@/types';
 
@@ -15,10 +16,10 @@ export const createCrawlJob = (payload: CrawlJobCreatePayloadDTO) =>
     body: JSON.stringify(payload),
   });
 
-export const listCrawlJobs = () => apiFetch<CrawlJobDTO[]>('/api/crawl-jobs');
+export const listCrawlJobs = () => apiFetch<CrawlJobSummaryDTO[]>('/api/crawl-jobs');
 
 export const getCrawlJob = (jobId: number) =>
-  apiFetch<CrawlJobDTO>(`/api/crawl-jobs/${jobId}`);
+  apiFetch<CrawlJobSummaryDTO>(`/api/crawl-jobs/${jobId}`);
 
 export const listCrawlCandidates = (jobId: number) =>
   apiFetch<CrawlCandidateDTO[]>(`/api/crawl-jobs/${jobId}/candidates`);
