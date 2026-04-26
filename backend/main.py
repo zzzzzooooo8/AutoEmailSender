@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import (
     batch_tasks_router,
     crawl_jobs_router,
+    diagnostics_router,
     email_tasks_router,
     identities_router,
     llm_profiles_router,
@@ -20,6 +21,7 @@ from app.api import (
 from app.core.config import get_settings
 from app.core.database import dispose_engine, get_session_factory
 from app.core.migrations import ensure_database_schema
+from app.core.request_context import RequestContextMiddleware
 from app.services.runtime_manager import RuntimeManager
 
 
@@ -50,6 +52,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(RequestContextMiddleware)
 
     app.include_router(identities_router)
     app.include_router(materials_router)
@@ -57,6 +60,7 @@ def create_app() -> FastAPI:
     app.include_router(professors_router)
     app.include_router(test_compose_router)
     app.include_router(crawl_jobs_router)
+    app.include_router(diagnostics_router)
     app.include_router(batch_tasks_router)
     app.include_router(email_tasks_router)
     app.include_router(workspaces_router)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
@@ -16,6 +17,7 @@ from app.schemas.llm_profile import (
     LLMProfileUpdate,
 )
 from app.services.llm_runtime import fetch_llm_profile_models, probe_llm_profile
+from app.services.operation_logs import record_operation_log
 
 
 router = APIRouter(prefix="/api/llm-profiles", tags=["llm-profiles"])
@@ -44,6 +46,8 @@ async def create_llm_profile(
         await _clear_default_profiles(session)
 
     session.add(profile)
+    await session.flush()
+    await _record_llm_profile_log(session, profile, "llm_profile.created")
     await session.commit()
     await session.refresh(profile)
     return profile
@@ -64,6 +68,7 @@ async def update_llm_profile(
         setattr(profile, key, value)
     profile.updated_at = datetime.now(UTC)
 
+    await _record_llm_profile_log(session, profile, "llm_profile.updated")
     await session.commit()
     await session.refresh(profile)
     return profile
@@ -76,6 +81,12 @@ async def delete_llm_profile(
 ) -> None:
     profile = await _get_profile(session, profile_id)
     was_default = profile.is_default
+    await _record_llm_profile_log(
+        session,
+        profile,
+        "llm_profile.deleted",
+        metadata={"was_default": was_default},
+    )
     await session.delete(profile)
     await session.commit()
 
@@ -98,6 +109,7 @@ async def set_default_llm_profile(
     await _clear_default_profiles(session, exclude_id=profile_id)
     profile.is_default = True
     profile.updated_at = datetime.now(UTC)
+    await _record_llm_profile_log(session, profile, "llm_profile.default_set")
     await session.commit()
     await session.refresh(profile)
     return profile
@@ -110,6 +122,25 @@ async def fetch_models_for_llm_profile(
 ) -> LLMProfileModelsResult:
     profile = await _get_profile(session, profile_id)
     result = await fetch_llm_profile_models(profile)
+    await _record_llm_profile_log(
+        session,
+        profile,
+        "llm_profile.models_fetched",
+        level="info" if result.ok else "warning",
+        metadata={
+            "ok": result.ok,
+            "result": "ok" if result.ok else "failed",
+            "status_code": result.status_code,
+            "duration_ms": result.duration_ms,
+            "endpoint_kind": result.endpoint_kind,
+            "resolved_base_url": _strip_url_query_and_fragment(result.resolved_base_url),
+            "request_url": _strip_url_query_and_fragment(result.request_url),
+            "attempted_urls": _strip_url_list_query_and_fragment(result.attempted_urls),
+            "model_count": len(result.models),
+            "selected_model_available": result.selected_model_available,
+        },
+    )
+    await session.commit()
     return LLMProfileModelsResult(
         ok=result.ok,
         message=result.message,
@@ -132,6 +163,24 @@ async def test_llm_profile(
 ) -> LLMProfileTestResult:
     profile = await _get_profile(session, profile_id)
     result = await probe_llm_profile(profile)
+    await _record_llm_profile_log(
+        session,
+        profile,
+        "llm_profile.tested",
+        level="info" if result.ok else "warning",
+        metadata={
+            "ok": result.ok,
+            "result": "ok" if result.ok else "failed",
+            "status_code": result.status_code,
+            "duration_ms": result.duration_ms,
+            "endpoint_kind": result.endpoint_kind,
+            "resolved_base_url": _strip_url_query_and_fragment(result.resolved_base_url),
+            "request_url": _strip_url_query_and_fragment(result.request_url),
+            "attempted_urls": _strip_url_list_query_and_fragment(result.attempted_urls),
+            "consumes_tokens": result.consumes_tokens,
+        },
+    )
+    await session.commit()
     return LLMProfileTestResult(
         ok=result.ok,
         message=result.message,
@@ -166,3 +215,47 @@ async def _clear_default_profiles(
             continue
         profile.is_default = False
         profile.updated_at = datetime.now(UTC)
+
+
+async def _record_llm_profile_log(
+    session: AsyncSession,
+    profile: LLMProfile,
+    event_name: str,
+    *,
+    level: str = "info",
+    metadata: dict[str, object] | None = None,
+) -> None:
+    base_metadata: dict[str, object] = {
+        "id": profile.id,
+        "name": profile.name,
+        "provider": profile.provider,
+        "model_name": profile.model_name,
+        "api_base_url": _strip_url_query_and_fragment(profile.api_base_url),
+        "is_default": profile.is_default,
+    }
+    if metadata:
+        base_metadata.update(metadata)
+    await record_operation_log(
+        session,
+        category="user_action",
+        event_name=event_name,
+        level=level,
+        entity_type="llm_profile",
+        entity_id=str(profile.id),
+        metadata=base_metadata,
+    )
+
+
+def _strip_url_query_and_fragment(url: str | None) -> str | None:
+    if url is None:
+        return None
+    parsed = urlsplit(url)
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+
+
+def _strip_url_list_query_and_fragment(urls: list[str]) -> list[str]:
+    return [
+        sanitized
+        for url in urls
+        if (sanitized := _strip_url_query_and_fragment(url)) is not None
+    ]

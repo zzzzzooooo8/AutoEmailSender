@@ -13,7 +13,7 @@ from app.services.outreach_templates import import_outreach_template_file
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "7b9c2d4e6f10"
+HEAD_REVISION = "8a6d2f4c9b31"
 LEGACY_RUNTIME_REVISION = "7a1d5e42c9bd"
 
 
@@ -57,6 +57,7 @@ class DatabaseSchemaTests(unittest.TestCase):
                 "app_settings",
                 "test_compose_sessions",
                 "test_compose_messages",
+                "operation_logs",
             }.issubset(table_names),
         )
         self.assertNotIn("attachment_assets", table_names)
@@ -68,6 +69,7 @@ class DatabaseSchemaTests(unittest.TestCase):
         professor_columns = self._get_columns("professors")
         log_columns = self._get_columns("email_logs")
         settings_columns = self._get_columns("app_settings")
+        operation_log_columns = self._get_columns("operation_logs")
 
         self.assertIn("current_primary_material_id", identity_columns)
         self.assertNotIn("resume_file_path", identity_columns)
@@ -87,6 +89,37 @@ class DatabaseSchemaTests(unittest.TestCase):
         self.assertIn("reply_headers", log_columns)
         self.assertNotIn("mail_delivery_mode", settings_columns)
         self.assertNotIn("signature", identity_columns)
+        self.assertTrue(
+            {
+                "id",
+                "request_id",
+                "category",
+                "event_name",
+                "level",
+                "message",
+                "entity_type",
+                "entity_id",
+                "metadata",
+                "created_at",
+            }.issubset(operation_log_columns),
+        )
+
+        operation_log_indexes = {
+            row[1]
+            for row in self.connection.execute(
+                "PRAGMA index_list('operation_logs')"
+            ).fetchall()
+        }
+        self.assertTrue(
+            {
+                "ix_operation_logs_request_id",
+                "ix_operation_logs_category",
+                "ix_operation_logs_event_name",
+                "ix_operation_logs_entity_type",
+                "ix_operation_logs_entity_id",
+                "ix_operation_logs_created_at",
+            }.issubset(operation_log_indexes),
+        )
 
     def test_crawl_job_tables_exist(self) -> None:
         rows = self.connection.execute(

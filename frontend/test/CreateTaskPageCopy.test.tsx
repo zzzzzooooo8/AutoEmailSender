@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CreateTaskPage } from "@/pages/CreateTaskPage";
+import { clearDiagnosticEvents, getDiagnosticEvents } from "@/lib/diagnostics";
 import type { IdentityDTO, LLMProfileDTO, ProfessorDashboardItemDTO } from "@/types";
 
 const mockedUseSelectionContext = vi.hoisted(() => vi.fn());
@@ -107,9 +108,11 @@ const renderPage = () =>
 
 describe("CreateTaskPage copy", () => {
   beforeEach(() => {
+    clearDiagnosticEvents();
     window.sessionStorage.setItem("selected_professor_ids", JSON.stringify([professor.id]));
     mockedListProfessors.mockReset();
     mockedCreateBatchTask.mockReset();
+    mockedCreateBatchTask.mockResolvedValue({ id: 1 });
     mockedConfirm.mockReset();
     mockedConfirm.mockResolvedValue(true);
     mockedListProfessors.mockResolvedValue([professor]);
@@ -148,5 +151,68 @@ describe("CreateTaskPage copy", () => {
         }),
       );
     });
+  });
+
+  it("records successful batch task creation as user actions", async () => {
+    renderPage();
+
+    await screen.findByText("发信模式");
+    fireEvent.click(screen.getByText("创建任务").closest("button")!);
+
+    await waitFor(() => {
+      expect(mockedCreateBatchTask).toHaveBeenCalled();
+    });
+
+    expect(getDiagnosticEvents()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "user_action",
+          eventName: "tasks.batch_create_submitted",
+          data: {
+            selectedCount: 1,
+            identityId: 1,
+            llmProfileId: 1,
+            scheduleType: "immediate",
+          },
+        }),
+        expect.objectContaining({
+          category: "user_action",
+          eventName: "tasks.batch_create_succeeded",
+        }),
+      ]),
+    );
+  });
+
+  it("records failed batch task creation as a user action", async () => {
+    mockedCreateBatchTask.mockRejectedValue(new Error("create failed"));
+
+    renderPage();
+
+    await screen.findByText("发信模式");
+    fireEvent.click(screen.getByText("创建任务").closest("button")!);
+
+    await waitFor(() => {
+      expect(mockedCreateBatchTask).toHaveBeenCalled();
+    });
+
+    expect(getDiagnosticEvents()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "user_action",
+          eventName: "tasks.batch_create_submitted",
+          data: {
+            selectedCount: 1,
+            identityId: 1,
+            llmProfileId: 1,
+            scheduleType: "immediate",
+          },
+        }),
+        expect.objectContaining({
+          category: "user_action",
+          eventName: "tasks.batch_create_failed",
+          message: "create failed",
+        }),
+      ]),
+    );
   });
 });

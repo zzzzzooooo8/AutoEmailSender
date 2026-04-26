@@ -27,6 +27,7 @@ from app.schemas.crawl_job import (
     CrawlPageRead,
 )
 from app.services.crawl_job_events import build_crawl_job_events, normalize_agent_trace_event
+from app.services.operation_logs import record_operation_log
 from app.services.professor_management import is_valid_professor_email
 
 
@@ -48,6 +49,20 @@ async def create_crawl_job(
         progress_total=0,
     )
     session.add(job)
+    await session.flush()
+    await record_operation_log(
+        session,
+        category="crawler",
+        event_name="crawl_job.created",
+        entity_type="crawl_job",
+        entity_id=str(job.id),
+        metadata={
+            "university": job.university,
+            "school": job.school,
+            "start_url": job.start_url,
+            "llm_profile_id": job.llm_profile_id,
+        },
+    )
     await session.commit()
     await session.refresh(job)
     return job
@@ -92,6 +107,18 @@ async def update_crawl_candidate(
     candidate.review_status = payload.review_status
     candidate.updated_at = datetime.now(UTC)
 
+    await record_operation_log(
+        session,
+        category="crawler",
+        event_name="crawl_candidate.updated",
+        entity_type="crawl_candidate",
+        entity_id=str(candidate.id),
+        metadata={
+            "job_id": candidate.job_id,
+            "review_status": candidate.review_status,
+            "has_email": bool(candidate.email),
+        },
+    )
     await session.commit()
     await session.refresh(candidate)
     return candidate
@@ -230,6 +257,19 @@ async def approve_crawl_candidates(
 
     job.status = CrawlJobStatus.COMPLETED.value
     job.updated_at = now
+    await record_operation_log(
+        session,
+        category="crawler",
+        event_name="crawl_job.approved",
+        entity_type="crawl_job",
+        entity_id=str(job.id),
+        metadata={
+            "inserted_count": inserted_count,
+            "updated_count": updated_count,
+            "skipped_count": skipped_count,
+            "candidate_count": len(candidates),
+        },
+    )
     await session.commit()
 
     return CrawlJobApproveResult(
@@ -254,6 +294,14 @@ async def cancel_crawl_job(
 
     job.status = CrawlJobStatus.CANCELED.value
     job.updated_at = datetime.now(UTC)
+    await record_operation_log(
+        session,
+        category="crawler",
+        event_name="crawl_job.canceled",
+        entity_type="crawl_job",
+        entity_id=str(job.id),
+        metadata={"status": job.status},
+    )
     await session.commit()
     await session.refresh(job)
     return job

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, datetime
+from time import perf_counter
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import func, select
@@ -20,6 +21,7 @@ from app.schemas.identity import (
 )
 from app.services.file_storage import delete_file
 from app.services.mail_runtime import test_imap_connection, test_smtp_connection
+from app.services.operation_logs import record_operation_log
 from app.services.outreach_templates import (
     OUTREACH_GENERATION_MODE_LLM,
     OUTREACH_GENERATION_MODE_TEMPLATE,
@@ -60,6 +62,8 @@ async def create_identity(
         await _clear_default_identities(session)
 
     session.add(identity)
+    await session.flush()
+    await _record_identity_log(session, identity, "identity.created")
     await session.commit()
     saved = await _get_identity(session, identity.id)
     return serialize_identity(saved)
@@ -81,6 +85,7 @@ async def update_identity(
         setattr(identity, key, value)
     identity.updated_at = datetime.now(UTC)
 
+    await _record_identity_log(session, identity, "identity.updated")
     await session.commit()
     saved = await _get_identity(session, identity_id)
     return serialize_identity(saved)
@@ -97,6 +102,12 @@ async def delete_identity(
     for material in identity.materials:
         delete_file(material.file_path)
 
+    await _record_identity_log(
+        session,
+        identity,
+        "identity.deleted",
+        metadata={"was_default": was_default},
+    )
     await session.delete(identity)
     await session.commit()
 
@@ -121,6 +132,7 @@ async def set_default_identity(
     await _clear_default_identities(session, exclude_id=identity_id)
     identity.is_default = True
     identity.updated_at = datetime.now(UTC)
+    await _record_identity_log(session, identity, "identity.default_set")
     await session.commit()
     saved = await _get_identity(session, identity_id)
     return serialize_identity(saved)
@@ -132,7 +144,22 @@ async def smtp_test(
     session: AsyncSession = Depends(get_async_session),
 ) -> ConnectionTestResult:
     identity = await _get_identity(session, identity_id)
+    started_at = perf_counter()
     ok, message = await test_smtp_connection(identity)
+    duration_ms = int((perf_counter() - started_at) * 1000)
+    await _record_identity_log(
+        session,
+        identity,
+        "identity.smtp_tested",
+        level="info" if ok else "warning",
+        metadata={
+            "ok": ok,
+            "result": "ok" if ok else "failed",
+            "duration_ms": duration_ms,
+            "host": identity.smtp_host,
+        },
+    )
+    await session.commit()
     return ConnectionTestResult(ok=ok, message=message, host=identity.smtp_host)
 
 
@@ -142,7 +169,22 @@ async def imap_test(
     session: AsyncSession = Depends(get_async_session),
 ) -> ConnectionTestResult:
     identity = await _get_identity(session, identity_id)
+    started_at = perf_counter()
     ok, message = await test_imap_connection(identity)
+    duration_ms = int((perf_counter() - started_at) * 1000)
+    await _record_identity_log(
+        session,
+        identity,
+        "identity.imap_tested",
+        level="info" if ok else "warning",
+        metadata={
+            "ok": ok,
+            "result": "ok" if ok else "failed",
+            "duration_ms": duration_ms,
+            "host": identity.imap_host,
+        },
+    )
+    await session.commit()
     return ConnectionTestResult(ok=ok, message=message, host=identity.imap_host)
 
 
@@ -207,6 +249,37 @@ async def _clear_default_identities(
             continue
         identity.is_default = False
         identity.updated_at = datetime.now(UTC)
+
+
+async def _record_identity_log(
+    session: AsyncSession,
+    identity: IdentityProfile,
+    event_name: str,
+    *,
+    level: str = "info",
+    metadata: dict[str, object] | None = None,
+) -> None:
+    base_metadata: dict[str, object] = {
+        "id": identity.id,
+        "name": identity.name,
+        "profile_name": identity.profile_name,
+        "sender_name": identity.sender_name,
+        "email_address": identity.email_address,
+        "smtp_host": identity.smtp_host,
+        "imap_host": identity.imap_host,
+        "is_default": identity.is_default,
+    }
+    if metadata:
+        base_metadata.update(metadata)
+    await record_operation_log(
+        session,
+        category="user_action",
+        event_name=event_name,
+        level=level,
+        entity_type="identity",
+        entity_id=str(identity.id),
+        metadata=base_metadata,
+    )
 
 
 def _normalize_identity_payload(

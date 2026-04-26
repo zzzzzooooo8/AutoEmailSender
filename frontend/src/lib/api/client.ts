@@ -1,3 +1,5 @@
+import { recordDiagnosticEvent } from "@/lib/diagnostics";
+
 export class ApiError extends Error {
   status: number;
 
@@ -13,7 +15,7 @@ export const buildApiPath = (
 ) => {
   const url = new URL(path, window.location.origin);
   Object.entries(params ?? {}).forEach(([key, value]) => {
-    if (value === null || value === undefined || value === '') {
+    if (value === null || value === undefined || value === "") {
       return;
     }
     url.searchParams.set(key, String(value));
@@ -26,37 +28,100 @@ export const buildApiUrl = (
   params?: Record<string, string | number | null | undefined>,
 ) => new URL(buildApiPath(path, params), window.location.origin).toString();
 
-const normalizeValidationMessage = (message: string) =>
-  message.replace(/^Value error,\s*/i, "").trim();
+export const apiFetch = async <T>(
+  path: string,
+  options?: RequestInit,
+  params?: Record<string, string | number | null | undefined>,
+): Promise<T> => {
+  const apiPath = buildApiPath(path, params);
+  const diagnosticData = {
+    method: (options?.method ?? "GET").toUpperCase(),
+    path: stripQueryAndHash(apiPath),
+  };
+  const startedAt = now();
 
-const extractApiErrorMessage = (data: unknown) => {
-  if (typeof data === "object" && data !== null && "detail" in data) {
-    const detail = data.detail;
-    if (typeof detail === "string" && detail.trim()) {
-      return detail;
+  try {
+    const response = await fetch(apiPath, {
+      ...options,
+      headers: {
+        ...(options?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+        ...(options?.headers ?? {}),
+      },
+    });
+
+    if (response.status === 204) {
+      recordApiDiagnosticEvent({
+        level: "info",
+        eventName: "api.request_succeeded",
+        data: {
+          ...diagnosticData,
+          status: response.status,
+          durationMs: elapsedMs(startedAt),
+        },
+      });
+      return undefined as T;
     }
-    if (Array.isArray(detail)) {
-      const messages = detail
-        .map((item) => {
-          if (typeof item === "string") {
-            return item.trim();
-          }
-          if (
-            typeof item === "object" &&
-            item !== null &&
-            "msg" in item &&
-            typeof item.msg === "string"
-          ) {
-            return normalizeValidationMessage(item.msg);
-          }
-          return "";
-        })
-        .filter(Boolean);
-      if (messages.length > 0) {
-        return messages.join("；");
+
+    const text = await response.text();
+    let data: unknown = null;
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = text;
       }
     }
+
+    if (!response.ok) {
+      const message = getApiErrorMessage(data);
+      recordApiDiagnosticEvent({
+        level: "error",
+        eventName: "api.request_failed",
+        data: {
+          ...diagnosticData,
+          status: response.status,
+          durationMs: elapsedMs(startedAt),
+          message: sanitizeDiagnosticMessage(message),
+        },
+      });
+      throw new ApiError(response.status, message);
+    }
+
+    recordApiDiagnosticEvent({
+      level: "info",
+      eventName: "api.request_succeeded",
+      data: {
+        ...diagnosticData,
+        status: response.status,
+        durationMs: elapsedMs(startedAt),
+      },
+    });
+    return data as T;
+  } catch (error) {
+    if (!(error instanceof ApiError)) {
+      recordApiDiagnosticEvent({
+        level: "error",
+        eventName: "api.request_errored",
+        data: {
+          ...diagnosticData,
+          durationMs: elapsedMs(startedAt),
+          errorType: getThrownErrorType(error),
+          error: sanitizeDiagnosticMessage(getThrownErrorMessage(error)),
+        },
+      });
+    }
+    throw error;
   }
+};
+
+function getApiErrorMessage(data: unknown): string {
+  if (typeof data === "object" && data !== null && "detail" in data) {
+    const detailMessage = formatDetailMessage(data.detail);
+    if (detailMessage) {
+      return detailMessage;
+    }
+  }
+
   if (
     typeof data === "object" &&
     data !== null &&
@@ -66,42 +131,127 @@ const extractApiErrorMessage = (data: unknown) => {
   ) {
     return data.message;
   }
+
   if (typeof data === "string" && data.trim()) {
     return data;
   }
-  return "请求失败";
-};
 
-export const apiFetch = async <T>(
-  path: string,
-  options?: RequestInit,
-  params?: Record<string, string | number | null | undefined>,
-): Promise<T> => {
-  const response = await fetch(buildApiPath(path, params), {
-    ...options,
-    headers: {
-      ...(options?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-      ...(options?.headers ?? {}),
-    },
-  });
+  return "\u8BF7\u6C42\u5931\u8D25";
+}
 
-  if (response.status === 204) {
-    return undefined as T;
+function formatDetailMessage(detail: unknown): string | undefined {
+  if (typeof detail === "string" && detail.trim()) {
+    return detail;
   }
 
-  const text = await response.text();
-  let data: unknown = null;
-  if (text) {
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = text;
-    }
+  if (!Array.isArray(detail)) {
+    return undefined;
   }
 
-  if (!response.ok) {
-    throw new ApiError(response.status, extractApiErrorMessage(data));
+  const messages = detail
+    .map((item) => {
+      if (typeof item === "string") {
+        return item.trim();
+      }
+      if (typeof item !== "object" || item === null || !("msg" in item) || typeof item.msg !== "string") {
+        return "";
+      }
+
+      const normalizedMessage = normalizeValidationMessage(item.msg);
+      if (normalizedMessage !== item.msg) {
+        return normalizedMessage;
+      }
+
+      const location =
+        "loc" in item && Array.isArray(item.loc)
+          ? item.loc.filter(isLocationPart).join(".")
+          : "";
+      return location ? `${location}: ${normalizedMessage}` : normalizedMessage;
+    })
+    .filter(Boolean);
+
+  return messages.length > 0 ? messages.join("\uFF1B") : undefined;
+}
+
+function normalizeValidationMessage(message: string): string {
+  return message.replace(/^Value error,\s*/i, "").trim();
+}
+
+function isLocationPart(part: unknown): part is string | number {
+  return typeof part === "string" || typeof part === "number";
+}
+
+function getThrownErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
   }
 
-  return data as T;
-};
+  return String(error);
+}
+
+function getThrownErrorType(error: unknown): string {
+  if (error instanceof Error && error.name) {
+    return error.name;
+  }
+
+  return typeof error;
+}
+
+function sanitizeDiagnosticMessage(message: string): string {
+  try {
+    const withoutSensitiveUrls = message.replace(/https?:\/\/[^\s"'<>]+/gi, (value) =>
+      stripUrlQueryAndHash(value),
+    );
+    const withoutAuthHeaders = withoutSensitiveUrls.replace(
+      /\bauthorization\s*[:=]\s*Bearer\s+[^\s,;&]+/gi,
+      "[Redacted]",
+    );
+    const withoutSensitiveKeyValues = withoutAuthHeaders.replace(
+      /\b(?:token|api[_-]?key|password|secret|authorization|cookie|smtpPassword)\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;&]+)/gi,
+      "[Redacted]",
+    );
+
+    return withoutSensitiveKeyValues.length > 300
+      ? `${withoutSensitiveKeyValues.slice(0, 300)}...`
+      : withoutSensitiveKeyValues;
+  } catch {
+    return "[Unserializable]";
+  }
+}
+
+function recordApiDiagnosticEvent(input: {
+  level: "info" | "error";
+  eventName: "api.request_succeeded" | "api.request_failed" | "api.request_errored";
+  data: Record<string, string | number>;
+}): void {
+  try {
+    recordDiagnosticEvent({
+      level: input.level,
+      category: "api",
+      eventName: input.eventName,
+      data: input.data,
+    });
+  } catch {
+    // Diagnostic failures should never change API behavior.
+  }
+}
+
+function elapsedMs(startedAt: number): number {
+  return Math.max(0, Math.round(now() - startedAt));
+}
+
+function now(): number {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+function stripQueryAndHash(path: string): string {
+  const url = new URL(path, window.location.origin);
+  return url.pathname;
+}
+
+function stripUrlQueryAndHash(value: string): string {
+  const url = new URL(value);
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
