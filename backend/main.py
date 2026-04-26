@@ -20,6 +20,7 @@ from app.api import (
 from app.core.config import get_settings
 from app.core.database import dispose_engine, get_session_factory
 from app.core.migrations import ensure_database_schema
+from app.core.request_context import RequestContextMiddleware
 from app.services.runtime_manager import RuntimeManager
 
 
@@ -50,6 +51,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(RequestContextMiddleware)
 
     app.include_router(identities_router)
     app.include_router(materials_router)
