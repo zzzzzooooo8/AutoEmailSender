@@ -21,6 +21,10 @@ import type { ProfessorDashboardItemDTO } from '@/types';
 
 const SESSION_KEY = 'selected_professor_ids';
 
+const hasMatchEvidence = (professor: ProfessorDashboardItemDTO) =>
+  Boolean(professor.research_direction?.trim()) ||
+  professor.recent_papers.some((paper) => paper.trim());
+
 export const HomePage = () => {
   const navigate = useNavigate();
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
@@ -204,7 +208,16 @@ export const HomePage = () => {
     if (!hasPrimaryMaterial) {
       notifyWarning(
         '缺少默认材料',
-        '请到个人页设置默认材料。',
+        '请到个人中心设置默认材料。',
+      );
+      return;
+    }
+
+    const professor = professors.find((item) => item.id === professorId);
+    if (professor && !hasMatchEvidence(professor)) {
+      notifyWarning(
+        '缺少研究信息',
+        '请先补充该导师的研究方向或近期论文，再分析匹配度。',
       );
       return;
     }
@@ -235,7 +248,7 @@ export const HomePage = () => {
     if (!hasPrimaryMaterial) {
       notifyWarning(
         '缺少默认材料',
-        '请到个人页设置默认材料。',
+        '请到个人中心设置默认材料。',
       );
       return;
     }
@@ -243,9 +256,27 @@ export const HomePage = () => {
     setBulkScoring(true);
     const failedNames: string[] = [];
     const selectedProfessors = professors.filter((item) => selectedIds.has(item.id));
+    const analyzableProfessors = selectedProfessors.filter(hasMatchEvidence);
+    const skippedCount = selectedProfessors.length - analyzableProfessors.length;
+
+    if (analyzableProfessors.length === 0) {
+      notifyWarning(
+        '缺少研究信息',
+        '已选导师都缺少研究方向或近期论文，暂不能分析匹配度。',
+      );
+      setBulkScoring(false);
+      return;
+    }
+
+    if (skippedCount > 0) {
+      notifyWarning(
+        '已跳过缺少研究信息的导师',
+        `已跳过 ${skippedCount} 位缺少研究方向或近期论文的导师。`,
+      );
+    }
 
     try {
-      for (const professor of selectedProfessors) {
+      for (const professor of analyzableProfessors) {
         toggleScoringProfessor(professor.id, true);
         try {
           await runCalculateMatchForProfessor(professor.id);
@@ -322,7 +353,7 @@ export const HomePage = () => {
                 className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {bulkScoring ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                批量只算匹配
+                批量分析匹配度
               </button>
               <Link to="/professors" data-interactive="button" className="ui-btn-secondary">
                 <FolderOpen className="h-4 w-4" />
@@ -387,7 +418,7 @@ export const HomePage = () => {
               </p>
             ) : (
               <p className="text-sm text-stone-500">
-                首页只计算匹配；草稿请在工作区生成。
+                根据默认材料与导师研究方向/近期论文分析匹配度；草稿请在工作区生成。
               </p>
             )}
           </div>
@@ -437,6 +468,7 @@ export const HomePage = () => {
                   selected={selectedIds.has(professor.id)}
                   bulkDisabled={bulkScoring}
                   scoring={scoringProfessorIds.has(professor.id)}
+                  canCalculateMatch={hasMatchEvidence(professor)}
                   statusLabel={getProfessorDashboardStatusLabel(professor.status)}
                   onToggleSelection={() => toggleSelection(professor.id)}
                   onCalculateMatch={() => void handleGenerateOne(professor.id)}

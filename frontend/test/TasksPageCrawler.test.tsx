@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TasksPage } from "@/pages/TasksPage";
-import { listBatchTasks } from "@/lib/api/batchTasksApi";
+import { listBatchTaskItems, listBatchTasks } from "@/lib/api/batchTasksApi";
 import {
   cancelCrawlJob,
   getCrawlJobEvents,
@@ -32,6 +32,7 @@ vi.mock("@/lib/useConfirmDialog", () => ({
 }));
 
 vi.mock("@/lib/api/batchTasksApi", () => ({
+  listBatchTaskItems: vi.fn(),
   listBatchTasks: vi.fn(),
   pauseBatchTask: vi.fn(),
   resumeBatchTask: vi.fn(),
@@ -63,6 +64,13 @@ const runningJob = {
   latest_event_message: "正在分析教师列表",
 } as const;
 
+const buildCrawlJob = (id: number) => ({
+  ...runningJob,
+  id,
+  university: `示例大学 ${id}`,
+  school: "计算机学院",
+});
+
 const renderPage = () =>
   render(
     <MemoryRouter>
@@ -79,6 +87,7 @@ describe("TasksPage crawler jobs tab", () => {
     });
     confirm.mockResolvedValue(true);
     vi.mocked(listBatchTasks).mockResolvedValue([]);
+    vi.mocked(listBatchTaskItems).mockResolvedValue([]);
     vi.mocked(listCrawlJobs).mockResolvedValue([runningJob]);
     vi.mocked(cancelCrawlJob).mockResolvedValue(runningJob);
     vi.mocked(listCrawlPages).mockResolvedValue([
@@ -125,7 +134,7 @@ describe("TasksPage crawler jobs tab", () => {
         job_id: 7,
         event_type: "crawl_page",
         message: "调用 crawl_page 抓取入口页面",
-        created_at: "2026-04-26T10:03:00Z",
+        created_at: "2026-04-26T08:34:00",
         raw: null,
       },
     ]);
@@ -133,6 +142,14 @@ describe("TasksPage crawler jobs tab", () => {
 
   it("shows crawl job cards after switching to the crawler tab", async () => {
     renderPage();
+
+    await waitFor(() => {
+      expect(listCrawlJobs).toHaveBeenCalled();
+    });
+
+    const crawlerSummaryCard =
+      screen.getAllByText("教师抓取")[0].closest("div")?.parentElement;
+    expect(crawlerSummaryCard).toHaveTextContent("1");
 
     fireEvent.click(screen.getByRole("button", { name: "教师抓取" }));
 
@@ -145,7 +162,7 @@ describe("TasksPage crawler jobs tab", () => {
     expect(screen.getByText("已抓页面 12")).toBeInTheDocument();
     expect(screen.getByText("候选导师 34")).toBeInTheDocument();
     expect(screen.getByText("正在分析教师列表")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "查看日志" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "查看详情" })).toBeEnabled();
   });
 
   it("opens and closes the crawl job log dialog", async () => {
@@ -153,22 +170,59 @@ describe("TasksPage crawler jobs tab", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "教师抓取" }));
 
-    const logButton = await screen.findByRole("button", { name: "查看日志" });
+    const logButton = await screen.findByRole("button", { name: "查看详情" });
     fireEvent.click(logButton);
 
-    const dialog = await screen.findByRole("dialog", { name: "抓取任务日志" });
+    const dialog = await screen.findByRole("dialog", { name: "抓取任务详情" });
     expect(dialog).toBeInTheDocument();
     expect(listCrawlPages).toHaveBeenCalledWith(7);
     expect(listCrawlCandidates).toHaveBeenCalledWith(7);
     expect(getCrawlJobEvents).toHaveBeenCalledWith(7);
     expect(screen.getByText("调用 crawl_page 抓取入口页面")).toBeInTheDocument();
+    expect(screen.getByText("04/26 16:34")).toBeInTheDocument();
     expect(screen.getByText("Faculty")).toBeInTheDocument();
     expect(screen.getByText("张教授")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "关闭" }));
 
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "抓取任务日志" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: "抓取任务详情" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("paginates crawl job cards", async () => {
+    vi.mocked(listCrawlJobs).mockResolvedValue(
+      Array.from({ length: 9 }, (_, index) => buildCrawlJob(index + 1)),
+    );
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "教师抓取" }));
+
+    expect(await screen.findByText("示例大学 1 / 计算机学院")).toBeInTheDocument();
+    expect(screen.getByText("示例大学 8 / 计算机学院")).toBeInTheDocument();
+    expect(screen.queryByText("示例大学 9 / 计算机学院")).not.toBeInTheDocument();
+    expect(screen.getByText("第 1 / 2 页")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+
+    expect(await screen.findByText("示例大学 9 / 计算机学院")).toBeInTheDocument();
+    expect(screen.queryByText("示例大学 1 / 计算机学院")).not.toBeInTheDocument();
+    expect(screen.getByText("显示 9-9 / 9 个任务")).toBeInTheDocument();
+  });
+
+  it("closes the crawl job details dialog when clicking the backdrop", async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "教师抓取" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "查看详情" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "抓取任务详情" });
+    fireEvent.click(dialog.parentElement as HTMLElement);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "抓取任务详情" })).not.toBeInTheDocument();
     });
   });
 

@@ -92,7 +92,80 @@ class CrawlJobEventsTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(message, "Agent 调用 crawl_page")
+        self.assertEqual(message, "Agent 调用 crawl_page 抓取页面")
+
+    def test_trace_update_with_tool_call_string_uses_specific_tool_message(self) -> None:
+        message = summarize_agent_trace_event(
+            {
+                "type": "updates",
+                "data": {
+                    "model": {
+                        "messages": [
+                            "content='' tool_calls=[{'name': 'crawl_page', 'args': {'url': 'https://example.edu'}}]",
+                        ],
+                    },
+                },
+            },
+        )
+
+        self.assertEqual(message, "Agent 调用 crawl_page 抓取页面")
+
+    def test_build_events_omits_generic_agent_update_messages(self) -> None:
+        job = CrawlJob(
+            id=3,
+            university="示例大学",
+            school="计算机学院",
+            start_url="https://example.edu/faculty",
+            status=CrawlJobStatus.RUNNING.value,
+            progress_current=0,
+            progress_total=0,
+            agent_trace=[
+                {
+                    "event_type": "updates",
+                    "message": "Agent 事件：updates",
+                    "created_at": "2026-04-26T10:01:00+00:00",
+                    "raw": {
+                        "type": "updates",
+                        "data": {"TodoListMiddleware.after_model": None},
+                    },
+                },
+                {
+                    "type": "updates",
+                    "data": {
+                        "model": {
+                            "messages": [
+                                "tool_calls=[{'name': 'save_professor_candidates', 'args': {}}]",
+                            ],
+                        },
+                    },
+                    "created_at": "2026-04-26T10:02:00+00:00",
+                },
+            ],
+            created_at=datetime(2026, 4, 26, 10, 0, tzinfo=UTC),
+            updated_at=datetime(2026, 4, 26, 10, 3, tzinfo=UTC),
+        )
+
+        messages = [event["message"] for event in build_crawl_job_events(job, pages=[], candidates=[])]
+
+        self.assertIn("Agent 保存候选导师", messages)
+        self.assertNotIn("Agent 事件：updates", messages)
+
+    def test_naive_datetime_event_times_are_marked_as_utc(self) -> None:
+        job = CrawlJob(
+            id=4,
+            university="示例大学",
+            school="计算机学院",
+            start_url="https://example.edu/faculty",
+            status=CrawlJobStatus.FAILED.value,
+            progress_current=0,
+            progress_total=0,
+            created_at=datetime(2026, 4, 26, 8, 0),
+            updated_at=datetime(2026, 4, 26, 8, 34),
+        )
+
+        events = build_crawl_job_events(job, pages=[], candidates=[])
+
+        self.assertEqual(events[0]["created_at"], "2026-04-26T08:34:00+00:00")
 
     def test_non_dict_and_empty_trace_do_not_raise(self) -> None:
         self.assertEqual(normalize_agent_trace_event({})["message"], "Agent 更新了执行状态")

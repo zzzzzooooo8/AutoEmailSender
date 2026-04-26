@@ -15,6 +15,7 @@ class WorkspaceProfessorRead(BaseModel):
     university: str | None
     school: str | None
     research_direction: str | None
+    recent_papers: list[str]
 
 
 class WorkspaceIdentityRead(BaseModel):

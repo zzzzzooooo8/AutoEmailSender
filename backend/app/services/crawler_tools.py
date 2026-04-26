@@ -89,10 +89,10 @@ def is_safe_public_crawl_url(url: str) -> bool:
 
 
 def validate_safe_public_crawl_url(url: str) -> None:
-    _resolve_safe_public_crawl_url(url)
+    _validate_safe_crawl_url_literal(url)
 
 
-def _resolve_safe_public_crawl_url(url: str) -> _SafeCrawlUrl:
+def _validate_safe_crawl_url_literal(url: str) -> tuple[str, str, int]:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
         raise ValueError(UNSAFE_CRAWL_URL_MESSAGE)
@@ -108,20 +108,26 @@ def _resolve_safe_public_crawl_url(url: str) -> _SafeCrawlUrl:
     try:
         ip_address = ipaddress.ip_address(normalized_host)
     except ValueError:
-        return _SafeCrawlUrl(
-            hostname=normalized_host,
-            resolved_ips=_resolve_safe_public_host_ips(
-                normalized_host,
-                parsed.port or _default_port_for_scheme(parsed.scheme),
-            ),
-        )
+        return normalized_host, parsed.scheme, parsed.port or _default_port_for_scheme(parsed.scheme)
 
     if _is_unsafe_ip_address(ip_address):
         raise ValueError(UNSAFE_CRAWL_URL_MESSAGE)
+    return normalized_host, parsed.scheme, parsed.port or _default_port_for_scheme(parsed.scheme)
+
+
+def _resolve_safe_public_crawl_url(url: str) -> _SafeCrawlUrl:
+    normalized_host, _scheme, port = _validate_safe_crawl_url_literal(url)
+    try:
+        ip_address = ipaddress.ip_address(normalized_host)
+    except ValueError:
+        return _SafeCrawlUrl(
+            hostname=normalized_host,
+            resolved_ips=_resolve_system_host_ips(normalized_host, port),
+        )
     return _SafeCrawlUrl(hostname=normalized_host, resolved_ips=(str(ip_address),))
 
 
-def _resolve_safe_public_host_ips(host: str, port: int) -> tuple[str, ...]:
+def _resolve_system_host_ips(host: str, port: int) -> tuple[str, ...]:
     try:
         address_infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except socket.gaierror as exc:
@@ -140,8 +146,6 @@ def _resolve_safe_public_host_ips(host: str, port: int) -> tuple[str, ...]:
             ip_address = ipaddress.ip_address(ip_text)
         except ValueError as exc:
             raise ValueError(UNSAFE_CRAWL_URL_MESSAGE) from exc
-        if _is_unsafe_ip_address(ip_address):
-            raise ValueError(UNSAFE_CRAWL_URL_MESSAGE)
         normalized_ip = str(ip_address)
         if normalized_ip not in resolved_ips:
             resolved_ips.append(normalized_ip)
@@ -359,7 +363,7 @@ async def crawl_page_with_http(ctx: CrawlToolContext, url: str) -> PageSnapshot:
 
     snapshot = html_to_snapshot(final_url, response.text, "http")
     snapshot.links = [
-        link for link in snapshot.links if is_allowed_crawl_url(ctx.start_url, link)
+        link for link in snapshot.links if _is_same_host_http_url(ctx.start_url, link)
     ][:MAX_LINKS]
     await record_page_snapshot(ctx, snapshot)
     return snapshot
@@ -553,6 +557,15 @@ def _failed_snapshot(url: str, fetch_method: str, error_message: str) -> PageSna
 
 def _has_unsafe_public_crawl_url(start_url: str, candidate_url: str) -> bool:
     return not is_safe_public_crawl_url(start_url) or not is_safe_public_crawl_url(candidate_url)
+
+
+def _is_same_host_http_url(start_url: str, candidate_url: str) -> bool:
+    start = urlparse(start_url)
+    candidate = urlparse(urljoin(start_url, candidate_url))
+    return (
+        candidate.scheme in {"http", "https"}
+        and (start.hostname or "").lower() == (candidate.hostname or "").lower()
+    )
 
 
 def _pre_request_rejected_snapshot(

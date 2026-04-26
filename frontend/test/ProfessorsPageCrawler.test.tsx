@@ -15,7 +15,6 @@ vi.mock("@/lib/api/professorsApi", () => ({
   createProfessor: vi.fn(),
   getProfessorTemplateDownloadUrl: vi.fn(() => "/templates/professors.xlsx"),
   importProfessorsFromFile: vi.fn(),
-  importSampleProfessors: vi.fn(),
   restoreProfessor: vi.fn(),
   triggerCrawler: vi.fn(),
   updateProfessor: vi.fn(),

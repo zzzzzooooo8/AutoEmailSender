@@ -74,4 +74,26 @@ describe("api client", () => {
       });
     }
   });
+
+  it("extracts FastAPI validation detail arrays into readable error messages", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          detail: [
+            {
+              type: "value_error",
+              loc: ["body", "start_url"],
+              msg: "Value error, URL 不允许指向本机、内网或不可解析地址",
+            },
+          ],
+        }),
+        { status: 422 },
+      ),
+    );
+
+    await expect(apiFetch("/api/crawl-jobs")).rejects.toMatchObject<ApiError>({
+      status: 422,
+      message: "URL 不允许指向本机、内网或不可解析地址",
+    });
+  });
 });

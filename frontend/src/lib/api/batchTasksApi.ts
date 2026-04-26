@@ -1,6 +1,7 @@
 import { apiFetch } from '@/lib/api/client';
 import type {
   BatchTaskCardDTO,
+  BatchTaskItemDTO,
   CreateBatchTaskRequestDTO,
 } from '@/types';
 
@@ -22,6 +23,9 @@ export const createBatchTask = (payload: CreateBatchTaskRequestDTO) =>
     method: 'POST',
     body: JSON.stringify(payload),
   });
+
+export const listBatchTaskItems = (taskId: number) =>
+  apiFetch<BatchTaskItemDTO[]>(`/api/batch-tasks/${taskId}/items`);
 
 export const pauseBatchTask = (taskId: number) =>
   apiFetch<{ ok: boolean; task: BatchTaskCardDTO }>(`/api/batch-tasks/${taskId}/pause`, {

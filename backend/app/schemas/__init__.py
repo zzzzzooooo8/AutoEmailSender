@@ -1,6 +1,7 @@
 from app.schemas.batch_task import (
     BatchTaskActionResponse,
     BatchTaskCardRead,
+    BatchTaskItemRead,
     CreateBatchTaskRequest,
 )
 from app.schemas.email_task import (
@@ -36,6 +37,7 @@ from app.schemas.workspace import (
 __all__ = [
     "BatchTaskActionResponse",
     "BatchTaskCardRead",
+    "BatchTaskItemRead",
     "ConnectionTestResult",
     "CreateBatchTaskRequest",
     "EmailTaskApprovalRequest",

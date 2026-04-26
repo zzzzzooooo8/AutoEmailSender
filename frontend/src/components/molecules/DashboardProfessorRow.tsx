@@ -9,6 +9,7 @@ type DashboardProfessorRowProps = {
   selected: boolean;
   bulkDisabled: boolean;
   scoring: boolean;
+  canCalculateMatch: boolean;
   statusLabel: string;
   onToggleSelection: () => void;
   onCalculateMatch: () => void;
@@ -26,6 +27,7 @@ export const DashboardProfessorRow = ({
   selected,
   bulkDisabled,
   scoring,
+  canCalculateMatch,
   statusLabel,
   onToggleSelection,
   onCalculateMatch,
@@ -69,7 +71,7 @@ export const DashboardProfessorRow = ({
       <button
         type="button"
         onClick={onCalculateMatch}
-        disabled={bulkDisabled || scoring}
+        disabled={bulkDisabled || scoring || !canCalculateMatch}
         className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
       >
         {scoring ? (
@@ -77,7 +79,7 @@ export const DashboardProfessorRow = ({
         ) : (
           <Sparkles className="h-4 w-4" />
         )}
-        只算匹配
+        {canCalculateMatch ? "分析匹配度" : "缺少研究信息"}
       </button>
       <button
         type="button"

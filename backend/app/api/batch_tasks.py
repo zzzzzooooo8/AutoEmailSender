@@ -23,6 +23,7 @@ from app.models import (
 from app.schemas.batch_task import (
     BatchTaskActionResponse,
     BatchTaskCardRead,
+    BatchTaskItemRead,
     CreateBatchTaskRequest,
 )
 from app.services.materials import material_can_be_primary
@@ -169,6 +170,25 @@ async def create_batch_task(
     return _serialize_batch_task(batch_task)
 
 
+@router.get("/{task_id}/items", response_model=list[BatchTaskItemRead])
+async def list_batch_task_items(
+    task_id: int,
+    session: AsyncSession = Depends(get_async_session),
+) -> list[BatchTaskItemRead]:
+    exists = await session.scalar(select(BatchTask.id).where(BatchTask.id == task_id))
+    if exists is None:
+        raise HTTPException(status_code=404, detail="未找到批量任务")
+
+    statement = (
+        select(EmailTask)
+        .options(selectinload(EmailTask.professor))
+        .where(EmailTask.batch_task_id == task_id)
+        .order_by(EmailTask.created_at.asc(), EmailTask.id.asc())
+    )
+    email_tasks = list((await session.execute(statement)).scalars().unique())
+    return [_serialize_batch_task_item(email_task) for email_task in email_tasks]
+
+
 @router.post("/{task_id}/pause", response_model=BatchTaskActionResponse)
 async def pause_batch_task(
     task_id: int,
@@ -226,6 +246,26 @@ async def _get_batch_task(session: AsyncSession, task_id: int) -> BatchTask:
     if not task:
         raise HTTPException(status_code=404, detail="未找到批量任务")
     return task
+
+
+def _serialize_batch_task_item(email_task: EmailTask) -> BatchTaskItemRead:
+    professor = email_task.professor
+    return BatchTaskItemRead(
+        id=email_task.id,
+        professor_id=professor.id,
+        professor_name=professor.name,
+        professor_email=professor.email,
+        professor_title=professor.title,
+        professor_school=professor.school,
+        status=email_task.status,
+        match_score=email_task.match_score,
+        scheduled_at=email_task.scheduled_at,
+        sent_at=email_task.sent_at,
+        last_send_attempt_at=email_task.last_send_attempt_at,
+        last_error=email_task.last_error,
+        is_replied=email_task.is_replied,
+        updated_at=email_task.updated_at,
+    )
 
 
 def _serialize_batch_task(task: BatchTask) -> BatchTaskCardRead:

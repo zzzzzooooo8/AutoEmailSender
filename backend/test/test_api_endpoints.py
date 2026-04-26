@@ -1332,6 +1332,82 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(response.json()["current_task"]["match_score"], 18)
         self.assertEqual(response.json()["current_task"]["status"], "matched")
 
+    def test_calculate_match_requires_professor_research_evidence(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        material_id = self._upload_material(
+            identity_id,
+            filename="resume.txt",
+            content=b"My background covers information extraction and agents.",
+            material_type="resume",
+        )
+        set_primary_response = self.client.post(f"/api/materials/{material_id}/set-primary")
+        self.assertEqual(set_primary_response.status_code, 200, msg=set_primary_response.text)
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "缺少研究信息导师",
+                "email": "missing-evidence@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of AI",
+                "department": "Computer Science",
+                "research_direction": None,
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        ensure_response = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(ensure_response.status_code, 200, msg=ensure_response.text)
+        task_id = ensure_response.json()["current_task"]["id"]
+
+        with patch(
+            "app.services.task_runtime.llm_runtime.generate_match_evaluation",
+            AsyncMock(side_effect=AssertionError("不应在缺少研究信息时调用模型")),
+        ):
+            response = self.client.post(f"/api/email-tasks/{task_id}/calculate-match")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "缺少研究方向或近期论文，暂不能分析匹配度")
+
+    def test_workspace_thread_includes_professor_recent_papers(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "只有论文导师",
+                "email": "paper-only@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of AI",
+                "department": "Computer Science",
+                "research_direction": None,
+                "recent_papers": ["Paper Evidence"],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        response = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        self.assertEqual(response.json()["professor"]["recent_papers"], ["Paper Evidence"])
+
     def test_stop_batch_task_marks_pending_items_as_canceled(self) -> None:
         identity_id = self._create_identity(with_imap=False)
         llm_id = self._create_llm()
@@ -2801,6 +2877,78 @@ class ApiEndpointTests(unittest.TestCase):
         ).json()[0]
         self.assertNotIn("dry_run_count", task_payload)
         self.assertNotIn("live_count", task_payload)
+
+    def test_batch_task_items_show_professor_delivery_progress(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        self.client.post("/api/professors/import-sample")
+        professors = self.client.get("/api/professors").json()[:2]
+
+        create_response = self.client.post(
+            "/api/batch-tasks",
+            json={
+                "identity_id": identity_id,
+                "llm_profile_id": llm_id,
+                "name": "明细任务",
+                "professor_ids": [item["id"] for item in professors],
+                "schedule_type": "immediate",
+                "window_start_time": None,
+                "window_end_time": None,
+                "emails_per_window": None,
+                "primary_material_id": None,
+                "email_subject": "申请与{{name}}老师交流",
+                "email_body": "老师您好，我是{{sender_name}}。",
+                "selected_material_ids": None,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        batch_task_id = create_response.json()["id"]
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            task_ids = [
+                row[0]
+                for row in connection.execute(
+                    """
+                    SELECT id
+                    FROM email_tasks
+                    WHERE batch_task_id = ?
+                    ORDER BY id
+                    """,
+                    (batch_task_id,),
+                ).fetchall()
+            ]
+            self.assertEqual(len(task_ids), 2)
+            connection.execute(
+                """
+                UPDATE email_tasks
+                SET status = 'sent', sent_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (task_ids[0],),
+            )
+            connection.execute(
+                """
+                UPDATE email_tasks
+                SET status = 'send_failed', last_error = 'smtp timeout'
+                WHERE id = ?
+                """,
+                (task_ids[1],),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        response = self.client.get(f"/api/batch-tasks/{batch_task_id}/items")
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        payload = response.json()
+        self.assertEqual(len(payload), 2)
+        self.assertEqual(payload[0]["professor_id"], professors[0]["id"])
+        self.assertEqual(payload[0]["professor_name"], professors[0]["name"])
+        self.assertEqual(payload[0]["status"], "sent")
+        self.assertIsNotNone(payload[0]["sent_at"])
+        self.assertEqual(payload[1]["status"], "send_failed")
+        self.assertEqual(payload[1]["last_error"], "smtp timeout")
 
     def test_test_compose_page_can_generate_and_send_to_self(self) -> None:
         identity_id = self._create_identity(with_imap=False)

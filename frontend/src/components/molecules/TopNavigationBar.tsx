@@ -7,7 +7,7 @@ export const TopNavigationBar = () => {
   const navItems = [
     { label: '首页', href: '/' },
     { label: '发件页', href: '/campaigns' },
-    { label: '个人页', href: '/profile' },
+    { label: '个人中心', href: '/profile' },
     { label: '设置页', href: '/settings' },
   ];
 

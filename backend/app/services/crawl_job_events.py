@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+import re
+from datetime import UTC, date, datetime
 from enum import Enum
 from typing import Any
 
@@ -13,6 +14,17 @@ STATUS_MESSAGES = {
     "failed": "任务失败",
     "canceled": "任务已取消",
 }
+TOOL_MESSAGES = {
+    "crawl_page": "Agent 调用 crawl_page 抓取页面",
+    "investigate_with_browser": "Agent 调用浏览器调查页面",
+    "save_professor_candidates": "Agent 保存候选导师",
+}
+GENERIC_AGENT_MESSAGES = {
+    "Agent 事件：updates",
+    "Agent 事件：dict",
+    "Agent 更新了执行状态",
+}
+TOOL_NAME_PATTERN = re.compile(r"['\"]name['\"]\s*:\s*['\"]([^'\"]+)['\"]")
 
 
 def build_crawl_job_events(
@@ -41,6 +53,8 @@ def build_crawl_job_events(
 
     for index, trace_event in enumerate(_iter_agent_trace(_get_attr(job, "agent_trace"))):
         normalized = normalize_agent_trace_event(trace_event)
+        if not _should_include_agent_trace_event(normalized):
+            continue
         event_id = normalized.get("id") or f"job:{job_id}:trace:{index}"
         events.append(
             {
@@ -110,13 +124,23 @@ def summarize_agent_trace_event(event: dict[str, object]) -> str:
     if not isinstance(event, dict) or not event:
         return "Agent 更新了执行状态"
 
+    raw_event = event.get("raw")
+    if isinstance(raw_event, dict):
+        raw_summary = summarize_agent_trace_event(raw_event)
+        if raw_summary not in GENERIC_AGENT_MESSAGES:
+            return raw_summary
+
     message = event.get("message")
-    if isinstance(message, str) and message.strip():
+    if isinstance(message, str) and message.strip() and message.strip() not in GENERIC_AGENT_MESSAGES:
         return message.strip()
 
-    name = _find_nested_name(event)
+    summary = event.get("summary")
+    if isinstance(summary, str) and summary.strip():
+        return summary.strip()
+
+    name = _find_nested_tool_name(event)
     if name:
-        return f"Agent 调用 {name}"
+        return TOOL_MESSAGES.get(name, f"Agent 调用 {name}")
 
     event_type = _trace_event_type(event)
     if event_type:
@@ -150,6 +174,37 @@ def _find_nested_name(value: object) -> str | None:
     return None
 
 
+def _find_nested_tool_name(value: object) -> str | None:
+    if isinstance(value, str):
+        match = TOOL_NAME_PATTERN.search(value)
+        if match:
+            return match.group(1).strip()
+        return None
+
+    if isinstance(value, dict):
+        name = value.get("name")
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+        for item in value.values():
+            nested = _find_nested_tool_name(item)
+            if nested:
+                return nested
+    elif isinstance(value, list):
+        for item in value:
+            nested = _find_nested_tool_name(item)
+            if nested:
+                return nested
+
+    return _find_nested_name(value)
+
+
+def _should_include_agent_trace_event(event: dict[str, object]) -> bool:
+    message = event.get("message")
+    if isinstance(message, str) and message.strip() in GENERIC_AGENT_MESSAGES:
+        return False
+    return True
+
+
 def _trace_event_type(event: dict[str, object]) -> str:
     for key in ("event_type", "type"):
         value = event.get(key)
@@ -174,6 +229,8 @@ def _to_event_time(value: object) -> str:
     if value is None:
         return ""
     if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
         return value.isoformat()
     if isinstance(value, date):
         return value.isoformat()

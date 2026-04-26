@@ -458,6 +458,23 @@ export interface BatchTaskCardDTO {
   updated_at: string;
 }
 
+export interface BatchTaskItemDTO {
+  id: number;
+  professor_id: number;
+  professor_name: string;
+  professor_email: string | null;
+  professor_title: string | null;
+  professor_school: string | null;
+  status: WorkspaceTaskStatus;
+  match_score: number | null;
+  scheduled_at: string | null;
+  sent_at: string | null;
+  last_send_attempt_at: string | null;
+  last_error: string | null;
+  is_replied: boolean;
+  updated_at: string;
+}
+
 export interface WorkspaceProfessorDTO {
   id: number;
   name: string;
@@ -466,6 +483,7 @@ export interface WorkspaceProfessorDTO {
   university: string | null;
   school: string | null;
   research_direction: string | null;
+  recent_papers: string[];
 }
 
 export interface WorkspaceIdentityDTO {

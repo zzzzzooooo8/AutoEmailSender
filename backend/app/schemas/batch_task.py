@@ -47,6 +47,23 @@ class BatchTaskCardRead(BaseModel):
     updated_at: datetime
 
 
+class BatchTaskItemRead(BaseModel):
+    id: int
+    professor_id: int
+    professor_name: str
+    professor_email: str | None
+    professor_title: str | None
+    professor_school: str | None
+    status: str
+    match_score: int | None
+    scheduled_at: datetime | None
+    sent_at: datetime | None
+    last_send_attempt_at: datetime | None
+    last_error: str | None
+    is_replied: bool
+    updated_at: datetime
+
+
 class BatchTaskActionResponse(BaseModel):
     ok: bool
     task: BatchTaskCardRead

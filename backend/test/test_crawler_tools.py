@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import socket
 import types
 import tempfile
 import unittest
@@ -24,6 +23,7 @@ from app.services.crawler_tools import (
     normalize_candidate_payload,
     record_page_snapshot,
     save_candidates,
+    _resolve_safe_public_crawl_url,
 )
 from app.services import crawler_tools
 
@@ -66,36 +66,42 @@ class CrawlerToolTests(unittest.TestCase):
             "http://169.254.169.254/latest/meta-data",
             "http://224.0.0.1/faculty",
             "http://0.0.0.0/faculty",
+            "http://198.18.0.105/faculty",
             "http://192.0.2.1/faculty",
         ):
             with self.subTest(url=url):
                 self.assertFalse(is_safe_public_crawl_url(url))
 
-    def test_is_safe_public_crawl_url_allows_domain_resolving_to_public_ip(self) -> None:
+    def test_is_safe_public_crawl_url_allows_domain_without_dns_resolution(self) -> None:
         with patch(
             "app.services.crawler_tools.socket.getaddrinfo",
-            return_value=[
-                (0, 0, 0, "", ("93.184.216.34", 443)),
-            ],
+            side_effect=AssertionError("URL validation should not resolve domain names"),
         ):
             self.assertTrue(is_safe_public_crawl_url("https://faculty.example.edu"))
 
-    def test_is_safe_public_crawl_url_rejects_domain_resolving_to_private_ip(self) -> None:
+    def test_resolve_safe_public_crawl_url_uses_system_dns_for_fetching_domains(self) -> None:
         with patch(
             "app.services.crawler_tools.socket.getaddrinfo",
             return_value=[
-                (0, 0, 0, "", ("93.184.216.34", 443)),
-                (0, 0, 0, "", ("10.0.0.1", 443)),
+                (0, 0, 0, "", ("100.64.0.42", 443)),
             ],
         ):
-            self.assertFalse(is_safe_public_crawl_url("https://faculty.example.edu"))
+            resolved = _resolve_safe_public_crawl_url("https://faculty.example.edu")
+            self.assertEqual(resolved.resolved_ips, ("100.64.0.42",))
 
-    def test_is_safe_public_crawl_url_rejects_unresolvable_domain(self) -> None:
+    def test_is_safe_public_crawl_url_allows_domain_even_if_system_dns_would_be_private(self) -> None:
         with patch(
             "app.services.crawler_tools.socket.getaddrinfo",
-            side_effect=socket.gaierror,
+            side_effect=AssertionError("URL validation should not resolve domain names"),
         ):
-            self.assertFalse(is_safe_public_crawl_url("https://faculty.example.edu"))
+            self.assertTrue(is_safe_public_crawl_url("https://faculty.example.edu"))
+
+    def test_is_safe_public_crawl_url_allows_unresolvable_domain_at_validation_time(self) -> None:
+        with patch(
+            "app.services.crawler_tools.socket.getaddrinfo",
+            side_effect=AssertionError("URL validation should not resolve domain names"),
+        ):
+            self.assertTrue(is_safe_public_crawl_url("https://faculty.example.edu"))
 
     def test_normalize_candidate_payload_fills_school_context(self) -> None:
         payload = normalize_candidate_payload(
@@ -336,7 +342,7 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("URL 不允许指向本机、内网或不可解析地址", snapshot.error_message or "")
         self.assertNotIn("本机正文", snapshot.text)
 
-    async def test_crawl_page_with_http_rejects_redirect_to_private_host(self) -> None:
+    async def test_crawl_page_with_http_allows_same_host_redirect_even_if_system_dns_is_private(self) -> None:
         session_factory = _FakeSessionFactory()
         ctx = CrawlToolContext(
             job_id=1,
@@ -361,9 +367,8 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
 
             snapshot = await crawl_page_with_http(ctx, "https://faculty.example.edu/faculty")
 
-        self.assertEqual(snapshot.status, "failed")
-        self.assertIn("URL 不允许指向本机、内网或不可解析地址", snapshot.error_message or "")
-        self.assertNotIn("内网正文", snapshot.text)
+        self.assertEqual(snapshot.status, "succeeded")
+        self.assertIn("内网正文", snapshot.text)
 
     async def test_crawl_page_with_http_does_not_request_unsafe_redirect_target(self) -> None:
         session_factory = _FakeSessionFactory()
@@ -474,6 +479,82 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(backend.connect_calls, [("93.184.216.34", 443)])
         self.assertNotIn(("faculty.example.edu", 443), backend.connect_calls)
         self.assertEqual(backend.streams[0].tls_server_hostnames, ["faculty.example.edu"])
+
+    async def test_crawl_page_with_http_uses_system_proxy_ip_for_domain_fetching(
+        self,
+    ) -> None:
+        session_factory = _FakeSessionFactory()
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://faculty.example.edu/faculty",
+            university="示例大学",
+            school="计算机学院",
+            session_factory=session_factory,  # type: ignore[arg-type]
+        )
+        backend = _RecordingNetworkBackend(
+            response_bytes=(
+                b"HTTP/1.1 200 OK\r\n"
+                b"Content-Type: text/html; charset=utf-8\r\n"
+                b"Content-Length: 38\r\n"
+                b"\r\n"
+                b"<html><body>Faculty page</body></html>"
+            )
+        )
+
+        with patch(
+            "app.services.crawler_tools.socket.getaddrinfo",
+            return_value=[
+                (0, 0, 0, "", ("100.64.0.42", 443)),
+            ],
+        ), patch(
+            "app.services.crawler_tools._default_async_network_backend",
+            return_value=backend,
+        ):
+            snapshot = await crawl_page_with_http(ctx, "https://faculty.example.edu/faculty")
+
+        self.assertEqual(snapshot.status, "succeeded")
+        self.assertEqual(backend.connect_calls, [("100.64.0.42", 443)])
+        self.assertEqual(backend.streams[0].tls_server_hostnames, ["faculty.example.edu"])
+
+    async def test_crawl_page_with_http_filters_same_host_links_without_dns_per_link(
+        self,
+    ) -> None:
+        session_factory = _FakeSessionFactory()
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://faculty.example.edu/faculty",
+            university="示例大学",
+            school="计算机学院",
+            session_factory=session_factory,  # type: ignore[arg-type]
+        )
+        links_html = "".join(
+            f'<a href="/people/{index}">导师 {index}</a>'
+            for index in range(20)
+        )
+        response = _FakeHttpResponse(
+            url="https://faculty.example.edu/faculty",
+            text=f"<html><body>{links_html}</body></html>",
+        )
+        dns_call_count = 0
+
+        def getaddrinfo(*args: object, **kwargs: object) -> list[tuple[int, int, int, str, tuple[str, int]]]:
+            nonlocal dns_call_count
+            _ = args, kwargs
+            dns_call_count += 1
+            return [(0, 0, 0, "", ("100.64.0.42", 443))]
+
+        with patch(
+            "app.services.crawler_tools.socket.getaddrinfo",
+            side_effect=getaddrinfo,
+        ), patch("app.services.crawler_tools.httpx.AsyncClient") as client_class:
+            client = client_class.return_value.__aenter__.return_value
+            client.get.return_value = response
+
+            snapshot = await crawl_page_with_http(ctx, "https://faculty.example.edu/faculty")
+
+        self.assertEqual(snapshot.status, "succeeded")
+        self.assertEqual(len(snapshot.links), 20)
+        self.assertEqual(dns_call_count, 1)
 
     async def test_crawl_page_with_http_re_resolves_and_rebinds_each_redirect_hop(
         self,

@@ -26,6 +26,7 @@ import {
   PROFESSOR_STATUS_LABELS,
   type OutreachGenerationMode,
   type WorkspaceMessageDTO,
+  type WorkspaceProfessorDTO,
   type WorkspaceTaskStatusLabelKey,
   type WorkspaceTaskSummaryDTO,
   type WorkspaceThreadDTO,
@@ -89,6 +90,10 @@ const shouldBlockDirectDraftActions = (task: WorkspaceTaskSummaryDTO | null) =>
       task?.sent_at ||
       task?.is_replied,
   );
+
+const hasProfessorMatchEvidence = (professor: WorkspaceProfessorDTO | null | undefined) =>
+  Boolean(professor?.research_direction?.trim()) ||
+  Boolean(professor?.recent_papers?.some((paper) => paper.trim()));
 
 const getStatusLabel = (
   currentTask: WorkspaceTaskSummaryDTO | null,
@@ -527,6 +532,7 @@ export const WorkspacePage = () => {
   const canCalculateMatch =
     Boolean(currentTaskId) &&
     Boolean(currentTask?.primary_material_id) &&
+    hasProfessorMatchEvidence(thread?.professor) &&
     !blocksDirectDraftActions;
   const hasTemplateConfigured = Boolean(
     currentTask?.outreach_template_body_text?.trim() ||
@@ -919,7 +925,7 @@ export const WorkspacePage = () => {
                     这位老师还没有任务
                   </div>
                   <p className="mt-3 text-sm leading-7 text-stone-600">
-                    从首页或任务页进入后，会自动创建通信记录。
+                    从首页或任务中心进入后，会自动创建通信记录。
                   </p>
                 </div>
               </div>

@@ -13,7 +13,6 @@ vi.mock("@/lib/api/professorsApi", () => ({
   createProfessor: vi.fn(),
   getProfessorTemplateDownloadUrl: vi.fn(() => "/templates/professors.xlsx"),
   importProfessorsFromFile: vi.fn(),
-  importSampleProfessors: vi.fn(),
   restoreProfessor: vi.fn(),
   triggerCrawler: vi.fn(),
   updateProfessor: vi.fn(),
@@ -201,12 +200,14 @@ describe("ProfessorsPage layout", () => {
 
     const resetButton = screen.getByRole("button", { name: "重置筛选" });
     expect(resetButton).toHaveClass("ui-select-shell", "rounded-3xl");
-    ["下载模板", "导入文件", "新增导师", "刷新"].forEach((name) => {
+    ["下载模板", "导入文件", "智能抓取", "新增导师", "刷新"].forEach((name) => {
       expect(screen.getByRole("button", { name })).toHaveClass(
         "h-10",
         "rounded-2xl",
       );
     });
+    expect(screen.queryByText("样例导入与智能抓取")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "导入样例导师" })).not.toBeInTheDocument();
     expect(screen.getByTestId("professor-toolbar-spacer")).toHaveClass("h-5", "leading-5");
     expect(screen.getAllByText("操作").length).toBeGreaterThan(1);
 

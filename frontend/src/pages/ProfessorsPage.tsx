@@ -33,7 +33,6 @@ import {
   createProfessor,
   getProfessorTemplateDownloadUrl,
   importProfessorsFromFile,
-  importSampleProfessors,
   listProfessorsForManagement,
   restoreProfessor,
   updateProfessor,
@@ -330,7 +329,6 @@ export const ProfessorsPage = () => {
   const [importingFile, setImportingFile] = useState(false);
   const [importResult, setImportResult] =
     useState<ProfessorImportFileResultDTO | null>(null);
-  const [devBusy, setDevBusy] = useState<"sample" | null>(null);
   const [crawlerModalOpen, setCrawlerModalOpen] = useState(false);
   const [crawlerFormState, setCrawlerFormState] =
     useState<CrawlerJobFormState>(emptyCrawlerJobForm());
@@ -627,22 +625,6 @@ export const ProfessorsPage = () => {
     }
   };
 
-  const handleImportSample = async () => {
-    setDevBusy("sample");
-    try {
-      const result = await importSampleProfessors();
-      notifySuccess("导入完成", result.message);
-      await loadProfessors();
-    } catch (sampleError) {
-      notifyError(
-        "导入样例导师失败",
-        getActionErrorMessage(sampleError, "导入样例导师失败"),
-      );
-    } finally {
-      setDevBusy(null);
-    }
-  };
-
   const closeCrawlerModal = () => {
     if (creatingCrawlJob) {
       return;
@@ -856,6 +838,14 @@ export const ProfessorsPage = () => {
                   </button>
                   <button
                     type="button"
+                    onClick={() => setCrawlerModalOpen(true)}
+                    className="ui-btn-secondary h-10 rounded-2xl"
+                  >
+                    <Bot className="h-4 w-4" />
+                    智能抓取
+                  </button>
+                  <button
+                    type="button"
                     onClick={openCreateModal}
                     className="ui-btn-primary h-10 rounded-2xl"
                   >
@@ -1020,44 +1010,6 @@ export const ProfessorsPage = () => {
             </div>
           </div>
         ) : null}
-      </section>
-
-      <section className="mt-6 rounded-[28px] border border-dashed border-stone-300 bg-[#fcfbf8] p-5">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white px-3 py-1 text-xs text-stone-500">
-              <Bot className="h-3.5 w-3.5 text-primary" />
-              开发辅助
-            </div>
-            <div className="mt-3 text-sm font-medium text-stone-900">
-              样例导入与智能抓取
-            </div>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-stone-500">
-              这两项保留在导师管理页的次级区域，避免首页继续变重。样例导入会写入内置导师数据，智能抓取会创建一个导师列表抓取任务。
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={() => void handleImportSample()}
-              disabled={devBusy !== null}
-              className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {devBusy === "sample" ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : null}
-              导入样例导师
-            </button>
-            <button
-              type="button"
-              onClick={() => setCrawlerModalOpen(true)}
-              disabled={devBusy !== null}
-              className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              智能抓取
-            </button>
-          </div>
-        </div>
       </section>
 
       {selectedIds.size > 0 ? (

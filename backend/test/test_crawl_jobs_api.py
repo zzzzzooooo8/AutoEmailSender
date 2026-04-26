@@ -82,6 +82,24 @@ class CrawlJobsApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
 
+    def test_create_crawl_job_allows_domain_without_dns_resolution(self) -> None:
+        with patch(
+            "app.services.crawler_tools.socket.getaddrinfo",
+            side_effect=AssertionError("Creating a crawl job should not resolve domain names"),
+        ):
+            response = self.client.post(
+                "/api/crawl-jobs",
+                json={
+                    "university": "江西财经大学",
+                    "school": "会计学院",
+                    "start_url": "https://cai.jxufe.edu.cn/lists/26.html",
+                    "llm_profile_id": None,
+                },
+            )
+
+        self.assertEqual(response.status_code, 201, msg=response.text)
+        self.assertEqual(response.json()["start_url"], "https://cai.jxufe.edu.cn/lists/26.html")
+
     def test_crawl_job_review_flow(self) -> None:
         create_response = self.client.post(
             "/api/crawl-jobs",

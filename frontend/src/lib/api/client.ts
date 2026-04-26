@@ -26,6 +26,52 @@ export const buildApiUrl = (
   params?: Record<string, string | number | null | undefined>,
 ) => new URL(buildApiPath(path, params), window.location.origin).toString();
 
+const normalizeValidationMessage = (message: string) =>
+  message.replace(/^Value error,\s*/i, "").trim();
+
+const extractApiErrorMessage = (data: unknown) => {
+  if (typeof data === "object" && data !== null && "detail" in data) {
+    const detail = data.detail;
+    if (typeof detail === "string" && detail.trim()) {
+      return detail;
+    }
+    if (Array.isArray(detail)) {
+      const messages = detail
+        .map((item) => {
+          if (typeof item === "string") {
+            return item.trim();
+          }
+          if (
+            typeof item === "object" &&
+            item !== null &&
+            "msg" in item &&
+            typeof item.msg === "string"
+          ) {
+            return normalizeValidationMessage(item.msg);
+          }
+          return "";
+        })
+        .filter(Boolean);
+      if (messages.length > 0) {
+        return messages.join("；");
+      }
+    }
+  }
+  if (
+    typeof data === "object" &&
+    data !== null &&
+    "message" in data &&
+    typeof data.message === "string" &&
+    data.message.trim()
+  ) {
+    return data.message;
+  }
+  if (typeof data === "string" && data.trim()) {
+    return data;
+  }
+  return "请求失败";
+};
+
 export const apiFetch = async <T>(
   path: string,
   options?: RequestInit,
@@ -54,15 +100,7 @@ export const apiFetch = async <T>(
   }
 
   if (!response.ok) {
-    const message =
-      typeof data === 'object' && data !== null && 'detail' in data && typeof data.detail === 'string'
-        ? data.detail
-        : typeof data === 'object' && data !== null && 'message' in data && typeof data.message === 'string'
-          ? data.message
-          : typeof data === 'string' && data.trim()
-            ? data
-            : '请求失败';
-    throw new ApiError(response.status, message);
+    throw new ApiError(response.status, extractApiErrorMessage(data));
   }
 
   return data as T;

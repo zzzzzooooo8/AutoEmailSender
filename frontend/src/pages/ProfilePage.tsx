@@ -223,7 +223,9 @@ const toIdentityForm = (identity: IdentityDTO): IdentityFormState => {
     outreach_template_body_text: identity.outreach_template_body_text ?? "",
     outreach_template_body_html: identity.outreach_template_body_html ?? "",
     daily_send_limit:
-      identity.daily_send_limit === null ? "" : String(identity.daily_send_limit),
+      identity.daily_send_limit === null
+        ? ""
+        : String(identity.daily_send_limit),
     send_interval_min:
       identity.send_interval_min === null
         ? ""
@@ -266,8 +268,10 @@ const toIdentityPayload = (form: IdentityFormState): IdentityPayload => {
     default_language: form.default_language.trim() || "zh-CN",
     outreach_generation_mode: form.outreach_generation_mode,
     outreach_template_subject: form.outreach_template_subject.trim() || null,
-    outreach_template_body_text: form.outreach_template_body_text.trim() || null,
-    outreach_template_body_html: form.outreach_template_body_html.trim() || null,
+    outreach_template_body_text:
+      form.outreach_template_body_text.trim() || null,
+    outreach_template_body_html:
+      form.outreach_template_body_html.trim() || null,
     daily_send_limit: form.daily_send_limit
       ? Number(form.daily_send_limit)
       : null,
@@ -765,7 +769,7 @@ const MaterialSummaryCard = ({
 
   return (
     <div className="rounded-[28px] border border-stone-200 bg-[linear-gradient(135deg,#fffdfa,#fff8ef_55%,#fff3e1)] p-5 shadow-sm shadow-stone-200/70">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="space-y-3">
           <div>
             <div className="text-sm font-medium text-stone-900">材料库</div>
@@ -874,12 +878,12 @@ const OutreachTemplateSummaryCard = ({
   const hasSubject = Boolean(form.outreach_template_subject.trim());
   const hasTemplateBody = Boolean(
     form.outreach_template_body_text.trim() ||
-      form.outreach_template_body_html.trim(),
+    form.outreach_template_body_html.trim(),
   );
 
   return (
     <div className="rounded-[28px] border border-stone-200 bg-[linear-gradient(135deg,#fffdfa,#fff7ee_58%,#fff2e4)] p-5 shadow-sm shadow-stone-200/70">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="space-y-3">
           <div>
             <div className="text-sm font-medium text-stone-900">
@@ -983,16 +987,26 @@ const OutreachTemplateModal = ({
         <div className="border-b border-stone-200/80 bg-[#fffaf3] px-6 py-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <div className="text-sm font-medium text-stone-900">当前默认值摘要</div>
+              <div className="text-sm font-medium text-stone-900">
+                当前默认值摘要
+              </div>
               <div className="mt-1 flex flex-wrap gap-2 text-xs text-stone-500">
                 <span className="rounded-full border border-stone-200 bg-white/90 px-3 py-1">
-                  模式：{form.outreach_generation_mode === 'template' ? '直接套用模板' : 'AI 辅助写信'}
+                  模式：
+                  {form.outreach_generation_mode === "template"
+                    ? "直接套用模板"
+                    : "AI 辅助写信"}
                 </span>
                 <span className="rounded-full border border-stone-200 bg-white/90 px-3 py-1">
-                  主题（必填）：{form.outreach_template_subject.trim() ? '已填写' : '未填写'}
+                  主题（必填）：
+                  {form.outreach_template_subject.trim() ? "已填写" : "未填写"}
                 </span>
                 <span className="rounded-full border border-stone-200 bg-white/90 px-3 py-1">
-                  正文（必填）：{form.outreach_template_body_text.trim() || form.outreach_template_body_html.trim() ? '已填写' : '未填写'}
+                  正文（必填）：
+                  {form.outreach_template_body_text.trim() ||
+                  form.outreach_template_body_html.trim()
+                    ? "已填写"
+                    : "未填写"}
                 </span>
               </div>
             </div>
@@ -1010,7 +1024,7 @@ const OutreachTemplateModal = ({
                 className="hidden"
                 onChange={(event) => {
                   const file = event.target.files?.[0];
-                  event.currentTarget.value = '';
+                  event.currentTarget.value = "";
                   if (!file) {
                     return;
                   }
@@ -1026,14 +1040,14 @@ const OutreachTemplateModal = ({
             <div className="grid gap-3 sm:grid-cols-2">
               {[
                 {
-                  value: 'llm' as const,
-                  title: 'AI 辅助写信',
-                  description: 'AI 基于模板生成个性化草稿。',
+                  value: "llm" as const,
+                  title: "AI 辅助写信",
+                  description: "AI 基于模板生成个性化草稿。",
                 },
                 {
-                  value: 'template' as const,
-                  title: '直接套用模板',
-                  description: '按模板生成邮件，适合统一话术。',
+                  value: "template" as const,
+                  title: "直接套用模板",
+                  description: "按模板生成邮件，适合统一话术。",
                 },
               ].map((option) => {
                 const active = form.outreach_generation_mode === option.value;
@@ -1043,21 +1057,25 @@ const OutreachTemplateModal = ({
                     type="button"
                     onClick={() => onModeChange(option.value)}
                     className={clsx(
-                      'rounded-[26px] border px-4 py-4 text-left transition',
+                      "rounded-[26px] border px-4 py-4 text-left transition",
                       active
-                        ? 'border-primary/20 bg-primary/5 shadow-sm shadow-primary/10'
-                        : 'border-stone-200 bg-white hover:border-stone-300 hover:bg-stone-50',
+                        ? "border-primary/20 bg-primary/5 shadow-sm shadow-primary/10"
+                        : "border-stone-200 bg-white hover:border-stone-300 hover:bg-stone-50",
                     )}
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <div className="text-sm font-semibold text-stone-900">{option.title}</div>
+                      <div className="text-sm font-semibold text-stone-900">
+                        {option.title}
+                      </div>
                       {active ? (
                         <span className="rounded-full bg-primary px-2.5 py-1 text-[11px] font-medium text-white">
                           当前默认
                         </span>
                       ) : null}
                     </div>
-                    <p className="mt-2 text-sm leading-6 text-stone-500">{option.description}</p>
+                    <p className="mt-2 text-sm leading-6 text-stone-500">
+                      {option.description}
+                    </p>
                   </button>
                 );
               })}
@@ -1094,9 +1112,9 @@ const OutreachTemplateModal = ({
             </div>
 
             <div className="rounded-2xl border border-dashed border-stone-200 bg-white/85 px-4 py-3 text-xs leading-6 text-stone-500">
-              {form.outreach_generation_mode === 'template'
-                ? '作为新任务默认值；已创建任务不受后续修改影响。'
-                : 'AI 只在模板基础上调整称呼、匹配理由和主题。'}
+              {form.outreach_generation_mode === "template"
+                ? "作为新任务默认值；已创建任务不受后续修改影响。"
+                : "AI 只在模板基础上调整称呼、匹配理由和主题。"}
             </div>
           </div>
         </div>
@@ -1490,7 +1508,13 @@ export const ProfilePage = () => {
     }
 
     applyIdentityEditorState("new");
-  }, [applyIdentityEditorState, identities, identityEditorId, loading, selectedIdentityId]);
+  }, [
+    applyIdentityEditorState,
+    identities,
+    identityEditorId,
+    loading,
+    selectedIdentityId,
+  ]);
 
   useEffect(() => {
     if (loading || llmEditorId === "new") {
@@ -1689,10 +1713,7 @@ export const ProfilePage = () => {
         status: "error",
         message,
       });
-      notifyError(
-        `${kind.toUpperCase()} 连接测试失败`,
-        message,
-      );
+      notifyError(`${kind.toUpperCase()} 连接测试失败`, message);
     } finally {
       setTestingIdentityConnection(null);
     }
@@ -1811,12 +1832,11 @@ export const ProfilePage = () => {
       !identityForm.imap_host.trim() ||
       !identityForm.imap_port.trim()
     ) {
-      notifyFormErrors("请检查表单", [
-        "请先填写所有带红色星号的身份必填项",
-      ]);
+      notifyFormErrors("请检查表单", ["请先填写所有带红色星号的身份必填项"]);
       return;
     }
-    const templateValidationMessage = getTemplateValidationMessage(identityForm);
+    const templateValidationMessage =
+      getTemplateValidationMessage(identityForm);
     if (templateValidationMessage) {
       notifyFormErrors("请检查表单", [templateValidationMessage]);
       return;
@@ -1982,13 +2002,13 @@ export const ProfilePage = () => {
           ) : (
             <button
               type="button"
-                  onClick={() => {
-                    setSelectedIdentityId(editingIdentity.id);
-                    notifySuccess(
-                      "已设为当前身份",
-                      `当前身份已切换为“${getIdentityProfileName(editingIdentity)}”。`,
-                    );
-                  }}
+              onClick={() => {
+                setSelectedIdentityId(editingIdentity.id);
+                notifySuccess(
+                  "已设为当前身份",
+                  `当前身份已切换为“${getIdentityProfileName(editingIdentity)}”。`,
+                );
+              }}
               className="ui-btn-secondary"
             >
               设为当前
@@ -2009,10 +2029,10 @@ export const ProfilePage = () => {
                       ...previous,
                       is_default: true,
                     }));
-                            notifySuccess(
-                              "已设为默认身份",
-                              `“${getIdentityProfileName(editingIdentity)}”已设为默认身份。`,
-                            );
+                    notifySuccess(
+                      "已设为默认身份",
+                      `“${getIdentityProfileName(editingIdentity)}”已设为默认身份。`,
+                    );
                   })
                   .catch((defaultError) => {
                     notifyError(
@@ -2029,23 +2049,23 @@ export const ProfilePage = () => {
           <button
             type="button"
             onClick={() => {
-                      void (async () => {
-                        if (
-                          !(await confirmDeleteTwice(
-                            `身份“${getIdentityProfileName(editingIdentity)}”`,
-                          ))
-                        ) {
-                          return;
-                        }
+              void (async () => {
+                if (
+                  !(await confirmDeleteTwice(
+                    `身份“${getIdentityProfileName(editingIdentity)}”`,
+                  ))
+                ) {
+                  return;
+                }
                 try {
                   await deleteIdentity(editingIdentity.id);
                   await refreshSelections();
                   setIdentityEditorId(null);
                   setIdentityForm(createEmptyIdentityForm());
-                          notifySuccess(
-                            "删除身份成功",
-                            `身份“${getIdentityProfileName(editingIdentity)}”已删除。`,
-                          );
+                  notifySuccess(
+                    "删除身份成功",
+                    `身份“${getIdentityProfileName(editingIdentity)}”已删除。`,
+                  );
                 } catch (deleteError) {
                   notifyError(
                     "删除身份失败",
@@ -2066,10 +2086,13 @@ export const ProfilePage = () => {
   return (
     <main className="mx-auto max-w-7xl px-6 py-8">
       <div className="rounded-3xl border border-stone-200 bg-[#fcfbf8] p-6 shadow-sm">
-        <h1 className="text-3xl font-semibold text-stone-900">个人页</h1>
+        <h1 className="text-3xl font-semibold text-stone-900">个人中心</h1>
         <div className="mt-4 flex flex-wrap gap-3 text-xs text-stone-600">
           <span className="rounded-full border border-stone-200 bg-white px-3 py-1.5">
-            身份：{selectedIdentity ? getIdentityProfileName(selectedIdentity) : "未选择"}
+            身份：
+            {selectedIdentity
+              ? getIdentityProfileName(selectedIdentity)
+              : "未选择"}
           </span>
           <span className="rounded-full border border-stone-200 bg-white px-3 py-1.5">
             模型：{selectedLlmProfile?.name ?? "未选择"}
@@ -2121,7 +2144,10 @@ export const ProfilePage = () => {
                 </p>
               </div>
               <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs text-stone-600">
-                默认身份：{defaultIdentity ? getIdentityProfileName(defaultIdentity) : "未设置"}
+                默认身份：
+                {defaultIdentity
+                  ? getIdentityProfileName(defaultIdentity)
+                  : "未设置"}
               </span>
             </div>
 
@@ -2153,7 +2179,9 @@ export const ProfilePage = () => {
                       使用中
                     </div>
                     <div className="mt-2 text-sm font-medium text-stone-900">
-                      {selectedIdentity ? getIdentityProfileName(selectedIdentity) : "未选择"}
+                      {selectedIdentity
+                        ? getIdentityProfileName(selectedIdentity)
+                        : "未选择"}
                     </div>
                   </div>
                   <div className="rounded-2xl border border-stone-200 bg-white px-4 py-3">

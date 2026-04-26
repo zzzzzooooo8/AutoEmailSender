@@ -55,6 +55,12 @@ class _FakeAsyncClient:
 
 
 class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    def test_match_only_prompt_requires_visible_research_evidence(self) -> None:
+        from app.services.llm_runtime import SYSTEM_MATCH_ONLY_PROMPT
+
+        self.assertIn("研究方向或近期论文", SYSTEM_MATCH_ONLY_PROMPT)
+        self.assertIn("证据不足", SYSTEM_MATCH_ONLY_PROMPT)
+
     def test_build_draft_prompt_requires_template_first_and_limits_changes(self) -> None:
         from app.models import IdentityMaterial, IdentityProfile, Professor
         from app.services.llm_runtime import MatchEvaluationResult

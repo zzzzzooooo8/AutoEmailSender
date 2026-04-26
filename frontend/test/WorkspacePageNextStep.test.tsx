@@ -93,6 +93,7 @@ vi.mock("@/components/organisms/WorkspaceComposerDock", () => ({
     content: string;
     contentHtml: string;
     onContentChange: (value: { html: string; text: string }) => void;
+    canCalculateMatch: boolean;
     onGenerateDraft: () => void;
     onSendNow: () => void;
     onScheduleSend: () => void;
@@ -108,6 +109,7 @@ vi.mock("@/components/organisms/WorkspaceComposerDock", () => ({
         <div>{props.subject ? `draft-subject:${props.subject}` : "draft-subject-empty"}</div>
         <div>{props.content ? `draft-content:${props.content}` : "draft-content-empty"}</div>
         <div>{props.contentHtml ? `draft-html:${props.contentHtml}` : "draft-html-empty"}</div>
+        <div>{props.canCalculateMatch ? "can-calculate-match" : "cannot-calculate-match"}</div>
         <button type="button" onClick={props.onGenerateDraft}>
           mock-generate-draft
         </button>
@@ -153,6 +155,8 @@ const buildThread = ({
   canContinueManually = false,
   canWriteFollowUp = false,
   outreachGenerationMode = "llm",
+  professorResearchDirection = "多智能体系统",
+  professorRecentPapers = [],
   messages = [],
 }: {
   status?: WorkspaceTaskStatus;
@@ -164,6 +168,8 @@ const buildThread = ({
   canContinueManually?: boolean;
   canWriteFollowUp?: boolean;
   outreachGenerationMode?: OutreachGenerationMode;
+  professorResearchDirection?: string | null;
+  professorRecentPapers?: string[];
   messages?: WorkspaceMessageDTO[];
 } = {}): WorkspaceThreadDTO => ({
   professor: {
@@ -173,7 +179,8 @@ const buildThread = ({
     title: "教授",
     university: "测试大学",
     school: "计算机学院",
-    research_direction: "多智能体系统",
+    research_direction: professorResearchDirection,
+    recent_papers: professorRecentPapers,
   },
   identity: {
     id: 1,
@@ -538,6 +545,32 @@ describe("WorkspacePage next-step", () => {
     expect(await screen.findByText("选择分析材料")).toBeInTheDocument();
     expect(screen.getByText("选择材料后可分析匹配度。")).toBeInTheDocument();
     expect(screen.getByText("draft-empty")).toBeInTheDocument();
+  });
+
+  it("disables match analysis in the workspace when professor research evidence is missing", async () => {
+    mockedGetWorkspaceThread.mockResolvedValue(
+      buildThread({
+        professorResearchDirection: null,
+        professorRecentPapers: [],
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("cannot-calculate-match")).toBeInTheDocument();
+  });
+
+  it("allows match analysis in the workspace when professor only has recent papers", async () => {
+    mockedGetWorkspaceThread.mockResolvedValue(
+      buildThread({
+        professorResearchDirection: null,
+        professorRecentPapers: ["Paper Evidence"],
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("can-calculate-match")).toBeInTheDocument();
   });
 
   it("shows follow-up guidance ahead of missing-material or draft prompts for sent tasks", async () => {

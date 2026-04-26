@@ -22,8 +22,8 @@ export const TopNavBar = () => {
   const navItems = [
     { label: "首页", href: "/" },
     { label: "导师管理", href: "/professors" },
-    { label: "任务页", href: "/tasks" },
-    { label: "个人页", href: "/profile" },
+    { label: "任务中心", href: "/tasks" },
+    { label: "个人中心", href: "/profile" },
   ];
 
   const identityOptions = identities.map((identity) => {

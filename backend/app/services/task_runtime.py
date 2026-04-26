@@ -50,6 +50,12 @@ TASK_RELATION_OPTIONS = (
 )
 
 
+def _has_professor_match_evidence(professor: Professor) -> bool:
+    return bool((professor.research_direction or "").strip()) or any(
+        str(paper).strip() for paper in professor.recent_papers or []
+    )
+
+
 async def process_pending_drafts_once(
     session_factory: async_sessionmaker[AsyncSession],
     limit: int = 5,
@@ -280,6 +286,8 @@ async def calculate_task_match(
                 raise ValueError("请先选择用于匹配的默认材料")
             return task.professor_id, task.identity_id, task.llm_profile_id
         ensure_material_extracted_text(task.primary_material)
+        if not _has_professor_match_evidence(task.professor):
+            raise ValueError("缺少研究方向或近期论文，暂不能分析匹配度")
         if not force and task.status in {
             EmailTaskStatus.MATCHED.value,
             EmailTaskStatus.REVIEW_REQUIRED.value,
