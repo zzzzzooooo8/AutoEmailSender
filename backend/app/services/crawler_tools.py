@@ -8,6 +8,7 @@ from typing import Any, Literal
 from urllib.parse import urljoin, urlparse
 
 import httpx
+import httpcore
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
@@ -62,6 +63,12 @@ class CrawlToolContext:
     session_factory: async_sessionmaker[AsyncSession]
 
 
+@dataclass(frozen=True)
+class _SafeCrawlUrl:
+    hostname: str
+    resolved_ips: tuple[str, ...]
+
+
 def is_allowed_crawl_url(start_url: str, candidate_url: str) -> bool:
     start = urlparse(start_url)
     candidate = urlparse(urljoin(start_url, candidate_url))
@@ -82,6 +89,10 @@ def is_safe_public_crawl_url(url: str) -> bool:
 
 
 def validate_safe_public_crawl_url(url: str) -> None:
+    _resolve_safe_public_crawl_url(url)
+
+
+def _resolve_safe_public_crawl_url(url: str) -> _SafeCrawlUrl:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
         raise ValueError(UNSAFE_CRAWL_URL_MESSAGE)
@@ -97,22 +108,29 @@ def validate_safe_public_crawl_url(url: str) -> None:
     try:
         ip_address = ipaddress.ip_address(normalized_host)
     except ValueError:
-        _validate_resolved_host_ips(normalized_host, parsed.port)
-        return
+        return _SafeCrawlUrl(
+            hostname=normalized_host,
+            resolved_ips=_resolve_safe_public_host_ips(
+                normalized_host,
+                parsed.port or _default_port_for_scheme(parsed.scheme),
+            ),
+        )
 
     if _is_unsafe_ip_address(ip_address):
         raise ValueError(UNSAFE_CRAWL_URL_MESSAGE)
+    return _SafeCrawlUrl(hostname=normalized_host, resolved_ips=(str(ip_address),))
 
 
-def _validate_resolved_host_ips(host: str, port: int | None) -> None:
+def _resolve_safe_public_host_ips(host: str, port: int) -> tuple[str, ...]:
     try:
-        address_infos = socket.getaddrinfo(host, port or 443, type=socket.SOCK_STREAM)
+        address_infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except socket.gaierror as exc:
         raise ValueError(UNSAFE_CRAWL_URL_MESSAGE) from exc
 
     if not address_infos:
         raise ValueError(UNSAFE_CRAWL_URL_MESSAGE)
 
+    resolved_ips: list[str] = []
     for address_info in address_infos:
         sockaddr = address_info[4]
         if not sockaddr:
@@ -124,6 +142,84 @@ def _validate_resolved_host_ips(host: str, port: int | None) -> None:
             raise ValueError(UNSAFE_CRAWL_URL_MESSAGE) from exc
         if _is_unsafe_ip_address(ip_address):
             raise ValueError(UNSAFE_CRAWL_URL_MESSAGE)
+        normalized_ip = str(ip_address)
+        if normalized_ip not in resolved_ips:
+            resolved_ips.append(normalized_ip)
+    return tuple(resolved_ips)
+
+
+def _default_port_for_scheme(scheme: str) -> int:
+    return 80 if scheme == "http" else 443
+
+
+class _PinnedCrawlNetworkBackend(httpcore.AsyncNetworkBackend):
+    def __init__(
+        self,
+        *,
+        hostname: str,
+        resolved_ip: str,
+        network_backend: httpcore.AsyncNetworkBackend | None = None,
+    ) -> None:
+        self._hostname = hostname.rstrip(".").lower()
+        self._resolved_ip = resolved_ip
+        self._network_backend = network_backend or _default_async_network_backend()
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Any = None,
+    ) -> httpcore.AsyncNetworkStream:
+        if host.rstrip(".").lower() != self._hostname:
+            raise httpcore.ConnectError("crawl transport attempted an unvalidated host")
+        return await self._network_backend.connect_tcp(
+            self._resolved_ip,
+            port,
+            timeout=timeout,
+            local_address=local_address,
+            socket_options=socket_options,
+        )
+
+    async def connect_unix_socket(
+        self,
+        path: str,
+        timeout: float | None = None,
+        socket_options: Any = None,
+    ) -> httpcore.AsyncNetworkStream:
+        return await self._network_backend.connect_unix_socket(
+            path,
+            timeout=timeout,
+            socket_options=socket_options,
+        )
+
+    async def sleep(self, seconds: float) -> None:
+        await self._network_backend.sleep(seconds)
+
+
+def _default_async_network_backend() -> httpcore.AsyncNetworkBackend:
+    return httpcore.AnyIOBackend()
+
+
+def _build_safe_crawl_transport(
+    *,
+    hostname: str,
+    resolved_ip: str,
+    network_backend: httpcore.AsyncNetworkBackend | None = None,
+) -> httpx.AsyncHTTPTransport:
+    transport = httpx.AsyncHTTPTransport(
+        trust_env=False,
+        proxy=None,
+        http2=False,
+        limits=httpx.Limits(max_connections=1, max_keepalive_connections=0),
+    )
+    transport._pool._network_backend = _PinnedCrawlNetworkBackend(  # type: ignore[attr-defined]
+        hostname=hostname,
+        resolved_ip=resolved_ip,
+        network_backend=network_backend,
+    )
+    return transport
 
 
 def _is_unsafe_ip_address(ip_address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -182,46 +278,56 @@ async def crawl_page_with_http(ctx: CrawlToolContext, url: str) -> PageSnapshot:
     try:
         response: httpx.Response | Any | None = None
         current_url = absolute_url
-        async with httpx.AsyncClient(follow_redirects=False, timeout=20.0) as client:
-            for redirect_count in range(MAX_HTTP_REDIRECTS + 1):
-                snapshot = _pre_request_rejected_snapshot(ctx, current_url, "http")
-                if snapshot is not None:
-                    await record_page_snapshot(ctx, snapshot)
-                    return snapshot
+        for redirect_count in range(MAX_HTTP_REDIRECTS + 1):
+            snapshot = _pre_request_rejected_snapshot(ctx, current_url, "http")
+            if snapshot is not None:
+                await record_page_snapshot(ctx, snapshot)
+                return snapshot
 
+            safe_url = _resolve_safe_public_crawl_url(current_url)
+            transport = _build_safe_crawl_transport(
+                hostname=safe_url.hostname,
+                resolved_ip=safe_url.resolved_ips[0],
+            )
+            async with httpx.AsyncClient(
+                follow_redirects=False,
+                timeout=20.0,
+                transport=transport,
+                trust_env=False,
+            ) as client:
                 response = await client.get(
                     current_url,
                     headers={"User-Agent": "AutoEmailSenderCrawler/0.1"},
                 )
-                if not getattr(response, "is_redirect", False):
-                    response.raise_for_status()
-                    break
+            if not getattr(response, "is_redirect", False):
+                response.raise_for_status()
+                break
 
-                if redirect_count >= MAX_HTTP_REDIRECTS:
-                    snapshot = _failed_snapshot(
-                        url=str(response.url),
-                        fetch_method="http",
-                        error_message="重定向次数过多，已拒绝抓取",
-                    )
-                    await record_page_snapshot(ctx, snapshot)
-                    return snapshot
+            if redirect_count >= MAX_HTTP_REDIRECTS:
+                snapshot = _failed_snapshot(
+                    url=str(response.url),
+                    fetch_method="http",
+                    error_message="重定向次数过多，已拒绝抓取",
+                )
+                await record_page_snapshot(ctx, snapshot)
+                return snapshot
 
-                location = response.headers.get("Location") or response.headers.get("location")
-                if not location:
-                    snapshot = _failed_snapshot(
-                        url=str(response.url),
-                        fetch_method="http",
-                        error_message="重定向响应缺少 Location，已拒绝抓取",
-                    )
-                    await record_page_snapshot(ctx, snapshot)
-                    return snapshot
+            location = response.headers.get("Location") or response.headers.get("location")
+            if not location:
+                snapshot = _failed_snapshot(
+                    url=str(response.url),
+                    fetch_method="http",
+                    error_message="重定向响应缺少 Location，已拒绝抓取",
+                )
+                await record_page_snapshot(ctx, snapshot)
+                return snapshot
 
-                next_url = urljoin(str(response.url), location)
-                snapshot = _pre_request_rejected_snapshot(ctx, next_url, "http")
-                if snapshot is not None:
-                    await record_page_snapshot(ctx, snapshot)
-                    return snapshot
-                current_url = next_url
+            next_url = urljoin(str(response.url), location)
+            snapshot = _pre_request_rejected_snapshot(ctx, next_url, "http")
+            if snapshot is not None:
+                await record_page_snapshot(ctx, snapshot)
+                return snapshot
+            current_url = next_url
         if response is None:
             raise RuntimeError("HTTP 抓取未返回响应")
     except Exception as exc:

@@ -25,6 +25,7 @@ from app.services.crawler_tools import (
     record_page_snapshot,
     save_candidates,
 )
+from app.services import crawler_tools
 
 
 class CrawlerToolTests(unittest.TestCase):
@@ -389,6 +390,7 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
         async_client = httpx.AsyncClient
 
         def client_factory(**kwargs: object) -> httpx.AsyncClient:
+            kwargs.pop("transport", None)
             return async_client(transport=transport, **kwargs)
 
         with patch(
@@ -402,6 +404,147 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot.status, "failed")
         self.assertIn("URL 不允许指向本机、内网或不可解析地址", snapshot.error_message or "")
         self.assertEqual(requested_urls, ["https://faculty.example.edu/faculty"])
+
+    async def test_crawl_page_with_http_uses_validated_transport_without_env_proxy(self) -> None:
+        session_factory = _FakeSessionFactory()
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://faculty.example.edu/faculty",
+            university="示例大学",
+            school="计算机学院",
+            session_factory=session_factory,  # type: ignore[arg-type]
+        )
+        client_kwargs: list[dict[str, object]] = []
+        response = _FakeHttpResponse(
+            url="https://faculty.example.edu/faculty",
+            text="<html><body>Faculty page</body></html>",
+        )
+
+        def client_factory(**kwargs: object) -> "_FakeAsyncHttpClient":
+            client_kwargs.append(kwargs)
+            return _FakeAsyncHttpClient(response)
+
+        with patch(
+            "app.services.crawler_tools.socket.getaddrinfo",
+            return_value=[
+                (0, 0, 0, "", ("93.184.216.34", 443)),
+            ],
+        ), patch("app.services.crawler_tools.httpx.AsyncClient", side_effect=client_factory):
+            snapshot = await crawl_page_with_http(ctx, "https://faculty.example.edu/faculty")
+
+        self.assertEqual(snapshot.status, "succeeded")
+        self.assertGreaterEqual(len(client_kwargs), 1)
+        for kwargs in client_kwargs:
+            self.assertIs(kwargs.get("trust_env"), False)
+            self.assertIn("transport", kwargs)
+
+    async def test_crawl_page_with_http_connects_to_validated_ip_not_rebound_hostname(
+        self,
+    ) -> None:
+        session_factory = _FakeSessionFactory()
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://faculty.example.edu/faculty",
+            university="示例大学",
+            school="计算机学院",
+            session_factory=session_factory,  # type: ignore[arg-type]
+        )
+        backend = _RecordingNetworkBackend(
+            response_bytes=(
+                b"HTTP/1.1 200 OK\r\n"
+                b"Content-Type: text/html; charset=utf-8\r\n"
+                b"Content-Length: 38\r\n"
+                b"\r\n"
+                b"<html><body>Faculty page</body></html>"
+            )
+        )
+
+        with patch(
+            "app.services.crawler_tools.socket.getaddrinfo",
+            return_value=[
+                (0, 0, 0, "", ("93.184.216.34", 443)),
+            ],
+        ), patch(
+            "app.services.crawler_tools._default_async_network_backend",
+            return_value=backend,
+        ):
+            snapshot = await crawl_page_with_http(ctx, "https://faculty.example.edu/faculty")
+
+        self.assertEqual(snapshot.status, "succeeded")
+        self.assertEqual(backend.connect_calls, [("93.184.216.34", 443)])
+        self.assertNotIn(("faculty.example.edu", 443), backend.connect_calls)
+        self.assertEqual(backend.streams[0].tls_server_hostnames, ["faculty.example.edu"])
+
+    async def test_crawl_page_with_http_re_resolves_and_rebinds_each_redirect_hop(
+        self,
+    ) -> None:
+        session_factory = _FakeSessionFactory()
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://faculty.example.edu/faculty",
+            university="示例大学",
+            school="计算机学院",
+            session_factory=session_factory,  # type: ignore[arg-type]
+        )
+        backend = _RecordingNetworkBackend(
+            response_bytes=[
+                b"HTTP/1.1 302 Found\r\n"
+                b"Location: /people\r\n"
+                b"Content-Length: 0\r\n"
+                b"\r\n",
+                b"HTTP/1.1 200 OK\r\n"
+                b"Content-Type: text/html; charset=utf-8\r\n"
+                b"Content-Length: 38\r\n"
+                b"\r\n"
+                b"<html><body>Faculty page</body></html>",
+            ]
+        )
+
+        def resolve_current_public_ip(
+            *args: object,
+            **kwargs: object,
+        ) -> list[tuple[int, int, int, str, tuple[str, int]]]:
+            _ = args, kwargs
+            if len(backend.connect_calls) == 0:
+                return [(0, 0, 0, "", ("93.184.216.34", 443))]
+            return [(0, 0, 0, "", ("93.184.216.35", 443))]
+
+        with patch(
+            "app.services.crawler_tools.socket.getaddrinfo",
+            side_effect=resolve_current_public_ip,
+        ), patch(
+            "app.services.crawler_tools._default_async_network_backend",
+            return_value=backend,
+        ):
+            snapshot = await crawl_page_with_http(ctx, "https://faculty.example.edu/faculty")
+
+        self.assertEqual(snapshot.status, "succeeded")
+        self.assertEqual(
+            backend.connect_calls,
+            [("93.184.216.34", 443), ("93.184.216.35", 443)],
+        )
+
+    async def test_safe_crawl_transport_connects_to_validated_ip_and_preserves_https_host_semantics(
+        self,
+    ) -> None:
+        backend = _RecordingNetworkBackend(
+            response_bytes=b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK"
+        )
+        transport = crawler_tools._build_safe_crawl_transport(
+            hostname="faculty.example.edu",
+            resolved_ip="93.184.216.34",
+            network_backend=backend,
+        )
+
+        async with httpx.AsyncClient(transport=transport, trust_env=False) as client:
+            response = await client.get("https://faculty.example.edu/faculty")
+
+        self.assertEqual(response.text, "OK")
+        self.assertEqual(backend.connect_calls, [("93.184.216.34", 443)])
+        self.assertEqual(backend.streams[0].tls_server_hostnames, ["faculty.example.edu"])
+        request_bytes = b"".join(backend.streams[0].writes)
+        self.assertIn(b"GET /faculty HTTP/1.1", request_bytes)
+        self.assertIn(b"Host: faculty.example.edu", request_bytes)
 
     async def test_crawl_page_with_crawl4ai_delegates_to_safe_http_path(self) -> None:
         session_factory = _FakeSessionFactory()
@@ -654,6 +797,94 @@ class _FakeHttpResponse:
         }
 
     def raise_for_status(self) -> None:
+        return None
+
+
+class _FakeAsyncHttpClient:
+    def __init__(self, response: _FakeHttpResponse) -> None:
+        self._response = response
+
+    async def __aenter__(self) -> "_FakeAsyncHttpClient":
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+    async def get(self, url: str, *, headers: dict[str, str]) -> _FakeHttpResponse:
+        _ = url, headers
+        return self._response
+
+
+class _RecordingNetworkBackend:
+    def __init__(self, *, response_bytes: bytes | list[bytes]) -> None:
+        self.connect_calls: list[tuple[str, int]] = []
+        responses = response_bytes if isinstance(response_bytes, list) else [response_bytes]
+        self.streams = [_RecordingNetworkStream(response) for response in responses]
+        self._next_stream_index = 0
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: object | None = None,
+    ) -> "_RecordingNetworkStream":
+        _ = timeout, local_address, socket_options
+        self.connect_calls.append((host, port))
+        stream = self.streams[self._next_stream_index]
+        if self._next_stream_index < len(self.streams) - 1:
+            self._next_stream_index += 1
+        return stream
+
+    async def connect_unix_socket(
+        self,
+        path: str,
+        timeout: float | None = None,
+        socket_options: object | None = None,
+    ) -> "_RecordingNetworkStream":
+        _ = path, timeout, socket_options
+        raise AssertionError("crawl transport must not use Unix sockets")
+
+    async def sleep(self, seconds: float) -> None:
+        _ = seconds
+        return None
+
+
+class _RecordingNetworkStream:
+    def __init__(self, response_bytes: bytes) -> None:
+        self._response_bytes = response_bytes
+        self._read_offset = 0
+        self.writes: list[bytes] = []
+        self.tls_server_hostnames: list[str | None] = []
+
+    async def read(self, max_bytes: int, timeout: float | None = None) -> bytes:
+        _ = timeout
+        if self._read_offset >= len(self._response_bytes):
+            return b""
+        chunk = self._response_bytes[self._read_offset : self._read_offset + max_bytes]
+        self._read_offset += len(chunk)
+        return chunk
+
+    async def write(self, buffer: bytes, timeout: float | None = None) -> None:
+        _ = timeout
+        self.writes.append(buffer)
+
+    async def aclose(self) -> None:
+        return None
+
+    async def start_tls(
+        self,
+        ssl_context: object,
+        server_hostname: str | None = None,
+        timeout: float | None = None,
+    ) -> "_RecordingNetworkStream":
+        _ = ssl_context, timeout
+        self.tls_server_hostnames.append(server_hostname)
+        return self
+
+    def get_extra_info(self, info: str) -> object | None:
+        _ = info
         return None
 
 
