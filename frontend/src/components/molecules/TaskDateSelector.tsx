@@ -21,6 +21,8 @@ const ruleLabels: Array<{ label: string; value: DateRule }> = [
 ];
 
 const weekdayLabels = ['一', '二', '三', '四', '五', '六', '日'];
+const maxRuleRangeDays = 366;
+const millisecondsPerDay = 24 * 60 * 60 * 1000;
 
 const toIsoDate = (date: Date) => date.toISOString().slice(0, 10);
 const fromIsoDate = (value: string) => new Date(`${value}T00:00:00Z`);
@@ -44,6 +46,9 @@ const buildMonthDays = (monthDate: Date) => {
   });
 };
 
+const getInclusiveRangeDays = (startDate: string, endDate: string) =>
+  Math.floor((fromIsoDate(endDate).getTime() - fromIsoDate(startDate).getTime()) / millisecondsPerDay) + 1;
+
 export const TaskDateSelector: React.FC<TaskDateSelectorProps> = ({
   selectedDates,
   onChange,
@@ -53,6 +58,7 @@ export const TaskDateSelector: React.FC<TaskDateSelectorProps> = ({
   const [rangeEnd, setRangeEnd] = useState(todayIso);
   const [visibleMonth, setVisibleMonth] = useState(() => fromIsoDate(todayIso));
   const [dateToAdd, setDateToAdd] = useState('');
+  const [ruleError, setRuleError] = useState('');
 
   const normalizedSelectedDates = useMemo(
     () => normalizeScheduledDates(selectedDates),
@@ -73,10 +79,25 @@ export const TaskDateSelector: React.FC<TaskDateSelectorProps> = ({
   };
 
   const handleRuleClick = (rule: DateRule) => {
+    if (!isValidIsoDate(rangeStart) || !isValidIsoDate(rangeEnd)) {
+      setRuleError('请选择有效的日期范围');
+      return;
+    }
+    if (rangeStart > rangeEnd) {
+      setRuleError('开始日期不能晚于结束日期');
+      return;
+    }
+    if (getInclusiveRangeDays(rangeStart, rangeEnd) > maxRuleRangeDays) {
+      setRuleError('日期范围最多支持 366 天');
+      return;
+    }
+
+    setRuleError('');
     onChange(applyDateRule(rule, rangeStart, rangeEnd));
   };
 
   const handleDateClick = (date: Date) => {
+    setRuleError('');
     onChange(toggleScheduledDate(normalizedSelectedDates, toIsoDate(date)));
   };
 
@@ -85,6 +106,7 @@ export const TaskDateSelector: React.FC<TaskDateSelectorProps> = ({
       return;
     }
 
+    setRuleError('');
     onChange(toggleScheduledDate(normalizedSelectedDates, dateToAdd));
     const addedDate = fromIsoDate(dateToAdd);
     setVisibleMonth(new Date(Date.UTC(addedDate.getUTCFullYear(), addedDate.getUTCMonth(), 1)));
@@ -134,12 +156,16 @@ export const TaskDateSelector: React.FC<TaskDateSelectorProps> = ({
         ))}
         <button
           type="button"
-          onClick={() => onChange([])}
+          onClick={() => {
+            setRuleError('');
+            onChange([]);
+          }}
           className="h-8 rounded-lg border border-stone-200 bg-white px-3 text-xs font-medium text-stone-500 transition-all hover:border-stone-300 hover:text-stone-700"
         >
           清空重选
         </button>
       </div>
+      {ruleError && <p className="text-xs text-red-500">{ruleError}</p>}
 
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between">

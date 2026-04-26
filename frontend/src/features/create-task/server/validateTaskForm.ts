@@ -1,4 +1,5 @@
 import type { CreateTaskFormData } from '../types';
+import { isValidIsoDate, normalizeScheduledDates } from '../client/scheduleDates';
 
 export interface ValidationResult {
   valid: boolean;
@@ -42,7 +43,10 @@ export const validateTaskForm = (data: CreateTaskFormData): ValidationResult => 
     if (!data.schedule.emailsToSend || data.schedule.emailsToSend <= 0) {
       errors.emailsToSend = '请输入要发送的邮件数量';
     }
-    if (!data.schedule.scheduledDates?.length) {
+    const scheduledDates = data.schedule.scheduledDates ?? [];
+    if (scheduledDates.some((date) => !isValidIsoDate(date))) {
+      errors.scheduledDates = '请选择有效的发送日期';
+    } else if (normalizeScheduledDates(scheduledDates).length === 0) {
       errors.scheduledDates = '请至少选择一个发送日期';
     }
   }
