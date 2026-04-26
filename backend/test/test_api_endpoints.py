@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "7b9c2d4e6f10"
+HEAD_REVISION = "8a6d2f4c9b31"
 
 
 class ApiEndpointTests(unittest.TestCase):
