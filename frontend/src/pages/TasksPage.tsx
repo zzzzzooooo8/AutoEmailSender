@@ -82,10 +82,33 @@ const CRAWL_REFRESH_INTERVAL_MS = 5000;
 const CRAWL_DETAILS_REFRESH_INTERVAL_MS = 5000;
 const TASKS_PAGE_SIZE = 8;
 const API_TIMEZONE_SUFFIX_PATTERN = /(Z|[+-]\d{2}:?\d{2})$/i;
+const SCHEDULE_DATE_PATTERN = /^\d{4}-(\d{2})-(\d{2})$/;
+
+const formatScheduleDate = (value: string) => {
+  const match = SCHEDULE_DATE_PATTERN.exec(value);
+  if (!match) {
+    return null;
+  }
+  return `${Number(match[1])}/${Number(match[2])}`;
+};
 
 const buildScheduleLabel = (task: BatchTaskCardDTO) => {
   if (task.schedule_type === "immediate") {
     return "立即执行";
+  }
+  const dates = (task.scheduled_dates ?? [])
+    .filter((date) => SCHEDULE_DATE_PATTERN.test(date))
+    .sort();
+  if (dates.length > 0) {
+    const firstDate = formatScheduleDate(dates[0]);
+    const lastDate = formatScheduleDate(dates[dates.length - 1]);
+    const dateRange =
+      firstDate && lastDate && firstDate !== lastDate
+        ? `${firstDate}-${lastDate}`
+        : firstDate;
+    if (dateRange) {
+      return `${dateRange} 共 ${dates.length} 天，${task.window_start_time ?? "--:--"}-${task.window_end_time ?? "--:--"}，每天最多 ${task.emails_per_window ?? 0} 封`;
+    }
   }
   return `${task.window_start_time ?? "--:--"} - ${task.window_end_time ?? "--:--"}，窗口内 ${task.emails_per_window ?? 0} 封`;
 };

@@ -4,12 +4,14 @@ import { useRef } from 'react';
 import { Loader2 } from 'lucide-react';
 import { NativeSelectField } from '@/components/atoms/NativeSelectField';
 import { SubjectTemplateInput } from '@/components/molecules/SubjectTemplateInput';
+import { TaskDateSelector } from '@/components/molecules/TaskDateSelector';
 import { useNotification } from '@/context/NotificationContext';
 import { safeRecordUserAction } from '@/lib/diagnosticUserActions';
 import { createBatchTask } from '@/lib/api/batchTasksApi';
 import { listProfessors } from '@/lib/api/professorsApi';
 import { useSelectionContext } from '@/context/SelectionContext';
 import { getTaskModeCopy } from '@/features/create-task/client/taskCopy';
+import { normalizeScheduledDates } from '@/features/create-task/client/scheduleDates';
 import { useConfirmDialog } from '@/lib/useConfirmDialog';
 import {
   MATERIAL_TYPE_LABELS,
@@ -61,6 +63,7 @@ export const CreateTaskPage = () => {
   const [templateBodyText, setTemplateBodyText] = useState('');
   const [templateBodyHtml, setTemplateBodyHtml] = useState('');
   const [scheduleType, setScheduleType] = useState<'immediate' | 'scheduled'>('immediate');
+  const [scheduledDates, setScheduledDates] = useState<string[]>([]);
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('11:00');
   const [emailsPerWindow, setEmailsPerWindow] = useState('10');
@@ -163,6 +166,7 @@ export const CreateTaskPage = () => {
 
   const handleSubmit = async () => {
     const validationErrors: string[] = [];
+    const normalizedScheduledDates = normalizeScheduledDates(scheduledDates);
 
     if (!selectedIdentityId || !selectedLlmProfileId) {
       validationErrors.push('请先选择身份和模型');
@@ -172,6 +176,9 @@ export const CreateTaskPage = () => {
     }
     if (professors.length === 0) {
       validationErrors.push('当前没有可执行的导师');
+    }
+    if (scheduleType === 'scheduled' && normalizedScheduledDates.length === 0) {
+      validationErrors.push('定时发送请至少选择一个发送日期');
     }
     if (scheduleType === 'scheduled' && (!startTime || !endTime || !emailsPerWindow)) {
       validationErrors.push('定时发送需要填写发送时间窗口和窗口内发送数量');
@@ -235,6 +242,7 @@ export const CreateTaskPage = () => {
         name: taskName.trim(),
         professor_ids: professors.map((item) => item.id),
         schedule_type: scheduleType,
+        scheduled_dates: scheduleType === 'scheduled' ? normalizedScheduledDates : null,
         window_start_time: scheduleType === 'scheduled' ? startTime : null,
         window_end_time: scheduleType === 'scheduled' ? endTime : null,
         emails_per_window:
@@ -399,25 +407,35 @@ export const CreateTaskPage = () => {
               </p>
 
               {scheduleType === 'scheduled' && (
-                <div className="grid gap-4 md:grid-cols-2">
-                  <label className="block">
-                    <div className="mb-2 text-sm font-medium text-stone-800">发送开始时间</div>
-                    <input
-                      type="time"
-                      value={startTime}
-                      onChange={(event) => setStartTime(event.target.value)}
-                      className="form-input"
-                    />
-                  </label>
-                  <label className="block">
-                    <div className="mb-2 text-sm font-medium text-stone-800">发送结束时间</div>
-                    <input
-                      type="time"
-                      value={endTime}
-                      onChange={(event) => setEndTime(event.target.value)}
-                      className="form-input"
-                    />
-                  </label>
+                <div className="space-y-5 border-t border-stone-200 pt-5">
+                  <TaskDateSelector
+                    selectedDates={scheduledDates}
+                    onChange={setScheduledDates}
+                  />
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <label className="block">
+                      <div className="mb-2 text-sm font-medium text-stone-800">发送开始时间</div>
+                      <input
+                        type="time"
+                        value={startTime}
+                        onChange={(event) => setStartTime(event.target.value)}
+                        className="form-input"
+                      />
+                    </label>
+                    <label className="block">
+                      <div className="mb-2 text-sm font-medium text-stone-800">发送结束时间</div>
+                      <input
+                        type="time"
+                        value={endTime}
+                        onChange={(event) => setEndTime(event.target.value)}
+                        className="form-input"
+                      />
+                    </label>
+                  </div>
+                  <p className="text-xs leading-6 text-stone-500">
+                    已选 {normalizeScheduledDates(scheduledDates).length} 天，将在 {startTime || '--:--'} 至{' '}
+                    {endTime || '--:--'} 之间动态发送，每天最多 {emailsPerWindow || 0} 封。
+                  </p>
                 </div>
               )}
 

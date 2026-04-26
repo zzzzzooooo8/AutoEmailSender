@@ -407,6 +407,7 @@ export interface CreateBatchTaskRequestDTO {
   name: string;
   professor_ids: number[];
   schedule_type: 'immediate' | 'scheduled';
+  scheduled_dates: string[] | null;
   window_start_time: string | null;
   window_end_time: string | null;
   emails_per_window: number | null;
@@ -440,6 +441,7 @@ export interface BatchTaskCardDTO {
   name: string;
   status: BatchTaskRuntimeStatus;
   schedule_type: 'immediate' | 'scheduled';
+  scheduled_dates: string[] | null;
   window_start_time: string | null;
   window_end_time: string | null;
   emails_per_window: number | null;

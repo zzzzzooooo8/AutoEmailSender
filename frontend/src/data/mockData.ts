@@ -74,7 +74,7 @@ export const MOCK_TASKS: BatchTask[] = [
   {
     id: 't1',
     name: '加州大学伯克利分校 AI 方向首轮套磁',
-    schedule: '每日 09:00-11:00，每 20 分钟/封',
+    schedule: '4/28-5/12 共 8 天，09:00-11:00，每天最多 20 封',
     targetDesc: '目标导师 45 人（CS, 教授）',
     currentCount: 15,
     totalCount: 45,
@@ -83,7 +83,7 @@ export const MOCK_TASKS: BatchTask[] = [
   {
     id: 't2',
     name: '清北复交系统架构方向跟进邮件',
-    schedule: '每日 14:00-16:00，每 15 分钟/封',
+    schedule: '5/6-5/10 共 5 天，14:00-16:00，每天最多 12 封',
     targetDesc: '目标导师 20 人（未回复）',
     currentCount: 12,
     totalCount: 20,
@@ -92,7 +92,7 @@ export const MOCK_TASKS: BatchTask[] = [
   {
     id: 't3',
     name: '常春藤联盟 CV 方向首轮触达',
-    schedule: '立即发送，每 30 分钟/封',
+    schedule: '立即发送，创建后进入审核与发送流程',
     targetDesc: '目标导师 50 人（匹配度 > 80%）',
     currentCount: 50,
     totalCount: 50,
@@ -101,7 +101,7 @@ export const MOCK_TASKS: BatchTask[] = [
   {
     id: 't4',
     name: 'NUS/NTU 凌晨定时发送',
-    schedule: '每日 02:00-05:00，每 45 分钟/封',
+    schedule: '5/15-5/29 共 6 天，02:00-05:00，每天最多 8 封',
     targetDesc: '目标导师 10 人（AP, 教授）',
     currentCount: 2,
     totalCount: 10,
