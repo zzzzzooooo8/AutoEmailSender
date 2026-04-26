@@ -31,6 +31,11 @@ describe('scheduleDates', () => {
       '2026-05-04',
     ]);
     expect(toggleScheduledDate(['2026-05-04'], '2026-02-30')).toEqual(['2026-05-04']);
+    expect(toggleScheduledDate(['2026-05-04', '2026-04-28', 'bad'], '2026-02-30')).toEqual([
+      '2026-05-04',
+      '2026-04-28',
+      'bad',
+    ]);
   });
 
   it('generates weekends and Monday Wednesday Friday rules', () => {

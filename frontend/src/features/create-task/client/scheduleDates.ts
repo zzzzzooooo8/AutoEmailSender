@@ -49,7 +49,7 @@ export const applyDateRule = (rule: DateRule, startDate: string, endDate: string
 
 export const toggleScheduledDate = (dates: string[], date: string) => {
   if (!isValidIsoDate(date)) {
-    return normalizeScheduledDates(dates);
+    return dates;
   }
   if (dates.includes(date)) {
     return dates.filter((item) => item !== date);
