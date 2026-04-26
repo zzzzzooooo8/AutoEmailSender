@@ -18,8 +18,22 @@ type FilterValue = "" | string;
 const backendLogLimit = 20;
 const frontendPreviewLimit = 6;
 const backendPreviewLimit = 20;
-const levelOptions = ["debug", "info", "warn", "error"];
-const categoryOptions = ["user_action", "api", "frontend_error", "system"];
+const levelOptions = [
+  { value: "debug", label: "debug（通用）" },
+  { value: "info", label: "info（通用）" },
+  { value: "warn", label: "warn（前端）" },
+  { value: "warning", label: "warning（后端）" },
+  { value: "error", label: "error（通用）" },
+];
+const categoryOptions = [
+  { value: "user_action", label: "user_action（前端/后端）" },
+  { value: "api", label: "api（前端）" },
+  { value: "frontend_error", label: "frontend_error（前端）" },
+  { value: "system", label: "system（前端）" },
+  { value: "email", label: "email（后端）" },
+  { value: "crawler", label: "crawler（后端）" },
+  { value: "backend", label: "backend（后端）" },
+];
 
 export const DiagnosticLogPanel = () => {
   const { notifyError, notifySuccess } = useNotification();
@@ -174,8 +188,8 @@ export const DiagnosticLogPanel = () => {
           >
             <option value="">全部</option>
             {levelOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
+              <option key={option.value} value={option.value}>
+                {option.label}
               </option>
             ))}
           </select>
@@ -191,8 +205,8 @@ export const DiagnosticLogPanel = () => {
           >
             <option value="">全部</option>
             {categoryOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
+              <option key={option.value} value={option.value}>
+                {option.label}
               </option>
             ))}
           </select>

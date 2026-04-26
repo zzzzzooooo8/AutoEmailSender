@@ -111,6 +111,33 @@ describe("DiagnosticLogPanel", () => {
     expect(await screen.findByText("后端诊断日志暂时不可用")).toBeInTheDocument();
   });
 
+  it("修改后端日志筛选条件时会带上对应参数重新加载", async () => {
+    render(<DiagnosticLogPanel />);
+
+    await screen.findByText("crawl_job.create_failed");
+    expect(
+      screen.getByRole("option", { name: "warning（后端）" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "crawler（后端）" }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Level"), {
+      target: { value: "warning" },
+    });
+    fireEvent.change(screen.getByLabelText("Category"), {
+      target: { value: "crawler" },
+    });
+
+    await waitFor(() =>
+      expect(listOperationLogs).toHaveBeenCalledWith({
+        limit: 20,
+        level: "warning",
+        category: "crawler",
+      }),
+    );
+  });
+
   it("点击导出会生成合并 JSON 并触发下载", async () => {
     seedLocalDiagnostics();
     const clickSpy = vi
