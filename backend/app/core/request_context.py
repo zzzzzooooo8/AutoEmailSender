@@ -4,6 +4,7 @@ import re
 import uuid
 from contextvars import ContextVar
 
+from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 
@@ -45,9 +46,12 @@ class RequestContextMiddleware:
 
         request_id = _resolve_request_id(scope)
         token = _request_id_var.set(request_id)
+        response_started = False
 
         async def send_with_request_id(message: Message) -> None:
+            nonlocal response_started
             if message["type"] == "http.response.start":
+                response_started = True
                 headers = list(message.get("headers", []))
                 headers.append((_REQUEST_ID_HEADER_BYTES, request_id.encode("ascii")))
                 message = {**message, "headers": headers}
@@ -55,5 +59,15 @@ class RequestContextMiddleware:
 
         try:
             await self.app(scope, receive, send_with_request_id)
+        except Exception:
+            app = scope.get("app")
+            if response_started or getattr(app, "debug", False):
+                raise
+            response = PlainTextResponse(
+                "Internal Server Error",
+                status_code=500,
+                headers={REQUEST_ID_HEADER: request_id},
+            )
+            await response(scope, receive, send)
         finally:
             _request_id_var.reset(token)

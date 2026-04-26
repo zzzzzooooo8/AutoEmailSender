@@ -22,6 +22,10 @@ class RequestContextTests(unittest.TestCase):
         async def read_request_id() -> dict[str, str | None]:
             return {"request_id": get_request_id()}
 
+        @self.app.get("/test/request-id-error")
+        async def raise_request_error() -> None:
+            raise RuntimeError("boom")
+
         self.client = TestClient(self.app)
 
     def tearDown(self) -> None:
@@ -66,6 +70,18 @@ class RequestContextTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"request_id": request_id})
+        self.assertEqual(response.headers["X-Request-ID"], request_id)
+        self.assertIsNone(get_request_id())
+
+    def test_unhandled_exception_response_keeps_request_id_and_resets_context(self) -> None:
+        request_id = "service.error-1"
+        client = TestClient(self.app, raise_server_exceptions=False)
+        try:
+            response = client.get("/test/request-id-error", headers={"X-Request-ID": request_id})
+        finally:
+            client.close()
+
+        self.assertEqual(response.status_code, 500)
         self.assertEqual(response.headers["X-Request-ID"], request_id)
         self.assertIsNone(get_request_id())
 
