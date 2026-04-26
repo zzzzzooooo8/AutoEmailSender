@@ -54,6 +54,14 @@ vi.mock("@/components/molecules/EmailTemplateEditor", () => ({
   ),
 }));
 
+vi.mock("@/components/organisms/DiagnosticLogPanel", () => ({
+  DiagnosticLogPanel: () => (
+    <section aria-label="诊断日志面板">
+      <h2>诊断日志</h2>
+    </section>
+  ),
+}));
+
 vi.mock("@/lib/api/identities", () => ({
   createIdentity: vi.fn(),
   deleteIdentity: vi.fn(),
@@ -184,6 +192,7 @@ describe("ProfilePage onboarding", () => {
         "接着去「导师管理」导入导师，再回首页创建任务。",
       ),
     ).toBeInTheDocument();
+    expect(screen.getByLabelText("诊断日志面板")).toBeInTheDocument();
   });
 
   it("renders the three setup sections before the final save and test section", () => {

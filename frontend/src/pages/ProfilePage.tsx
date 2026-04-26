@@ -25,6 +25,7 @@ import { useSelectionContext } from "@/context/SelectionContext";
 import { NativeSelectField } from "@/components/atoms/NativeSelectField";
 import { EmailTemplateEditor } from "@/components/molecules/EmailTemplateEditor";
 import { SubjectTemplateInput } from "@/components/molecules/SubjectTemplateInput";
+import { DiagnosticLogPanel } from "@/components/organisms/DiagnosticLogPanel";
 import { formatApiDateTime } from "@/lib/dateTime";
 import { textToEmailHtml } from "@/lib/richEmail";
 import {
@@ -2711,6 +2712,8 @@ export const ProfilePage = () => {
               接着去「导师管理」导入导师，再回首页创建任务。
             </div>
           </section>
+
+          <DiagnosticLogPanel />
         </div>
       )}
       <OutreachTemplateModal
