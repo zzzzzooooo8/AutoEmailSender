@@ -1,5 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Download, Loader2, RefreshCw, Trash2 } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type TransitionEvent,
+} from "react";
+import {
+  ChevronDown,
+  Download,
+  Loader2,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 import { useNotification } from "@/context/NotificationContext";
 import { safeRecordUserAction } from "@/lib/diagnosticUserActions";
 import {
@@ -16,9 +28,13 @@ import {
 
 type FilterValue = "" | string;
 
+interface DiagnosticExportPayload {
+  exportedAt: string;
+  sessionId: string;
+  events: DiagnosticEvent[];
+}
+
 const backendLogLimit = 20;
-const frontendPreviewLimit = 6;
-const backendPreviewLimit = 20;
 const levelOptions = [
   { value: "debug", label: "debug（通用）" },
   { value: "info", label: "info（通用）" },
@@ -44,31 +60,37 @@ export const DiagnosticLogPanel = () => {
   const [backendLogs, setBackendLogs] = useState<OperationLogDTO[]>([]);
   const [level, setLevel] = useState<FilterValue>("");
   const [category, setCategory] = useState<FilterValue>("");
+  const [exportDate, setExportDate] = useState(() =>
+    formatDateInputValue(new Date()),
+  );
   const [loadingBackendLogs, setLoadingBackendLogs] = useState(false);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [refreshIndex, setRefreshIndex] = useState(0);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [renderContent, setRenderContent] = useState(false);
+
+  const exportDateRange = useMemo(
+    () => getLocalDateRange(exportDate),
+    [exportDate],
+  );
 
   const backendParams = useMemo(
     () => ({
       limit: backendLogLimit,
       level: level || undefined,
       category: category || undefined,
+      start_at: exportDateRange?.startAt,
+      end_at: exportDateRange?.endAt,
     }),
-    [category, level],
-  );
-
-  const frontendPreview = useMemo(
-    () => frontendEvents.slice(-frontendPreviewLimit).reverse(),
-    [frontendEvents],
-  );
-
-  const backendPreview = useMemo(
-    () => backendLogs.slice(0, backendPreviewLimit),
-    [backendLogs],
+    [category, exportDateRange, level],
   );
 
   useEffect(() => {
+    if (!isExpanded) {
+      return undefined;
+    }
+
     let ignore = false;
 
     const loadBackendLogs = async () => {
@@ -97,11 +119,31 @@ export const DiagnosticLogPanel = () => {
     return () => {
       ignore = true;
     };
-  }, [backendParams, refreshIndex]);
+  }, [backendParams, isExpanded, refreshIndex]);
 
   const refreshLocalEvents = useCallback(() => {
     setFrontendEvents(getDiagnosticEvents());
   }, []);
+
+  const filteredFrontendEvents = useMemo(
+    () => filterEventsByDate(frontendEvents, exportDate),
+    [exportDate, frontendEvents],
+  );
+
+  const toggleExpanded = () => {
+    refreshLocalEvents();
+    setRenderContent(true);
+    setIsExpanded((current) => !current);
+  };
+
+  const handleContentTransitionEnd = (
+    event: TransitionEvent<HTMLDivElement>,
+  ) => {
+    if (isExpanded || event.propertyName !== "grid-template-rows") {
+      return;
+    }
+    setRenderContent(false);
+  };
 
   const handleRefresh = () => {
     refreshLocalEvents();
@@ -125,13 +167,25 @@ export const DiagnosticLogPanel = () => {
     setExporting(true);
 
     try {
-      const frontend = JSON.parse(exportDiagnosticEvents());
+      const frontend = JSON.parse(
+        exportDiagnosticEvents(),
+      ) as DiagnosticExportPayload;
+      const selectedFrontendEvents = filterEventsByDate(
+        frontend.events ?? [],
+        exportDate,
+      );
+      const frontendPayload: DiagnosticExportPayload = {
+        ...frontend,
+        events: selectedFrontendEvents,
+      };
       let backend: unknown;
 
       try {
         backend = await exportOperationLogs({
           level: level || undefined,
           category: category || undefined,
+          start_at: exportDateRange?.startAt,
+          end_at: exportDateRange?.endAt,
         });
       } catch (error) {
         backend = {
@@ -144,7 +198,8 @@ export const DiagnosticLogPanel = () => {
 
       const payload = {
         exportedAt: new Date().toISOString(),
-        frontend,
+        selectedDate: exportDate || null,
+        frontend: frontendPayload,
         backend,
       };
       const blob = new Blob([JSON.stringify(payload, null, 2)], {
@@ -153,7 +208,7 @@ export const DiagnosticLogPanel = () => {
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = objectUrl;
-      link.download = `auto-email-diagnostics-${formatFilenameTimestamp(new Date())}.json`;
+      link.download = `auto-email-diagnostics-${exportDate || formatFilenameTimestamp(new Date())}.json`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -161,9 +216,12 @@ export const DiagnosticLogPanel = () => {
       safeRecordUserAction({
         eventName: "diagnostics.export_succeeded",
         data: {
-          frontendCount: frontend.events?.length ?? 0,
+          selectedDate: exportDate || null,
+          frontendCount: selectedFrontendEvents.length,
           backendCount:
-            typeof backend === "object" && backend !== null && "total" in backend
+            typeof backend === "object" &&
+            backend !== null &&
+            "total" in backend
               ? Number((backend as { total?: unknown }).total ?? 0)
               : 0,
         },
@@ -183,209 +241,214 @@ export const DiagnosticLogPanel = () => {
   };
 
   return (
-    <section className="rounded-3xl border border-stone-200 bg-white p-6 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-semibold text-stone-900">诊断日志</h2>
-          <p className="mt-2 text-sm leading-6 text-stone-600">
-            排查创建任务、抓取和接口请求问题时，可导出日志给开发者。
+    <section className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
+      <button
+        type="button"
+        aria-expanded={isExpanded}
+        aria-controls="diagnostic-log-panel-content"
+        onClick={toggleExpanded}
+        className="collapsible-card-toggle flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-stone-50 active:bg-stone-50"
+      >
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-base font-semibold text-stone-900">
+              开发诊断日志
+            </h2>
+            <span className="rounded-full border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs text-stone-600">
+              用于排查错误
+            </span>
+          </div>
+          <p className="mt-1 text-sm text-stone-500">
+            排查问题时导出给开发者使用，不作为普通用户内容展示。
           </p>
         </div>
-        <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs text-stone-600">
-          本地日志 {frontendEvents.length} 条
-        </span>
-      </div>
-
-      <div className="mt-5 flex flex-wrap items-end gap-3">
-        <label className="block min-w-36">
-          <span className="mb-2 block text-xs font-medium text-stone-500">
-            Level
+        <div className="flex shrink-0 items-center gap-3">
+          <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs text-stone-600">
+            本地 {frontendEvents.length}
           </span>
-          <select
-            value={level}
-            onChange={(event) => setLevel(event.target.value)}
-            className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
-          >
-            <option value="">全部</option>
-            {levelOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block min-w-44">
-          <span className="mb-2 block text-xs font-medium text-stone-500">
-            Category
-          </span>
-          <select
-            value={category}
-            onChange={(event) => setCategory(event.target.value)}
-            className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
-          >
-            <option value="">全部</option>
-            {categoryOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button
-          type="button"
-          onClick={handleRefresh}
-          disabled={loadingBackendLogs}
-          className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {loadingBackendLogs ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <RefreshCw className="h-4 w-4" />
-          )}
-          刷新
-        </button>
-        <button
-          type="button"
-          onClick={() => void handleExport()}
-          disabled={exporting}
-          className="ui-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {exporting ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Download className="h-4 w-4" />
-          )}
-          导出诊断日志
-        </button>
-        <button
-          type="button"
-          onClick={handleClearLocalLogs}
-          className="ui-btn-danger"
-        >
-          <Trash2 className="h-4 w-4" />
-          清空本地日志
-        </button>
-      </div>
+          <ChevronDown
+            className={`h-5 w-5 text-stone-500 transition-transform ${
+              isExpanded ? "rotate-180" : ""
+            }`}
+          />
+        </div>
+      </button>
 
-      {backendError ? (
-        <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          {backendError}
+      {renderContent ? (
+        <div
+          id="diagnostic-log-panel-content"
+          data-state={isExpanded ? "open" : "closed"}
+          onTransitionEnd={handleContentTransitionEnd}
+          className="collapsible-card-content"
+        >
+          <div className="min-h-0 px-5 py-5">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <SummaryMetric
+                label="本地事件"
+                value={filteredFrontendEvents.length}
+              />
+              <SummaryMetric
+                label="后端日志"
+                value={loadingBackendLogs ? "加载中" : backendLogs.length}
+              />
+              <SummaryMetric label="导出日期" value={exportDate || "全部"} />
+            </div>
+
+            <div className="mt-5 flex flex-wrap items-end gap-3">
+              <label className="block min-w-40">
+                <span className="mb-2 block text-xs font-medium text-stone-500">
+                  导出日期
+                </span>
+                <input
+                  type="date"
+                  value={exportDate}
+                  onChange={(event) => setExportDate(event.target.value)}
+                  className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                />
+              </label>
+              <label className="block min-w-36">
+                <span className="mb-2 block text-xs font-medium text-stone-500">
+                  Level
+                </span>
+                <select
+                  value={level}
+                  onChange={(event) => setLevel(event.target.value)}
+                  className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="">全部</option>
+                  {levelOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block min-w-44">
+                <span className="mb-2 block text-xs font-medium text-stone-500">
+                  Category
+                </span>
+                <select
+                  value={category}
+                  onChange={(event) => setCategory(event.target.value)}
+                  className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="">全部</option>
+                  {categoryOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={handleRefresh}
+                disabled={loadingBackendLogs}
+                className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loadingBackendLogs ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+                刷新
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleExport()}
+                disabled={exporting}
+                className="ui-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {exporting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+                导出诊断日志
+              </button>
+              <button
+                type="button"
+                onClick={handleClearLocalLogs}
+                className="ui-btn-danger"
+              >
+                <Trash2 className="h-4 w-4" />
+                清空本地日志
+              </button>
+            </div>
+
+            {backendError ? (
+              <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                {backendError}
+              </div>
+            ) : null}
+          </div>
         </div>
       ) : null}
-
-      <div className="mt-6 grid gap-4 xl:grid-cols-[0.85fr,1.15fr]">
-        <LogSection
-          title="前端本地日志"
-          emptyText="暂无本地诊断事件。"
-          rows={frontendPreview.map((event) => ({
-            key: event.id,
-            level: event.level,
-            category: event.category,
-            name: event.eventName,
-            requestId: event.sessionId,
-            createdAt: event.timestamp,
-            message: event.message,
-          }))}
-        />
-        <LogSection
-          title="后端 Operation Logs"
-          emptyText={
-            loadingBackendLogs ? "正在加载后端日志..." : "暂无后端诊断日志。"
-          }
-          rows={backendPreview.map((log) => ({
-            key: String(log.id),
-            level: log.level,
-            category: log.category,
-            name: log.event_name,
-            requestId: log.request_id,
-            createdAt: log.created_at,
-            message: log.message,
-          }))}
-        />
-      </div>
     </section>
   );
 };
 
-function LogSection({
-  title,
-  emptyText,
-  rows,
+function SummaryMetric({
+  label,
+  value,
 }: {
-  title: string;
-  emptyText: string;
-  rows: Array<{
-    key: string;
-    level: string;
-    category: string;
-    name: string;
-    requestId?: string | null;
-    createdAt: string;
-    message?: string | null;
-  }>;
+  label: string;
+  value: number | string;
 }) {
   return (
-    <div className="rounded-2xl border border-stone-200 bg-[#fcfbf8] p-4">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold text-stone-900">{title}</h3>
-        <span className="rounded-full border border-stone-200 bg-white px-2.5 py-1 text-[11px] text-stone-500">
-          {rows.length} 条预览
-        </span>
+    <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3">
+      <div className="text-xs font-medium text-stone-500">{label}</div>
+      <div className="mt-1 truncate text-lg font-semibold text-stone-900">
+        {value}
       </div>
-      {rows.length > 0 ? (
-        <div className="mt-3 space-y-2">
-          {rows.map((row) => (
-            <article
-              key={row.key}
-              className="rounded-2xl border border-stone-200 bg-white px-3 py-3 text-sm shadow-sm"
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full bg-stone-900 px-2.5 py-1 text-[11px] font-medium text-white">
-                  {row.level}
-                </span>
-                <span className="rounded-full border border-stone-200 bg-stone-50 px-2.5 py-1 text-[11px] text-stone-600">
-                  {row.category}
-                </span>
-                {row.requestId ? (
-                  <span className="rounded-full border border-stone-200 bg-white px-2.5 py-1 text-[11px] text-stone-500">
-                    {row.requestId}
-                  </span>
-                ) : null}
-              </div>
-              <div className="mt-2 break-all font-medium text-stone-900">
-                {row.name}
-              </div>
-              <div className="mt-1 text-xs text-stone-500">
-                {formatDisplayDate(row.createdAt)}
-              </div>
-              {row.message ? (
-                <p className="mt-2 line-clamp-2 text-sm leading-6 text-stone-600">
-                  {summarize(row.message)}
-                </p>
-              ) : null}
-            </article>
-          ))}
-        </div>
-      ) : (
-        <div className="mt-3 rounded-2xl border border-dashed border-stone-200 bg-white/70 px-4 py-8 text-center text-sm text-stone-500">
-          {emptyText}
-        </div>
-      )}
     </div>
   );
 }
 
-function summarize(value: string): string {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  return normalized.length > 120 ? `${normalized.slice(0, 120)}...` : normalized;
+function filterEventsByDate(
+  events: DiagnosticEvent[],
+  selectedDate: string,
+): DiagnosticEvent[] {
+  if (!selectedDate) {
+    return events;
+  }
+
+  return events.filter((event) => {
+    const eventDate = new Date(event.timestamp);
+    if (Number.isNaN(eventDate.getTime())) {
+      return false;
+    }
+    return formatDateInputValue(eventDate) === selectedDate;
+  });
 }
 
-function formatDisplayDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
+function getLocalDateRange(
+  selectedDate: string,
+): { startAt: string; endAt: string } | undefined {
+  if (!selectedDate) {
+    return undefined;
   }
-  return date.toLocaleString("zh-CN", { hour12: false });
+
+  const startAt = new Date(`${selectedDate}T00:00:00`);
+  if (Number.isNaN(startAt.getTime())) {
+    return undefined;
+  }
+
+  const endAt = new Date(startAt);
+  endAt.setDate(endAt.getDate() + 1);
+  return {
+    startAt: startAt.toISOString(),
+    endAt: endAt.toISOString(),
+  };
+}
+
+function formatDateInputValue(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+  ].join("-");
 }
 
 function formatFilenameTimestamp(date: Date): string {

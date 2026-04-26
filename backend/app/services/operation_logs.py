@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime, timedelta
 from types import FunctionType, MethodType
 from urllib.parse import urlsplit, urlunsplit
 
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.request_context import get_request_id
 from app.models import OperationLog
 
@@ -57,7 +60,9 @@ async def record_operation_log(
     entity_id: str | None = None,
     metadata: object | None = None,
     request_id: str | None = None,
+    now: datetime | None = None,
 ) -> OperationLog:
+    await cleanup_old_operation_logs(session, now=now)
     log = OperationLog(
         request_id=request_id if request_id is not None else get_request_id(),
         category=category,
@@ -71,6 +76,28 @@ async def record_operation_log(
     session.add(log)
     await session.flush()
     return log
+
+
+async def cleanup_old_operation_logs(
+    session: AsyncSession,
+    *,
+    retention_days: int | None = None,
+    now: datetime | None = None,
+) -> int:
+    resolved_retention_days = (
+        get_settings().operation_log_retention_days
+        if retention_days is None
+        else retention_days
+    )
+    if resolved_retention_days <= 0:
+        return 0
+
+    resolved_now = now or datetime.now(UTC)
+    cutoff = resolved_now - timedelta(days=resolved_retention_days)
+    result = await session.execute(
+        delete(OperationLog).where(OperationLog.created_at < cutoff),
+    )
+    return int(result.rowcount or 0)
 
 
 def _safe_json(value: object | None) -> object | None:

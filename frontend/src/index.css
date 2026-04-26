@@ -106,6 +106,52 @@ summary:active,
   transform: translateY(1px) scale(0.985);
 }
 
+button.collapsible-card-toggle:not(:disabled):active {
+  transform: none;
+}
+
+@keyframes collapsible-card-expand {
+  from {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+
+  to {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+}
+
+.collapsible-card-content {
+  display: grid;
+  overflow: hidden;
+  border-top: 1px solid rgb(245 245 244);
+}
+
+.collapsible-card-content[data-state="open"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  animation: collapsible-card-expand 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.collapsible-card-content[data-state="closed"] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 190ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 140ms ease-in;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .collapsible-card-content[data-state="open"] {
+    animation: none;
+  }
+
+  .collapsible-card-content[data-state="closed"] {
+    transition: none;
+  }
+}
+
 button:not(:disabled):hover,
 [data-interactive="button"]:hover {
   box-shadow: 0 10px 20px -22px rgb(41 37 36 / 0.28);

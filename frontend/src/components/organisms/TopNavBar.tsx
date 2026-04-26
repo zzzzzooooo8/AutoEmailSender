@@ -1,10 +1,6 @@
 import { Link, NavLink } from "react-router-dom";
 import clsx from "clsx";
-import {
-  BrainCircuit,
-  Mail,
-  UserCircle2,
-} from "lucide-react";
+import { BrainCircuit, Mail, UserCircle2 } from "lucide-react";
 import { TopBarSelectMenu } from "@/components/atoms/TopBarSelectMenu";
 import { useSelectionContext } from "@/context/SelectionContext";
 

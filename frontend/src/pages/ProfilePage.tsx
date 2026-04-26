@@ -5,10 +5,13 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
+  type TransitionEvent,
 } from "react";
 import { Link } from "react-router-dom";
 import clsx from "clsx";
 import {
+  ChevronDown,
   CheckCircle2,
   Download,
   ExternalLink,
@@ -52,6 +55,7 @@ import {
   testLLMProfile,
   updateLLMProfile,
 } from "@/lib/api/llmProfiles";
+import { getTestComposeThread } from "@/lib/api/testComposeApi";
 import {
   MATERIAL_TYPE_LABELS,
   type IdentityDTO,
@@ -105,6 +109,16 @@ type IdentityConnectionTestSummary = {
 };
 
 type MaterialFilterValue = IdentityMaterialType | "all";
+type ProfileSetupSectionId = "identity" | "materials" | "model" | "test";
+type ProfileSetupItem = {
+  id: ProfileSetupSectionId;
+  label: string;
+  title: string;
+  description: string;
+  completed: boolean;
+  statusDetail: string;
+};
+type TestComposeSetupStatus = "unchecked" | "loading" | "completed" | "pending";
 
 const DEFAULT_LLM_PROVIDER = "openai";
 const DEFAULT_LLM_TEMPERATURE = 0.2;
@@ -124,11 +138,36 @@ const TEMPLATE_PLACEHOLDERS = [
 ] as const;
 
 const PROFILE_SETUP_STAGES = [
-  "1. 发件身份",
-  "2. 材料与模板",
-  "3. 模型配置",
-  "4. 测试写信",
-] as const;
+  {
+    id: "identity",
+    label: "1. 发件身份",
+    title: "发件身份",
+    description: "配置发件邮箱、SMTP 和 IMAP。",
+  },
+  {
+    id: "materials",
+    label: "2. 材料与模板",
+    title: "材料与模板",
+    description: "准备默认模板和常用材料。",
+  },
+  {
+    id: "model",
+    label: "3. 模型配置",
+    title: "模型配置",
+    description: "配置可用模型并测试连接。",
+  },
+  {
+    id: "test",
+    label: "4. 测试写信",
+    title: "测试写信",
+    description: "保存配置后，发送一封测试邮件。",
+  },
+] as const satisfies ReadonlyArray<{
+  id: ProfileSetupSectionId;
+  label: string;
+  title: string;
+  description: string;
+}>;
 
 const createEmptyIdentityForm = (): IdentityFormState => ({
   name: "",
@@ -317,6 +356,81 @@ const renderFieldLabel = (label: string, required = false) => (
     <span>{label}</span>
   </span>
 );
+
+function ProfileSetupSection({
+  sectionId,
+  title,
+  description,
+  badge,
+  open,
+  renderContent,
+  onToggle,
+  onExitComplete,
+  sectionRef,
+  children,
+}: {
+  sectionId: ProfileSetupSectionId;
+  title: string;
+  description: string;
+  badge: ReactNode;
+  open: boolean;
+  renderContent: boolean;
+  onToggle: () => void;
+  onExitComplete: () => void;
+  sectionRef: (element: HTMLElement | null) => void;
+  children: ReactNode;
+}) {
+  const handleContentTransitionEnd = (
+    event: TransitionEvent<HTMLDivElement>,
+  ) => {
+    if (open || event.propertyName !== "grid-template-rows") {
+      return;
+    }
+    onExitComplete();
+  };
+
+  return (
+    <section
+      ref={sectionRef}
+      className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm"
+    >
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={`${sectionId}-setup-content`}
+        onClick={onToggle}
+        className="collapsible-card-toggle flex w-full items-center justify-between gap-4 px-6 py-5 text-left transition hover:bg-stone-50 active:bg-stone-50"
+      >
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-xl font-semibold text-stone-900">{title}</h2>
+            {badge}
+          </div>
+          <p className="mt-2 text-sm leading-6 text-stone-600">
+            {description}
+          </p>
+        </div>
+        <ChevronDown
+          className={clsx(
+            "h-5 w-5 shrink-0 text-stone-500 transition-transform",
+            open ? "rotate-180" : "rotate-0",
+          )}
+        />
+      </button>
+
+      {renderContent ? (
+        <div
+          id={`${sectionId}-setup-content`}
+          data-state={open ? "open" : "closed"}
+          onTransitionEnd={handleContentTransitionEnd}
+          className="collapsible-card-content"
+        >
+          <div className="min-h-0 px-6 pb-6">{children}</div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
 
 const formatFileSize = (sizeBytes: number) => {
   if (sizeBytes < 1024) {
@@ -1427,9 +1541,35 @@ export const ProfilePage = () => {
   >(null);
   const [optimisticMaterial, setOptimisticMaterial] =
     useState<IdentityMaterialDTO | null>(null);
+  const [openSetupSections, setOpenSetupSections] = useState<
+    Record<ProfileSetupSectionId, boolean>
+  >({
+    identity: false,
+    materials: false,
+    model: false,
+    test: false,
+  });
+  const [renderedSetupSections, setRenderedSetupSections] = useState<
+    Record<ProfileSetupSectionId, boolean>
+  >({
+    identity: false,
+    materials: false,
+    model: false,
+    test: false,
+  });
+  const [testComposeSetupStatus, setTestComposeSetupStatus] =
+    useState<TestComposeSetupStatus>("unchecked");
   const identityNameInputRef = useRef<HTMLInputElement | null>(null);
   const llmNameInputRef = useRef<HTMLInputElement | null>(null);
   const identityEditorIdRef = useRef<EditorId>(null);
+  const setupSectionRefs = useRef<
+    Record<ProfileSetupSectionId, HTMLElement | null>
+  >({
+    identity: null,
+    materials: null,
+    model: null,
+    test: null,
+  });
   const templateSubjectRef = useRef("");
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
 
@@ -1446,6 +1586,50 @@ export const ProfilePage = () => {
 
   const getActionErrorMessage = (error: unknown, fallbackMessage: string) =>
     error instanceof Error ? error.message : fallbackMessage;
+  const setSetupSectionRef = useCallback(
+    (sectionId: ProfileSetupSectionId, element: HTMLElement | null) => {
+      setupSectionRefs.current[sectionId] = element;
+    },
+    [],
+  );
+  const toggleSetupSection = useCallback((sectionId: ProfileSetupSectionId) => {
+    setRenderedSetupSections((previous) => ({
+      ...previous,
+      [sectionId]: true,
+    }));
+    setOpenSetupSections((previous) => ({
+      ...previous,
+      [sectionId]: !previous[sectionId],
+    }));
+  }, []);
+  const openAndScrollToSetupSection = useCallback(
+    (sectionId: ProfileSetupSectionId) => {
+      setRenderedSetupSections((previous) => ({
+        ...previous,
+        [sectionId]: true,
+      }));
+      setOpenSetupSections((previous) => ({
+        ...previous,
+        [sectionId]: true,
+      }));
+      window.requestAnimationFrame(() => {
+        setupSectionRefs.current[sectionId]?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      });
+    },
+    [],
+  );
+  const handleSetupSectionExitComplete = useCallback(
+    (sectionId: ProfileSetupSectionId) => {
+      setRenderedSetupSections((previous) => ({
+        ...previous,
+        [sectionId]: false,
+      }));
+    },
+    [],
+  );
 
   const applyIdentityEditorState = useCallback(
     (nextEditor: IdentityDTO | "new") => {
@@ -1606,6 +1790,122 @@ export const ProfilePage = () => {
         : editingIdentity.current_primary_material_id,
     };
   }, [editingIdentity, optimisticMaterial]);
+  const setupIdentity =
+    displayIdentity ??
+    editingIdentity ??
+    selectedIdentity ??
+    defaultIdentity ??
+    identities[0] ??
+    null;
+  const setupLlmProfile =
+    selectedLlmProfile ?? defaultLLMProfile ?? llmProfiles[0] ?? null;
+  const setupHasTemplate = Boolean(
+    setupIdentity?.outreach_template_subject?.trim() &&
+      (setupIdentity.outreach_template_body_text?.trim() ||
+        setupIdentity.outreach_template_body_html?.trim()),
+  );
+  const setupHasMaterial = Boolean(
+    setupIdentity?.current_primary_material || setupIdentity?.materials.length,
+  );
+  const setupItems = useMemo<ProfileSetupItem[]>(() => {
+    const hasIdentity = Boolean(setupIdentity);
+    const hasLlmProfile = Boolean(setupLlmProfile);
+    const materialsCompleted = setupHasTemplate && setupHasMaterial;
+    const testComposeCompleted = testComposeSetupStatus === "completed";
+    const testComposeStatusDetail =
+      testComposeSetupStatus === "loading"
+        ? "正在检查测试写信记录"
+        : testComposeCompleted
+          ? "已发送测试邮件"
+          : hasIdentity && hasLlmProfile
+            ? "待发送测试邮件确认"
+            : "待选择身份和模型";
+    const materialStatusDetail = !setupIdentity
+      ? "待保存身份后上传材料"
+      : materialsCompleted
+        ? "默认模板和材料已准备"
+        : !setupHasTemplate && !setupHasMaterial
+          ? "待填写默认模板并上传材料"
+          : !setupHasTemplate
+            ? "待填写默认模板"
+            : "待上传材料";
+
+    return PROFILE_SETUP_STAGES.map((stage) => {
+      if (stage.id === "identity") {
+        return {
+          ...stage,
+          completed: hasIdentity,
+          statusDetail: hasIdentity
+            ? `已保存身份：${getIdentityProfileName(setupIdentity!)}`
+            : "待创建发件身份",
+        };
+      }
+      if (stage.id === "materials") {
+        return {
+          ...stage,
+          completed: materialsCompleted,
+          statusDetail: materialStatusDetail,
+        };
+      }
+      if (stage.id === "model") {
+        return {
+          ...stage,
+          completed: hasLlmProfile,
+          statusDetail: hasLlmProfile
+            ? `已保存模型：${setupLlmProfile!.name}`
+            : "待保存模型配置",
+        };
+      }
+      return {
+        ...stage,
+        completed: testComposeCompleted,
+        statusDetail: testComposeStatusDetail,
+      };
+    });
+  }, [
+    setupHasMaterial,
+    setupHasTemplate,
+    setupIdentity,
+    setupLlmProfile,
+    testComposeSetupStatus,
+  ]);
+
+  useEffect(() => {
+    if (!selectedIdentityId || !selectedLlmProfileId) {
+      setTestComposeSetupStatus("unchecked");
+      return;
+    }
+
+    let ignore = false;
+
+    const loadTestComposeStatus = async () => {
+      setTestComposeSetupStatus("loading");
+      try {
+        const thread = await getTestComposeThread(
+          selectedIdentityId,
+          selectedLlmProfileId,
+        );
+        if (ignore) {
+          return;
+        }
+        setTestComposeSetupStatus(
+          thread.history.some((message) => message.status === "sent")
+            ? "completed"
+            : "pending",
+        );
+      } catch {
+        if (!ignore) {
+          setTestComposeSetupStatus("pending");
+        }
+      }
+    };
+
+    void loadTestComposeStatus();
+
+    return () => {
+      ignore = true;
+    };
+  }, [selectedIdentityId, selectedLlmProfileId]);
 
   useEffect(() => {
     if (!editingIdentity) {
@@ -2083,6 +2383,22 @@ export const ProfilePage = () => {
       )}
     </div>
   );
+  const setIdentitySetupSectionRef = useCallback(
+    (element: HTMLElement | null) => setSetupSectionRef("identity", element),
+    [setSetupSectionRef],
+  );
+  const setMaterialsSetupSectionRef = useCallback(
+    (element: HTMLElement | null) => setSetupSectionRef("materials", element),
+    [setSetupSectionRef],
+  );
+  const setModelSetupSectionRef = useCallback(
+    (element: HTMLElement | null) => setSetupSectionRef("model", element),
+    [setSetupSectionRef],
+  );
+  const setTestSetupSectionRef = useCallback(
+    (element: HTMLElement | null) => setSetupSectionRef("test", element),
+    [setSetupSectionRef],
+  );
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-8">
@@ -2122,35 +2438,65 @@ export const ProfilePage = () => {
                 新用户上手流程
               </span>
             </div>
-            <div className="mt-4 flex flex-wrap gap-3">
-              {PROFILE_SETUP_STAGES.map((stage) => (
-                <span
-                  key={stage}
-                  className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 shadow-sm"
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {setupItems.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => openAndScrollToSetupSection(item.id)}
+                  className={clsx(
+                    "rounded-2xl border bg-white px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary/20",
+                    item.completed
+                      ? "border-emerald-200"
+                      : "border-amber-200",
+                  )}
                 >
-                  {stage}
-                </span>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-semibold text-stone-900">
+                      {item.label}
+                    </span>
+                    <span
+                      className={clsx(
+                        "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium",
+                        item.completed
+                          ? "bg-emerald-100 text-emerald-700"
+                          : "bg-amber-100 text-amber-700",
+                      )}
+                    >
+                      {item.completed ? (
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                      ) : (
+                        <XCircle className="h-3.5 w-3.5" />
+                      )}
+                      {item.completed ? "已完成" : "待完成"}
+                    </span>
+                  </div>
+                  <div className="mt-2 text-xs leading-5 text-stone-500">
+                    {item.statusDetail}
+                  </div>
+                </button>
               ))}
             </div>
           </section>
 
-          <section className="rounded-3xl border border-stone-200 bg-white p-6 shadow-sm">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-semibold text-stone-900">
-                  发件身份
-                </h2>
-                <p className="mt-2 text-sm leading-6 text-stone-600">
-                  配置发件邮箱、SMTP 和 IMAP。
-                </p>
-              </div>
+          <ProfileSetupSection
+            sectionId="identity"
+            title="发件身份"
+            description="配置发件邮箱、SMTP 和 IMAP。"
+            open={openSetupSections.identity}
+            renderContent={renderedSetupSections.identity}
+            onToggle={() => toggleSetupSection("identity")}
+            onExitComplete={() => handleSetupSectionExitComplete("identity")}
+            sectionRef={setIdentitySetupSectionRef}
+            badge={
               <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs text-stone-600">
                 默认身份：
                 {defaultIdentity
                   ? getIdentityProfileName(defaultIdentity)
                   : "未设置"}
               </span>
-            </div>
+            }
+          >
 
             <div className="mt-5 rounded-3xl border border-stone-200 bg-[#fcfbf8] p-4">
               <div className="grid gap-4 lg:grid-cols-[1.2fr,0.8fr]">
@@ -2326,22 +2672,23 @@ export const ProfilePage = () => {
                 />
               </div>
             ) : null}
-          </section>
+          </ProfileSetupSection>
 
-          <section className="rounded-3xl border border-stone-200 bg-white p-6 shadow-sm">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-semibold text-stone-900">
-                  材料与模板
-                </h2>
-                <p className="mt-2 text-sm leading-6 text-stone-600">
-                  准备默认模板和常用材料。
-                </p>
-              </div>
+          <ProfileSetupSection
+            sectionId="materials"
+            title="材料与模板"
+            description="准备默认模板和常用材料。"
+            open={openSetupSections.materials}
+            renderContent={renderedSetupSections.materials}
+            onToggle={() => toggleSetupSection("materials")}
+            onExitComplete={() => handleSetupSectionExitComplete("materials")}
+            sectionRef={setMaterialsSetupSectionRef}
+            badge={
               <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs text-stone-600">
                 任务准备
               </span>
-            </div>
+            }
+          >
 
             <div className="mt-6">
               <OutreachTemplateSummaryCard
@@ -2367,22 +2714,23 @@ export const ProfilePage = () => {
                 创建并保存发件身份后，可上传材料。
               </div>
             ) : null}
-          </section>
+          </ProfileSetupSection>
 
-          <section className="rounded-3xl border border-stone-200 bg-white p-6 shadow-sm">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-semibold text-stone-900">
-                  模型配置
-                </h2>
-                <p className="mt-2 text-sm leading-6 text-stone-600">
-                  配置可用模型并测试连接。
-                </p>
-              </div>
+          <ProfileSetupSection
+            sectionId="model"
+            title="模型配置"
+            description="配置可用模型并测试连接。"
+            open={openSetupSections.model}
+            renderContent={renderedSetupSections.model}
+            onToggle={() => toggleSetupSection("model")}
+            onExitComplete={() => handleSetupSectionExitComplete("model")}
+            sectionRef={setModelSetupSectionRef}
+            badge={
               <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs text-stone-600">
                 默认模型：{defaultLLMProfile?.name ?? "未设置"}
               </span>
-            </div>
+            }
+          >
 
             <div className="mt-5 rounded-3xl border border-stone-200 bg-[#fcfbf8] p-4">
               <div className="grid gap-4 lg:grid-cols-[1.2fr,0.8fr]">
@@ -2685,22 +3033,23 @@ export const ProfilePage = () => {
                 </div>
               </div>
             )}
-          </section>
+          </ProfileSetupSection>
 
-          <section className="rounded-3xl border border-stone-200 bg-white p-6 shadow-sm">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-semibold text-stone-900">
-                  保存与测试写信
-                </h2>
-                <p className="mt-2 text-sm leading-6 text-stone-600">
-                  保存配置后，发送一封测试邮件。
-                </p>
-              </div>
+          <ProfileSetupSection
+            sectionId="test"
+            title="测试写信"
+            description="保存配置后，发送一封测试邮件。"
+            open={openSetupSections.test}
+            renderContent={renderedSetupSections.test}
+            onToggle={() => toggleSetupSection("test")}
+            onExitComplete={() => handleSetupSectionExitComplete("test")}
+            sectionRef={setTestSetupSectionRef}
+            badge={
               <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs text-stone-600">
                 完成前检查
               </span>
-            </div>
+            }
+          >
 
             <div className="mt-6 grid gap-6 lg:grid-cols-[1fr,0.95fr] lg:items-start">
               <div>
@@ -2739,7 +3088,7 @@ export const ProfilePage = () => {
             <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50/80 px-4 py-4 text-sm leading-6 text-emerald-800">
               接着去「导师管理」导入导师，再回首页创建任务。
             </div>
-          </section>
+          </ProfileSetupSection>
 
           <DiagnosticLogPanel />
         </div>

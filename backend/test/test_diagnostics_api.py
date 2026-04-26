@@ -151,6 +151,36 @@ class DiagnosticsApiTests(unittest.TestCase):
         self.assertEqual(lower_response.status_code, 422)
         self.assertEqual(upper_response.status_code, 422)
 
+    def test_list_operation_logs_filters_by_created_at_range(self) -> None:
+        expected_id = self._seed_log(
+            category="crawler",
+            event_name="crawl.today",
+            created_at=datetime(2026, 4, 26, 10, 0, tzinfo=UTC),
+        )
+        self._seed_log(
+            category="crawler",
+            event_name="crawl.yesterday",
+            created_at=datetime(2026, 4, 25, 23, 59, tzinfo=UTC),
+        )
+        self._seed_log(
+            category="crawler",
+            event_name="crawl.tomorrow",
+            created_at=datetime(2026, 4, 27, 0, 0, tzinfo=UTC),
+        )
+
+        response = self.client.get(
+            "/api/diagnostics/operation-logs",
+            params={
+                "start_at": "2026-04-26T00:00:00Z",
+                "end_at": "2026-04-27T00:00:00Z",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        payload = response.json()
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual([item["id"] for item in payload["items"]], [expected_id])
+
     def test_export_operation_logs_returns_timestamp_filters_and_default_limit(self) -> None:
         self._seed_logs(
             [
@@ -191,8 +221,37 @@ class DiagnosticsApiTests(unittest.TestCase):
                 "request_id": None,
                 "entity_type": "email_task",
                 "entity_id": "task-1",
+                "start_at": None,
+                "end_at": None,
             },
         )
+
+    def test_export_operation_logs_filters_by_created_at_range(self) -> None:
+        expected_id = self._seed_log(
+            category="mail",
+            event_name="email.today",
+            created_at=datetime(2026, 4, 26, 12, 0, tzinfo=UTC),
+        )
+        self._seed_log(
+            category="mail",
+            event_name="email.other_day",
+            created_at=datetime(2026, 4, 27, 0, 0, tzinfo=UTC),
+        )
+
+        response = self.client.get(
+            "/api/diagnostics/export",
+            params={
+                "start_at": "2026-04-26T00:00:00Z",
+                "end_at": "2026-04-27T00:00:00Z",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        payload = response.json()
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual([item["id"] for item in payload["items"]], [expected_id])
+        self.assertEqual(payload["filters"]["start_at"], "2026-04-26T00:00:00+00:00")
+        self.assertEqual(payload["filters"]["end_at"], "2026-04-27T00:00:00+00:00")
 
     def test_operation_log_metadata_field_maps_from_event_metadata(self) -> None:
         log_id = self._seed_log(

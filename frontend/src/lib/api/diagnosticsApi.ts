@@ -23,6 +23,8 @@ export interface OperationLogListParams
   request_id?: string;
   entity_type?: string;
   entity_id?: string;
+  start_at?: string;
+  end_at?: string;
 }
 
 export interface OperationLogListResponseDTO {

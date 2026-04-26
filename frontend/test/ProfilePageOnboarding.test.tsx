@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProfilePage } from "@/pages/ProfilePage";
@@ -6,6 +6,7 @@ import { updateIdentity } from "@/lib/api/identities";
 import type { IdentityDTO, LLMProfileDTO } from "@/types";
 
 const mockedUseSelectionContext = vi.hoisted(() => vi.fn());
+const mockedGetTestComposeThread = vi.hoisted(() => vi.fn());
 
 vi.mock("@/context/SelectionContext", () => ({
   useSelectionContext: mockedUseSelectionContext,
@@ -89,6 +90,10 @@ vi.mock("@/lib/api/llmProfiles", () => ({
   updateLLMProfile: vi.fn(),
 }));
 
+vi.mock("@/lib/api/testComposeApi", () => ({
+  getTestComposeThread: mockedGetTestComposeThread,
+}));
+
 const selectedIdentity: IdentityDTO = {
   id: 1,
   name: "旧身份名称",
@@ -153,10 +158,34 @@ const expectToAppearBefore = (first: HTMLElement, second: HTMLElement) => {
 describe("ProfilePage onboarding", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.HTMLElement.prototype.scrollIntoView = vi.fn();
     vi.mocked(updateIdentity).mockResolvedValue({
       ...selectedIdentity,
       outreach_template_body_text: "富文本更新",
       outreach_template_body_html: "<p>富文本更新</p>",
+    });
+    mockedGetTestComposeThread.mockResolvedValue({
+      identity: {
+        id: selectedIdentity.id,
+        name: selectedIdentity.name,
+        profile_name: selectedIdentity.profile_name,
+        sender_name: selectedIdentity.sender_name,
+        email_address: selectedIdentity.email_address,
+      },
+      llm_profile: {
+        id: selectedLlmProfile.id,
+        name: selectedLlmProfile.name,
+        provider: selectedLlmProfile.provider,
+        model_name: selectedLlmProfile.model_name,
+      },
+      material_options: [],
+      draft: {
+        subject: null,
+        body_text: "",
+        body_html: null,
+        selected_material_ids: [],
+      },
+      history: [],
     });
     mockedUseSelectionContext.mockReturnValue({
       identities: [selectedIdentity],
@@ -172,7 +201,11 @@ describe("ProfilePage onboarding", () => {
     });
   });
 
-  it("shows the onboarding recommendation, sequence labels, and next-step hint", async () => {
+  const openSetupSection = (name: string) => {
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${name}`) }));
+  };
+
+  it("shows setup recommendations with completion state", async () => {
     renderPage();
 
     expect(
@@ -183,19 +216,108 @@ describe("ProfilePage onboarding", () => {
         "按顺序完成身份、材料、模型和测试写信。",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText("1. 发件身份")).toBeInTheDocument();
-    expect(screen.getByText("2. 材料与模板")).toBeInTheDocument();
-    expect(screen.getByText("3. 模型配置")).toBeInTheDocument();
-    expect(screen.getByText("4. 测试写信")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /1\. 发件身份/ })).toHaveTextContent(
+      "已完成",
+    );
     expect(
-      screen.getByText(
-        "接着去「导师管理」导入导师，再回首页创建任务。",
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByLabelText("诊断日志面板")).toBeInTheDocument();
+      screen.getByRole("button", { name: /2\. 材料与模板/ }),
+    ).toHaveTextContent("待完成");
+    expect(screen.getByRole("button", { name: /3\. 模型配置/ })).toHaveTextContent(
+      "已完成",
+    );
+    expect(screen.getByRole("button", { name: /4\. 测试写信/ })).toHaveTextContent(
+      "待完成",
+    );
   });
 
-  it("renders the three setup sections before the final save and test section", () => {
+  it("marks test compose as completed when the current thread has sent history", async () => {
+    mockedGetTestComposeThread.mockResolvedValueOnce({
+      identity: {
+        id: selectedIdentity.id,
+        name: selectedIdentity.name,
+        profile_name: selectedIdentity.profile_name,
+        sender_name: selectedIdentity.sender_name,
+        email_address: selectedIdentity.email_address,
+      },
+      llm_profile: {
+        id: selectedLlmProfile.id,
+        name: selectedLlmProfile.name,
+        provider: selectedLlmProfile.provider,
+        model_name: selectedLlmProfile.model_name,
+      },
+      material_options: [],
+      draft: {
+        subject: null,
+        body_text: "",
+        body_html: null,
+        selected_material_ids: [],
+      },
+      history: [
+        {
+          id: 1,
+          recipient_email: selectedIdentity.email_address,
+          subject: "测试主题",
+          content: "测试正文",
+          content_html: "<p>测试正文</p>",
+          status: "sent",
+          rfc_message_id: "<test@example.com>",
+          failure_summary: null,
+          created_at: "2026-04-23T08:00:00Z",
+        },
+      ],
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /4\. 测试写信/ })).toHaveTextContent(
+        "已完成",
+      );
+    });
+    expect(screen.getByText("已发送测试邮件")).toBeInTheDocument();
+  });
+
+  it("keeps setup sections collapsed by default and opens them from recommendations", async () => {
+    renderPage();
+
+    expect(screen.getByRole("button", { name: /^发件身份/ })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.queryByLabelText("配置名称")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /1\. 发件身份/ }));
+
+    expect(screen.getByRole("button", { name: /^发件身份/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(await screen.findByLabelText("配置名称")).toHaveValue("博士申请配置");
+    expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+  });
+
+  it("animates setup section content while opening and closing", async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: /^发件身份/ }));
+
+    const content = await screen.findByLabelText("配置名称").then(() =>
+      document.getElementById("identity-setup-content"),
+    );
+
+    expect(content).toHaveClass("collapsible-card-content");
+    expect(content).toHaveAttribute("data-state", "open");
+
+    fireEvent.click(screen.getByRole("button", { name: /^发件身份/ }));
+
+    expect(content).toHaveAttribute("data-state", "closed");
+
+    fireEvent.transitionEnd(content!, { propertyName: "grid-template-rows" });
+
+    expect(document.getElementById("identity-setup-content")).not.toBeInTheDocument();
+  });
+
+  it("renders the three setup sections before the final test section", () => {
     renderPage();
 
     const identitySection = screen.getByRole("heading", { name: "发件身份" });
@@ -203,7 +325,7 @@ describe("ProfilePage onboarding", () => {
       name: "材料与模板",
     });
     const modelSection = screen.getByRole("heading", { name: "模型配置" });
-    const finishSection = screen.getByRole("heading", { name: "保存与测试写信" });
+    const finishSection = screen.getByRole("heading", { name: "测试写信" });
 
     expectToAppearBefore(identitySection, materialsSection);
     expectToAppearBefore(materialsSection, modelSection);
@@ -212,6 +334,7 @@ describe("ProfilePage onboarding", () => {
 
   it("shows separate profile name and sender name fields", async () => {
     renderPage();
+    openSetupSection("发件身份");
 
     expect(await screen.findByLabelText("配置名称")).toHaveValue("博士申请配置");
     expect(screen.getByLabelText("发件人姓名")).toHaveValue("王同学");
@@ -221,6 +344,8 @@ describe("ProfilePage onboarding", () => {
 
   it("renders the material entry and connection testing area for an existing identity", () => {
     renderPage();
+    openSetupSection("材料与模板");
+    openSetupSection("发件身份");
 
     expect(screen.getByText("材料库")).toBeInTheDocument();
     expect(
@@ -237,6 +362,7 @@ describe("ProfilePage onboarding", () => {
 
   it("opens the material library modal from the reordered materials section", async () => {
     renderPage();
+    openSetupSection("材料与模板");
 
     fireEvent.click(screen.getByRole("button", { name: "打开材料库" }));
 
@@ -250,8 +376,9 @@ describe("ProfilePage onboarding", () => {
 
   it("shows the test compose entry inside the final save section", () => {
     renderPage();
+    openSetupSection("测试写信");
 
-    const finishSection = screen.getByRole("heading", { name: "保存与测试写信" });
+    const finishSection = screen.getByRole("heading", { name: "测试写信" });
     const entryLink = screen.getByRole("link", { name: "进入测试写信页" });
 
     expect(screen.getByText("保存配置")).toBeInTheDocument();
@@ -268,6 +395,8 @@ describe("ProfilePage onboarding", () => {
 
   it("uses the shared rich text editor for the default outreach template modal", async () => {
     renderPage();
+    openSetupSection("材料与模板");
+    openSetupSection("测试写信");
 
     fireEvent.click(screen.getByRole("button", { name: "打开默认值编辑" }));
 

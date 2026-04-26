@@ -32,6 +32,8 @@ async def list_operation_logs(
     request_id: str | None = None,
     entity_type: str | None = None,
     entity_id: str | None = None,
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
     session: AsyncSession = Depends(get_async_session),
 ) -> OperationLogListResponse:
     filters = _build_operation_log_filters(
@@ -41,6 +43,8 @@ async def list_operation_logs(
         request_id=request_id,
         entity_type=entity_type,
         entity_id=entity_id,
+        start_at=start_at,
+        end_at=end_at,
     )
     total = await _count_operation_logs(session, filters)
     logs = list(
@@ -70,6 +74,8 @@ async def export_operation_logs(
     request_id: str | None = None,
     entity_type: str | None = None,
     entity_id: str | None = None,
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
     session: AsyncSession = Depends(get_async_session),
 ) -> OperationLogExportResponse:
     filter_values = {
@@ -79,8 +85,19 @@ async def export_operation_logs(
         "request_id": request_id,
         "entity_type": entity_type,
         "entity_id": entity_id,
+        "start_at": start_at.isoformat() if start_at else None,
+        "end_at": end_at.isoformat() if end_at else None,
     }
-    filters = _build_operation_log_filters(**filter_values)
+    filters = _build_operation_log_filters(
+        level=level,
+        category=category,
+        event_name=event_name,
+        request_id=request_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        start_at=start_at,
+        end_at=end_at,
+    )
     total = await _count_operation_logs(session, filters)
     logs = list(
         (
@@ -108,6 +125,8 @@ def _build_operation_log_filters(
     request_id: str | None,
     entity_type: str | None,
     entity_id: str | None,
+    start_at: datetime | None,
+    end_at: datetime | None,
 ) -> list[object]:
     filters: list[object] = []
     if level is not None:
@@ -122,6 +141,10 @@ def _build_operation_log_filters(
         filters.append(OperationLog.entity_type == entity_type)
     if entity_id is not None:
         filters.append(OperationLog.entity_id == entity_id)
+    if start_at is not None:
+        filters.append(OperationLog.created_at >= start_at)
+    if end_at is not None:
+        filters.append(OperationLog.created_at < end_at)
     return filters
 
 

@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -43,6 +44,7 @@ class OperationLogTests(unittest.TestCase):
         get_settings.cache_clear()
         os.environ.pop("DATABASE_URL", None)
         os.environ.pop("ENABLE_BACKGROUND_WORKERS", None)
+        os.environ.pop("OPERATION_LOG_RETENTION_DAYS", None)
         self.temp_dir.cleanup()
 
     def test_record_operation_log_uses_request_context_id(self) -> None:
@@ -207,6 +209,93 @@ class OperationLogTests(unittest.TestCase):
         self.assertNotIn("sk-secret", message)
         self.assertNotIn("smtp-secret", message)
         self.assertIn("status=failed", message)
+
+    def test_record_operation_log_removes_logs_older_than_retention_days(self) -> None:
+        from app.core.database import get_session_factory
+        from app.models import OperationLog
+        from app.services.operation_logs import record_operation_log
+
+        now = datetime(2026, 4, 26, 12, 0, tzinfo=UTC)
+
+        async def scenario() -> list[str]:
+            async with get_session_factory()() as session:
+                session.add_all(
+                    [
+                        OperationLog(
+                            category="backend",
+                            event_name="old.event",
+                            created_at=now - timedelta(days=31),
+                        ),
+                        OperationLog(
+                            category="backend",
+                            event_name="recent.event",
+                            created_at=now - timedelta(days=5),
+                        ),
+                    ],
+                )
+                await session.commit()
+
+            async with get_session_factory()() as session:
+                await record_operation_log(
+                    session,
+                    category="backend",
+                    event_name="new.event",
+                    now=now,
+                )
+                await session.commit()
+
+            async with get_session_factory()() as session:
+                return list(
+                    (
+                        await session.execute(
+                            select(OperationLog.event_name).order_by(OperationLog.event_name),
+                        )
+                    ).scalars(),
+                )
+
+        self.assertEqual(asyncio.run(scenario()), ["new.event", "recent.event"])
+
+    def test_operation_log_retention_can_be_disabled_by_env(self) -> None:
+        os.environ["OPERATION_LOG_RETENTION_DAYS"] = "0"
+
+        from app.core.config import get_settings
+        from app.core.database import get_session_factory
+        from app.models import OperationLog
+        from app.services.operation_logs import record_operation_log
+
+        get_settings.cache_clear()
+        now = datetime(2026, 4, 26, 12, 0, tzinfo=UTC)
+
+        async def scenario() -> list[str]:
+            async with get_session_factory()() as session:
+                session.add(
+                    OperationLog(
+                        category="backend",
+                        event_name="old.event",
+                        created_at=now - timedelta(days=365),
+                    ),
+                )
+                await session.commit()
+
+            async with get_session_factory()() as session:
+                await record_operation_log(
+                    session,
+                    category="backend",
+                    event_name="new.event",
+                    now=now,
+                )
+                await session.commit()
+
+            async with get_session_factory()() as session:
+                return list(
+                    (
+                        await session.execute(
+                            select(OperationLog.event_name).order_by(OperationLog.event_name),
+                        )
+                    ).scalars(),
+                )
+
+        self.assertEqual(asyncio.run(scenario()), ["new.event", "old.event"])
 
     def _run_alembic_upgrade(self) -> None:
         result = subprocess.run(

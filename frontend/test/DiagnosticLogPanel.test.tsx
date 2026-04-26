@@ -61,6 +61,31 @@ function seedLocalDiagnostics() {
   });
 }
 
+function todayInputValue() {
+  const date = new Date();
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+  ].join("-");
+}
+
+function expectDateRangeParams(extra: Record<string, unknown> = {}) {
+  return expect.objectContaining({
+    start_at: expect.any(String),
+    end_at: expect.any(String),
+    ...extra,
+  });
+}
+
+async function expandPanel() {
+  fireEvent.click(screen.getByRole("button", { name: /开发诊断日志/ }));
+  await waitFor(() => {
+    expect(listOperationLogs).toHaveBeenCalled();
+  });
+}
+
 describe("DiagnosticLogPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -88,40 +113,74 @@ describe("DiagnosticLogPanel", () => {
     vi.unstubAllGlobals();
   });
 
-  it("显示本地日志数量和后端日志条目", async () => {
+  it("默认折叠，不展示日志预览，也不主动加载后端日志", () => {
     seedLocalDiagnostics();
 
     render(<DiagnosticLogPanel />);
 
-    expect(screen.getByText("本地日志 2 条")).toBeInTheDocument();
-    expect(screen.getByText("api.request_failed")).toBeInTheDocument();
-    expect(await screen.findByText("crawl_job.create_failed")).toBeInTheDocument();
-    expect(screen.getByText("req-101")).toBeInTheDocument();
-    expect(listOperationLogs).toHaveBeenCalledWith({ limit: 20 });
+    expect(screen.getByRole("button", { name: /开发诊断日志/ })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.getByText("本地 2")).toBeInTheDocument();
+    expect(screen.queryByText("本地事件")).not.toBeInTheDocument();
+    expect(screen.queryByText("api.request_failed")).not.toBeInTheDocument();
+    expect(screen.queryByText("crawl_job.create_failed")).not.toBeInTheDocument();
+    expect(listOperationLogs).not.toHaveBeenCalled();
   });
 
-  it("后端加载失败时仍显示本地日志和错误提示", async () => {
+  it("点击后展开控制区并按默认今天加载后端日志", async () => {
     seedLocalDiagnostics();
+
+    render(<DiagnosticLogPanel />);
+    await expandPanel();
+
+    expect(screen.getByRole("button", { name: /开发诊断日志/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.getByLabelText("导出日期")).toHaveValue(todayInputValue());
+    expect(screen.getByText("本地事件")).toBeInTheDocument();
+    expect(screen.getByText("后端日志")).toBeInTheDocument();
+    expect(screen.queryByText("api.request_failed")).not.toBeInTheDocument();
+    expect(screen.queryByText("crawl_job.create_failed")).not.toBeInTheDocument();
+    expect(listOperationLogs).toHaveBeenCalledWith(
+      expectDateRangeParams({ limit: 20 }),
+    );
+  });
+
+  it("展开和收起诊断内容时使用过渡容器", async () => {
+    render(<DiagnosticLogPanel />);
+    await expandPanel();
+
+    const content = document.getElementById("diagnostic-log-panel-content");
+    expect(content).toHaveClass("collapsible-card-content");
+    expect(content).toHaveAttribute("data-state", "open");
+
+    fireEvent.click(screen.getByRole("button", { name: /开发诊断日志/ }));
+
+    expect(content).toHaveAttribute("data-state", "closed");
+    fireEvent.transitionEnd(content!, { propertyName: "grid-template-rows" });
+
+    expect(document.getElementById("diagnostic-log-panel-content")).not.toBeInTheDocument();
+  });
+
+  it("后端加载失败时只显示不可用提示", async () => {
     vi.mocked(listOperationLogs).mockRejectedValue(new Error("backend down"));
 
     render(<DiagnosticLogPanel />);
+    fireEvent.click(screen.getByRole("button", { name: /开发诊断日志/ }));
 
-    expect(screen.getByText("本地日志 2 条")).toBeInTheDocument();
-    expect(screen.getByText("api.request_failed")).toBeInTheDocument();
     expect(await screen.findByText("后端诊断日志暂时不可用")).toBeInTheDocument();
   });
 
-  it("修改后端日志筛选条件时会带上对应参数重新加载", async () => {
+  it("修改日期和筛选条件时会带上对应参数重新加载", async () => {
     render(<DiagnosticLogPanel />);
+    await expandPanel();
 
-    await screen.findByText("crawl_job.create_failed");
-    expect(
-      screen.getByRole("option", { name: "warning（后端）" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("option", { name: "crawler（后端）" }),
-    ).toBeInTheDocument();
-
+    fireEvent.change(screen.getByLabelText("导出日期"), {
+      target: { value: "2026-04-25" },
+    });
     fireEvent.change(screen.getByLabelText("Level"), {
       target: { value: "warning" },
     });
@@ -130,31 +189,35 @@ describe("DiagnosticLogPanel", () => {
     });
 
     await waitFor(() =>
-      expect(listOperationLogs).toHaveBeenCalledWith({
-        limit: 20,
-        level: "warning",
-        category: "crawler",
-      }),
+      expect(listOperationLogs).toHaveBeenCalledWith(
+        expectDateRangeParams({
+          limit: 20,
+          level: "warning",
+          category: "crawler",
+        }),
+      ),
     );
   });
 
-  it("点击导出会生成合并 JSON 并触发下载", async () => {
+  it("点击导出会按选中日期生成合并 JSON 并触发下载", async () => {
     seedLocalDiagnostics();
     const clickSpy = vi
       .spyOn(HTMLAnchorElement.prototype, "click")
       .mockImplementation(() => undefined);
 
     render(<DiagnosticLogPanel />);
+    await expandPanel();
 
-    await screen.findByText("crawl_job.create_failed");
     fireEvent.click(screen.getByRole("button", { name: "导出诊断日志" }));
 
     await waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(1));
     const blob = vi.mocked(URL.createObjectURL).mock.calls[0][0] as Blob;
     const payload = JSON.parse(await blob.text());
 
+    expect(exportOperationLogs).toHaveBeenCalledWith(expectDateRangeParams());
     expect(payload).toMatchObject({
       exportedAt: expect.any(String),
+      selectedDate: todayInputValue(),
       frontend: {
         events: expect.arrayContaining([
           expect.objectContaining({ eventName: "api.request_failed" }),
@@ -185,8 +248,8 @@ describe("DiagnosticLogPanel", () => {
     });
 
     render(<DiagnosticLogPanel />);
+    await expandPanel();
 
-    await screen.findByText("crawl_job.create_failed");
     fireEvent.click(screen.getByRole("button", { name: "导出诊断日志" }));
 
     await waitFor(() => {
@@ -211,8 +274,9 @@ describe("DiagnosticLogPanel", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
 
     render(<DiagnosticLogPanel />);
+    await expandPanel();
 
-    expect(screen.getByText("本地日志 2 条")).toBeInTheDocument();
+    expect(screen.getByText("本地 2")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "清空本地日志" }));
 
     expect(getDiagnosticEvents()).toEqual([
@@ -221,7 +285,7 @@ describe("DiagnosticLogPanel", () => {
         eventName: "diagnostics.local_logs_cleared",
       }),
     ]);
-    expect(screen.getByText("本地日志 1 条")).toBeInTheDocument();
+    expect(screen.getByText("本地 1")).toBeInTheDocument();
     expect(notificationApi.notifySuccess).toHaveBeenCalledWith("本地诊断日志已清空");
   });
 });

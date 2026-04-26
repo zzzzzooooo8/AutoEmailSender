@@ -28,6 +28,7 @@ npm run dev
 | `LLM_REQUEST_TIMEOUT_SECONDS` | `90` | LLM 请求超时 |
 | `SMTP_SEND_TIMEOUT_SECONDS` | `30` | SMTP 超时 |
 | `IMAP_LOOKBACK_HOURS` | `72` | IMAP 回溯窗口 |
+| `OPERATION_LOG_RETENTION_DAYS` | `30` | 后端诊断日志保留天数，设置为 `0` 可关闭自动清理 |
 | `ENABLE_BACKGROUND_WORKERS` | `true` | 测试时可关闭 |
 
 ## 3. 首次配置建议

@@ -22,6 +22,7 @@ from app.core.config import get_settings
 from app.core.database import dispose_engine, get_session_factory
 from app.core.migrations import ensure_database_schema
 from app.core.request_context import RequestContextMiddleware
+from app.services.operation_logs import cleanup_old_operation_logs
 from app.services.runtime_manager import RuntimeManager
 
 
@@ -29,6 +30,9 @@ from app.services.runtime_manager import RuntimeManager
 async def lifespan(app: FastAPI):
     runtime_manager: RuntimeManager | None = None
     await ensure_database_schema()
+    async with get_session_factory()() as session:
+        await cleanup_old_operation_logs(session)
+        await session.commit()
     if get_settings().enable_background_workers:
         runtime_manager = RuntimeManager(get_session_factory())
         await runtime_manager.start()
