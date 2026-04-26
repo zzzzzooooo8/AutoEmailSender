@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import subprocess
-import sys
 import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
@@ -12,42 +10,64 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 
-BACKEND_DIR = Path(__file__).resolve().parents[1]
-
-
 class DiagnosticsApiTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.temp_dir.name) / "diagnostics_api_test.db"
-        os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{self.db_path.as_posix()}"
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.temp_dir = tempfile.TemporaryDirectory()
+        cls.db_path = Path(cls.temp_dir.name) / "diagnostics_api_test.db"
+        os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{cls.db_path.as_posix()}"
         os.environ["ENABLE_BACKGROUND_WORKERS"] = "0"
-        self._run_alembic_upgrade()
 
         from app.core.config import get_settings
         from app.core.database import dispose_engine, get_engine, get_session_factory
+
+        get_settings.cache_clear()
+        if get_engine.cache_info().currsize:
+            asyncio.run(dispose_engine())
+        get_session_factory.cache_clear()
+        get_settings.cache_clear()
+        asyncio.run(cls._create_operation_logs_schema())
+
         from main import create_app
+        cls.client = TestClient(create_app())
 
-        get_settings.cache_clear()
-        if get_engine.cache_info().currsize:
-            asyncio.run(dispose_engine())
-        get_session_factory.cache_clear()
-        get_settings.cache_clear()
+    @classmethod
+    async def _create_operation_logs_schema(cls) -> None:
+        from app.core.database import get_engine
+        from app.models.operation_log import OperationLog
 
-        self.client = TestClient(create_app())
+        async with get_engine().begin() as connection:
+            await connection.run_sync(OperationLog.metadata.create_all)
 
-    def tearDown(self) -> None:
-        self.client.close()
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.client.close()
 
-        from app.core.config import get_settings
         from app.core.database import dispose_engine, get_engine, get_session_factory
 
         if get_engine.cache_info().currsize:
             asyncio.run(dispose_engine())
         get_session_factory.cache_clear()
+
+        from app.core.config import get_settings
+
         get_settings.cache_clear()
         os.environ.pop("DATABASE_URL", None)
         os.environ.pop("ENABLE_BACKGROUND_WORKERS", None)
-        self.temp_dir.cleanup()
+        cls.temp_dir.cleanup()
+
+    def setUp(self) -> None:
+        asyncio.run(self._clear_operation_logs())
+
+    async def _clear_operation_logs(self) -> None:
+        from sqlalchemy import delete
+
+        from app.core.database import get_session_factory
+        from app.models import OperationLog
+
+        async with get_session_factory()() as session:
+            await session.execute(delete(OperationLog))
+            await session.commit()
 
     def test_list_operation_logs_orders_by_created_at_and_id_with_total(self) -> None:
         base_time = datetime(2026, 4, 26, 8, 30, tzinfo=UTC)
@@ -132,16 +152,21 @@ class DiagnosticsApiTests(unittest.TestCase):
         self.assertEqual(upper_response.status_code, 422)
 
     def test_export_operation_logs_returns_timestamp_filters_and_default_limit(self) -> None:
-        for index in range(501):
-            self._seed_log(
-                request_id="export-req" if index % 2 == 0 else "other-req",
-                category="mail",
-                event_name="email.exported",
-                level="info",
-                entity_type="email_task",
-                entity_id="task-1",
-                created_at=datetime(2026, 4, 26, 9, 0, tzinfo=UTC) + timedelta(seconds=index),
-            )
+        self._seed_logs(
+            [
+                {
+                    "request_id": "export-req" if index % 2 == 0 else "other-req",
+                    "category": "mail",
+                    "event_name": "email.exported",
+                    "level": "info",
+                    "entity_type": "email_task",
+                    "entity_id": "task-1",
+                    "created_at": datetime(2026, 4, 26, 9, 0, tzinfo=UTC)
+                    + timedelta(seconds=index),
+                }
+                for index in range(501)
+            ],
+        )
 
         response = self.client.get(
             "/api/diagnostics/export",
@@ -220,22 +245,31 @@ class DiagnosticsApiTests(unittest.TestCase):
 
         return asyncio.run(_seed())
 
-    def _run_alembic_upgrade(self) -> None:
-        result = subprocess.run(
-            [sys.executable, "-m", "alembic", "upgrade", "head"],
-            cwd=BACKEND_DIR,
-            env=os.environ.copy(),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            self.fail(
-                "Alembic migration failed.\n"
-                f"stdout:\n{result.stdout}\n"
-                f"stderr:\n{result.stderr}",
-            )
+    def _seed_logs(self, rows: list[dict[str, object]]) -> None:
+        async def _seed() -> None:
+            from app.core.database import get_session_factory
+            from app.models import OperationLog
 
+            async with get_session_factory()() as session:
+                session.add_all(
+                    [
+                        OperationLog(
+                            request_id=row.get("request_id"),
+                            category=str(row.get("category", "backend")),
+                            event_name=str(row.get("event_name", "operation.completed")),
+                            level=str(row.get("level", "info")),
+                            message=row.get("message", "operation completed"),
+                            entity_type=row.get("entity_type"),
+                            entity_id=row.get("entity_id"),
+                            event_metadata=row.get("event_metadata"),
+                            created_at=row.get("created_at", datetime.now(UTC)),
+                        )
+                        for row in rows
+                    ],
+                )
+                await session.commit()
+
+        asyncio.run(_seed())
 
 if __name__ == "__main__":
     unittest.main()
