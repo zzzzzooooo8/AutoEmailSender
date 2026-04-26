@@ -179,6 +179,33 @@ describe("DiagnosticLogPanel", () => {
     );
   });
 
+  it("导出失败时会记录本地诊断事件", async () => {
+    vi.mocked(URL.createObjectURL).mockImplementation(() => {
+      throw new Error("blob failed");
+    });
+
+    render(<DiagnosticLogPanel />);
+
+    await screen.findByText("crawl_job.create_failed");
+    fireEvent.click(screen.getByRole("button", { name: "导出诊断日志" }));
+
+    await waitFor(() => {
+      expect(notificationApi.notifyError).toHaveBeenCalledWith(
+        "导出诊断日志失败",
+        "blob failed",
+      );
+    });
+    expect(getDiagnosticEvents()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "user_action",
+          eventName: "diagnostics.export_failed",
+          message: "blob failed",
+        }),
+      ]),
+    );
+  });
+
   it("清空本地日志会调用清理逻辑并更新数量", async () => {
     seedLocalDiagnostics();
     vi.spyOn(window, "confirm").mockReturnValue(true);

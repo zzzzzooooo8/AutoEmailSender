@@ -182,4 +182,37 @@ describe("CreateTaskPage copy", () => {
       ]),
     );
   });
+
+  it("records failed batch task creation as a user action", async () => {
+    mockedCreateBatchTask.mockRejectedValue(new Error("create failed"));
+
+    renderPage();
+
+    await screen.findByText("发信模式");
+    fireEvent.click(screen.getByText("创建任务").closest("button")!);
+
+    await waitFor(() => {
+      expect(mockedCreateBatchTask).toHaveBeenCalled();
+    });
+
+    expect(getDiagnosticEvents()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "user_action",
+          eventName: "tasks.batch_create_submitted",
+          data: {
+            selectedCount: 1,
+            identityId: 1,
+            llmProfileId: 1,
+            scheduleType: "immediate",
+          },
+        }),
+        expect.objectContaining({
+          category: "user_action",
+          eventName: "tasks.batch_create_failed",
+          message: "create failed",
+        }),
+      ]),
+    );
+  });
 });

@@ -3,7 +3,12 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TasksPage } from "@/pages/TasksPage";
 import { clearDiagnosticEvents, getDiagnosticEvents } from "@/lib/diagnostics";
-import { listBatchTasks } from "@/lib/api/batchTasksApi";
+import {
+  listBatchTasks,
+  pauseBatchTask,
+  resumeBatchTask,
+  stopBatchTask,
+} from "@/lib/api/batchTasksApi";
 import {
   cancelCrawlJob,
   getCrawlJobEvents,
@@ -64,6 +69,31 @@ const runningJob = {
   latest_event_message: "正在分析教师列表",
 } as const;
 
+const makeBatchTask = (
+  status: "running" | "paused" | "stopped" | "completed",
+) => ({
+  id: 31,
+  name: "测试批量任务",
+  status,
+  schedule_type: "immediate",
+  window_start_time: null,
+  window_end_time: null,
+  emails_per_window: null,
+  email_subject: "测试主题",
+  target_count: 3,
+  completed_count: 1,
+  identity_id: 1,
+  llm_profile_id: 2,
+  pending_generation_count: 1,
+  review_required_count: 1,
+  scheduled_count: 0,
+  sent_count: 1,
+  failed_count: 0,
+  replied_count: 0,
+  created_at: "2026-04-26T09:00:00Z",
+  updated_at: "2026-04-26T09:10:00Z",
+} as const);
+
 const renderPage = () =>
   render(
     <MemoryRouter>
@@ -81,6 +111,9 @@ describe("TasksPage crawler jobs tab", () => {
     });
     confirm.mockResolvedValue(true);
     vi.mocked(listBatchTasks).mockResolvedValue([]);
+    vi.mocked(pauseBatchTask).mockResolvedValue(makeBatchTask("paused"));
+    vi.mocked(resumeBatchTask).mockResolvedValue(makeBatchTask("running"));
+    vi.mocked(stopBatchTask).mockResolvedValue(makeBatchTask("stopped"));
     vi.mocked(listCrawlJobs).mockResolvedValue([runningJob]);
     vi.mocked(cancelCrawlJob).mockResolvedValue(runningJob);
     vi.mocked(listCrawlPages).mockResolvedValue([
@@ -150,6 +183,120 @@ describe("TasksPage crawler jobs tab", () => {
     expect(screen.getByRole("button", { name: "查看日志" })).toBeEnabled();
   });
 
+  it("records pause batch task submission and success as user actions", async () => {
+    vi.mocked(listBatchTasks).mockResolvedValue([makeBatchTask("running")]);
+
+    renderPage();
+
+    const pauseButton = await screen.findByRole("button", { name: "暂停" });
+    fireEvent.click(pauseButton);
+
+    await waitFor(() => {
+      expect(pauseBatchTask).toHaveBeenCalledWith(31);
+    });
+
+    expect(getDiagnosticEvents()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "user_action",
+          eventName: "tasks.batch_task_pause_submitted",
+          data: { taskId: 31, action: "pause" },
+        }),
+        expect.objectContaining({
+          category: "user_action",
+          eventName: "tasks.batch_task_pause_succeeded",
+          data: { taskId: 31, action: "pause" },
+        }),
+      ]),
+    );
+  });
+
+  it("records resume batch task submission and success as user actions", async () => {
+    vi.mocked(listBatchTasks).mockResolvedValue([makeBatchTask("paused")]);
+
+    renderPage();
+
+    const resumeButton = await screen.findByRole("button", { name: "继续" });
+    fireEvent.click(resumeButton);
+
+    await waitFor(() => {
+      expect(resumeBatchTask).toHaveBeenCalledWith(31);
+    });
+
+    expect(getDiagnosticEvents()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "user_action",
+          eventName: "tasks.batch_task_resume_submitted",
+          data: { taskId: 31, action: "resume" },
+        }),
+        expect.objectContaining({
+          category: "user_action",
+          eventName: "tasks.batch_task_resume_succeeded",
+          data: { taskId: 31, action: "resume" },
+        }),
+      ]),
+    );
+  });
+
+  it("records stop batch task submission and success as user actions", async () => {
+    vi.mocked(listBatchTasks).mockResolvedValue([makeBatchTask("running")]);
+
+    renderPage();
+
+    const stopButton = await screen.findByRole("button", { name: "中止" });
+    fireEvent.click(stopButton);
+
+    await waitFor(() => {
+      expect(stopBatchTask).toHaveBeenCalledWith(31);
+    });
+
+    expect(getDiagnosticEvents()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "user_action",
+          eventName: "tasks.batch_task_stop_submitted",
+          data: { taskId: 31, action: "stop" },
+        }),
+        expect.objectContaining({
+          category: "user_action",
+          eventName: "tasks.batch_task_stop_succeeded",
+          data: { taskId: 31, action: "stop" },
+        }),
+      ]),
+    );
+  });
+
+  it("records failed pause batch task action as a user action", async () => {
+    vi.mocked(listBatchTasks).mockResolvedValue([makeBatchTask("running")]);
+    vi.mocked(pauseBatchTask).mockRejectedValue(new Error("pause failed"));
+
+    renderPage();
+
+    const pauseButton = await screen.findByRole("button", { name: "暂停" });
+    fireEvent.click(pauseButton);
+
+    await waitFor(() => {
+      expect(pauseBatchTask).toHaveBeenCalledWith(31);
+    });
+
+    expect(getDiagnosticEvents()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "user_action",
+          eventName: "tasks.batch_task_pause_submitted",
+          data: { taskId: 31, action: "pause" },
+        }),
+        expect.objectContaining({
+          category: "user_action",
+          eventName: "tasks.batch_task_pause_failed",
+          data: { taskId: 31, action: "pause" },
+          message: "pause failed",
+        }),
+      ]),
+    );
+  });
+
   it("opens and closes the crawl job log dialog", async () => {
     renderPage();
 
@@ -209,6 +356,37 @@ describe("TasksPage crawler jobs tab", () => {
           category: "user_action",
           eventName: "tasks.crawl_job_cancel_succeeded",
           data: { jobId: 7 },
+        }),
+      ]),
+    );
+  });
+
+  it("records failed crawl job cancellation as a user action", async () => {
+    vi.mocked(cancelCrawlJob).mockRejectedValue(new Error("cancel failed"));
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "教师抓取" }));
+
+    const cancelButton = await screen.findByRole("button", { name: "取消抓取" });
+    fireEvent.click(cancelButton);
+
+    await waitFor(() => {
+      expect(cancelCrawlJob).toHaveBeenCalledWith(7);
+    });
+
+    expect(getDiagnosticEvents()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "user_action",
+          eventName: "tasks.crawl_job_cancel_submitted",
+          data: { jobId: 7 },
+        }),
+        expect.objectContaining({
+          category: "user_action",
+          eventName: "tasks.crawl_job_cancel_failed",
+          data: { jobId: 7 },
+          message: "cancel failed",
         }),
       ]),
     );
