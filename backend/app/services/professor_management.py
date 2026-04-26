@@ -5,9 +5,11 @@ import io
 import re
 from dataclasses import dataclass
 from typing import Any
+from zipfile import BadZipFile
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils.exceptions import InvalidFileException
 
 from app.schemas.professor import ProfessorUpsertPayload
 
@@ -180,7 +182,10 @@ def _parse_csv_rows(content: bytes) -> list[dict[str, Any]]:
 
 
 def _parse_xlsx_rows(content: bytes) -> list[dict[str, Any]]:
-    workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    try:
+        workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    except (BadZipFile, InvalidFileException, OSError) as error:
+        raise ValueError("XLSX 文件无法读取") from error
     sheet = workbook.active
     return _parse_tabular_rows(list(sheet.iter_rows(values_only=True)))
 

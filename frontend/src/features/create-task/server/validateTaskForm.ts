@@ -32,6 +32,13 @@ export const validateTaskForm = (data: CreateTaskFormData): ValidationResult => 
     if (!data.schedule.endTime) {
       errors.endTime = '请选择结束时间';
     }
+    if (
+      data.schedule.startTime &&
+      data.schedule.endTime &&
+      data.schedule.endTime <= data.schedule.startTime
+    ) {
+      errors.endTime = '结束时间必须晚于开始时间';
+    }
     if (!data.schedule.emailsToSend || data.schedule.emailsToSend <= 0) {
       errors.emailsToSend = '请输入要发送的邮件数量';
     }
