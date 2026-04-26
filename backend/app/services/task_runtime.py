@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -69,8 +69,9 @@ async def dispatch_due_tasks_once(
     limit: int = 10,
     *,
     now: datetime | None = None,
+    local_timezone: tzinfo | None = None,
 ) -> int:
-    now = now or datetime.now(UTC)
+    now_utc, local_now = _resolve_dispatch_clocks(now, local_timezone)
     if limit <= 0:
         return 0
 
@@ -95,7 +96,7 @@ async def dispatch_due_tasks_once(
                             ),
                             or_(
                                 EmailTask.scheduled_at.is_(None),
-                                EmailTask.scheduled_at <= now,
+                                EmailTask.scheduled_at <= now_utc,
                             ),
                             or_(
                                 BatchTask.id.is_(None),
@@ -120,7 +121,7 @@ async def dispatch_due_tasks_once(
                 if len(task_ids) >= limit:
                     break
                 batch_task = task.batch_task
-                if not _batch_task_allows_dispatch(batch_task, now):
+                if not _batch_task_allows_dispatch(batch_task, local_now):
                     continue
                 if (
                     batch_task is not None
@@ -129,7 +130,7 @@ async def dispatch_due_tasks_once(
                 ):
                     count = sent_counts.get(batch_task.id)
                     if count is None:
-                        count = await _batch_task_sent_count_on_date(session, batch_task.id, now)
+                        count = await _batch_task_sent_count_on_date(session, batch_task.id, local_now)
                     if count >= batch_task.emails_per_window:
                         sent_counts[batch_task.id] = count
                         continue
@@ -144,6 +145,15 @@ async def dispatch_due_tasks_once(
         await dispatch_email_task(session_factory, task_id)
         processed += 1
     return processed
+
+
+def _resolve_dispatch_clocks(
+    now: datetime | None,
+    local_timezone: tzinfo | None,
+) -> tuple[datetime, datetime]:
+    now_utc = now.astimezone(UTC) if now is not None else datetime.now(UTC)
+    resolved_timezone = local_timezone or datetime.now().astimezone().tzinfo or UTC
+    return now_utc, now_utc.astimezone(resolved_timezone)
 
 
 def _batch_task_allows_dispatch(batch_task: BatchTask | None, now: datetime) -> bool:
@@ -164,10 +174,12 @@ def _batch_task_allows_dispatch(batch_task: BatchTask | None, now: datetime) -> 
 async def _batch_task_sent_count_on_date(
     session: AsyncSession,
     batch_task_id: int,
-    now: datetime,
+    local_now: datetime,
 ) -> int:
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    end = start + timedelta(days=1)
+    start_local = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_local = start_local + timedelta(days=1)
+    start_utc = start_local.astimezone(UTC)
+    end_utc = end_local.astimezone(UTC)
     return int(
         await session.scalar(
             select(func.count(EmailTask.id)).where(
@@ -178,8 +190,8 @@ async def _batch_task_sent_count_on_date(
                         EmailTaskStatus.REPLY_DETECTED.value,
                     ],
                 ),
-                EmailTask.sent_at >= start,
-                EmailTask.sent_at < end,
+                EmailTask.sent_at >= start_utc,
+                EmailTask.sent_at < end_utc,
             ),
         )
         or 0
