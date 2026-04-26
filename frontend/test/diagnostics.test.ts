@@ -145,6 +145,93 @@ describe("diagnostics", () => {
     });
   });
 
+  it("uses safe placeholders when data serialization itself throws", async () => {
+    const { getDiagnosticEvents, recordDiagnosticEvent } = await loadDiagnostics();
+    const throwingGetter = {
+      safe: "kept",
+      get broken() {
+        throw new Error("getter exploded");
+      },
+    };
+    const throwingProxy = new Proxy(
+      {},
+      {
+        ownKeys() {
+          throw new Error("proxy exploded");
+        },
+      },
+    );
+
+    expect(() =>
+      recordDiagnosticEvent({
+        level: "warn",
+        category: "system",
+        eventName: "serialization.failed",
+        data: {
+          invalidDate: new Date("not-a-date"),
+          throwingGetter,
+          throwingProxy,
+        },
+      }),
+    ).not.toThrow();
+
+    const [event] = getDiagnosticEvents();
+    expect(event.data).toEqual({
+      invalidDate: "[Invalid Date]",
+      throwingGetter: { safe: "kept", broken: "[Unserializable]" },
+      throwingProxy: "[Unserializable]",
+    });
+  });
+
+  it("redacts sensitive fields and strips URL query and hash values", async () => {
+    const { getDiagnosticEvents, recordDiagnosticEvent } = await loadDiagnostics();
+
+    recordDiagnosticEvent({
+      level: "info",
+      category: "api",
+      eventName: "api.request",
+      data: {
+        token: "secret-token",
+        accessToken: "secret-access",
+        refreshToken: "secret-refresh",
+        apiKey: "secret-key",
+        password: "secret-password",
+        secret: "secret-value",
+        authorization: "Bearer secret",
+        cookie: "sid=secret",
+        smtpPassword: "smtp-secret",
+        nested: {
+          url: "https://example.com/callback?token=secret#session",
+          safe: "visible",
+        },
+        response: new Response("ok", { status: 200 }),
+      },
+    });
+
+    const [event] = getDiagnosticEvents();
+    expect(event.data).toMatchObject({
+      token: "[Redacted]",
+      accessToken: "[Redacted]",
+      refreshToken: "[Redacted]",
+      apiKey: "[Redacted]",
+      password: "[Redacted]",
+      secret: "[Redacted]",
+      authorization: "[Redacted]",
+      cookie: "[Redacted]",
+      smtpPassword: "[Redacted]",
+      nested: {
+        url: "https://example.com/callback",
+        safe: "visible",
+      },
+    });
+    const serializedData = JSON.stringify(event.data);
+    expect(serializedData).not.toContain("secret-token");
+    expect(serializedData).not.toContain("secret-access");
+    expect(serializedData).not.toContain("Bearer secret");
+    expect(serializedData).not.toContain("?token=secret");
+    expect(serializedData).not.toContain("#session");
+  });
+
   it("exports formatted JSON with metadata", async () => {
     const { exportDiagnosticEvents, getDiagnosticSessionId, recordDiagnosticEvent } = await loadDiagnostics();
     recordDiagnosticEvent({

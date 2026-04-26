@@ -32,6 +32,19 @@ interface DiagnosticExport {
 const diagnosticsStorageKey = "auto-email-diagnostics:v1";
 const diagnosticsSessionStorageKey = "auto-email-diagnostics-session:v1";
 const maxStoredEvents = 500;
+const redactedValue = "[Redacted]";
+const unserializableValue = "[Unserializable]";
+const sensitiveKeys = new Set([
+  "token",
+  "accesstoken",
+  "refreshtoken",
+  "apikey",
+  "password",
+  "secret",
+  "authorization",
+  "cookie",
+  "smtppassword",
+]);
 
 let memoryEvents: DiagnosticEvent[] = [];
 let memorySessionId: string | undefined;
@@ -51,7 +64,7 @@ export function recordDiagnosticEvent(input: DiagnosticEventInput): DiagnosticEv
   }
 
   if (Object.prototype.hasOwnProperty.call(input, "data")) {
-    event.data = toJsonValue(input.data, new WeakSet<object>());
+    event.data = safeToJsonValue(input.data, new WeakSet<object>());
   }
 
   try {
@@ -168,9 +181,21 @@ function createId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function toJsonValue(value: unknown, seen: WeakSet<object>): JsonValue {
+function safeToJsonValue(value: unknown, seen: WeakSet<object>, key?: string): JsonValue {
+  try {
+    if (key && isSensitiveKey(key)) {
+      return redactedValue;
+    }
+
+    return toJsonValue(value, seen, key);
+  } catch {
+    return unserializableValue;
+  }
+}
+
+function toJsonValue(value: unknown, seen: WeakSet<object>, key?: string): JsonValue {
   if (value === null || typeof value === "string" || typeof value === "boolean") {
-    return value;
+    return typeof value === "string" ? sanitizeStringValue(value, key) : value;
   }
 
   if (typeof value === "number") {
@@ -191,8 +216,8 @@ function toJsonValue(value: unknown, seen: WeakSet<object>): JsonValue {
 
   if (value instanceof Error) {
     return {
-      name: value.name,
-      message: value.message,
+      name: safeToJsonValue(value.name, seen),
+      message: safeToJsonValue(value.message, seen),
     };
   }
 
@@ -203,11 +228,15 @@ function toJsonValue(value: unknown, seen: WeakSet<object>): JsonValue {
       status: value.status,
       statusText: value.statusText,
       type: value.type,
-      url: value.url,
+      url: stripUrlQueryAndHash(value.url),
     };
   }
 
   if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) {
+      return "[Invalid Date]";
+    }
+
     return value.toISOString();
   }
 
@@ -217,7 +246,7 @@ function toJsonValue(value: unknown, seen: WeakSet<object>): JsonValue {
     }
 
     seen.add(value);
-    const serializedItems = value.map((item) => toJsonValue(item, seen));
+    const serializedItems = value.map((item) => safeToJsonValue(item, seen));
     seen.delete(value);
     return serializedItems;
   }
@@ -229,12 +258,43 @@ function toJsonValue(value: unknown, seen: WeakSet<object>): JsonValue {
 
     seen.add(value);
     const serializedObject: { [key: string]: JsonValue } = {};
-    for (const [key, item] of Object.entries(value)) {
-      serializedObject[key] = toJsonValue(item, seen);
+    for (const key of Object.keys(value)) {
+      serializedObject[key] = safeToJsonValue(readObjectValue(value, key), seen, key);
     }
     seen.delete(value);
     return serializedObject;
   }
 
   return String(value);
+}
+
+function readObjectValue(value: object, key: string): unknown {
+  try {
+    return (value as Record<string, unknown>)[key];
+  } catch {
+    return unserializableValue;
+  }
+}
+
+function isSensitiveKey(key: string): boolean {
+  return sensitiveKeys.has(key.toLowerCase().replace(/[^a-z0-9]/g, ""));
+}
+
+function sanitizeStringValue(value: string, key?: string): string {
+  if (key && key.toLowerCase().includes("url")) {
+    return stripUrlQueryAndHash(value);
+  }
+
+  return value;
+}
+
+function stripUrlQueryAndHash(value: string): string {
+  try {
+    const url = new URL(value);
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return value;
+  }
 }
