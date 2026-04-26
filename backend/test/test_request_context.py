@@ -85,6 +85,12 @@ class RequestContextTests(unittest.TestCase):
         self.assertEqual(response.headers["X-Request-ID"], request_id)
         self.assertIsNone(get_request_id())
 
+    def test_unhandled_exception_still_propagates_and_resets_context(self) -> None:
+        with self.assertRaises(RuntimeError):
+            self.client.get("/test/request-id-error", headers={"X-Request-ID": "service.error-2"})
+
+        self.assertIsNone(get_request_id())
+
 
 if __name__ == "__main__":
     unittest.main()

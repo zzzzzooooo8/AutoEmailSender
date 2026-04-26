@@ -69,5 +69,6 @@ class RequestContextMiddleware:
                 headers={REQUEST_ID_HEADER: request_id},
             )
             await response(scope, receive, send)
+            raise
         finally:
             _request_id_var.reset(token)
