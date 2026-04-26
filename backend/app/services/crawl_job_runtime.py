@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.faculty_crawler_agent import run_faculty_crawler_agent
 from app.models import CrawlJob, CrawlJobStatus, LLMProfile
+from app.services.crawl_job_events import normalize_agent_trace_event
 from app.services.crawler_tools import CrawlToolContext
 
 
@@ -116,8 +117,12 @@ async def _append_agent_trace(
         if job is None:
             return
 
+        normalized_event = normalize_agent_trace_event(event)
+        if not normalized_event.get("created_at"):
+            normalized_event["created_at"] = datetime.now(UTC).isoformat()
+
         trace = list(_normalize_trace(job.agent_trace))
-        trace.append(event)
+        trace.append(normalized_event)
         job.agent_trace = trace[-MAX_AGENT_TRACE_EVENTS:]
         job.updated_at = datetime.now(UTC)
         await session.commit()

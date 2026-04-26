@@ -63,6 +63,21 @@ class CrawlJobRead(BaseModel):
     updated_at: datetime
 
 
+class CrawlJobSummaryRead(CrawlJobRead):
+    page_count: int = 0
+    candidate_count: int = 0
+    latest_event_message: str | None = None
+
+
+class CrawlJobEventRead(BaseModel):
+    id: str
+    job_id: int
+    event_type: str
+    message: str
+    created_at: str | None
+    raw: dict[str, object] | None = None
+
+
 class CrawlPageRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

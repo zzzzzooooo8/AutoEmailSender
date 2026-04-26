@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
@@ -21,9 +21,12 @@ from app.schemas.crawl_job import (
     CrawlJobApprovePayload,
     CrawlJobApproveResult,
     CrawlJobCreatePayload,
+    CrawlJobEventRead,
     CrawlJobRead,
+    CrawlJobSummaryRead,
     CrawlPageRead,
 )
+from app.services.crawl_job_events import build_crawl_job_events, normalize_agent_trace_event
 from app.services.professor_management import is_valid_professor_email
 
 
@@ -50,11 +53,11 @@ async def create_crawl_job(
     return job
 
 
-@router.get("", response_model=list[CrawlJobRead])
+@router.get("", response_model=list[CrawlJobSummaryRead])
 async def list_crawl_jobs(
     session: AsyncSession = Depends(get_async_session),
-) -> list[CrawlJob]:
-    return list(
+) -> list[CrawlJobSummaryRead]:
+    jobs = list(
         (
             await session.execute(
                 select(CrawlJob)
@@ -63,6 +66,7 @@ async def list_crawl_jobs(
             )
         ).scalars(),
     )
+    return await _build_crawl_job_summaries(session, jobs)
 
 
 @router.patch("/candidates/{candidate_id}", response_model=CrawlCandidateRead)
@@ -93,12 +97,25 @@ async def update_crawl_candidate(
     return candidate
 
 
-@router.get("/{job_id}", response_model=CrawlJobRead)
+@router.get("/{job_id}", response_model=CrawlJobSummaryRead)
 async def get_crawl_job(
     job_id: int,
     session: AsyncSession = Depends(get_async_session),
-) -> CrawlJob:
-    return await _get_crawl_job_or_404(session, job_id)
+) -> CrawlJobSummaryRead:
+    job = await _get_crawl_job_or_404(session, job_id)
+    summaries = await _build_crawl_job_summaries(session, [job])
+    return summaries[0]
+
+
+@router.get("/{job_id}/events", response_model=list[CrawlJobEventRead])
+async def list_crawl_job_events(
+    job_id: int,
+    session: AsyncSession = Depends(get_async_session),
+) -> list[dict[str, object]]:
+    job = await _get_crawl_job_or_404(session, job_id)
+    pages = await _list_crawl_pages_for_job(session, job_id)
+    candidates = await _list_crawl_candidates_for_job(session, job_id)
+    return build_crawl_job_events(job, pages=pages, candidates=candidates)
 
 
 @router.get("/{job_id}/pages", response_model=list[CrawlPageRead])
@@ -107,6 +124,19 @@ async def list_crawl_pages(
     session: AsyncSession = Depends(get_async_session),
 ) -> list[CrawlPage]:
     await _get_crawl_job_or_404(session, job_id)
+    return await _list_crawl_pages_for_job(session, job_id)
+
+
+@router.get("/{job_id}/candidates", response_model=list[CrawlCandidateRead])
+async def list_crawl_candidates(
+    job_id: int,
+    session: AsyncSession = Depends(get_async_session),
+) -> list[CrawlCandidate]:
+    await _get_crawl_job_or_404(session, job_id)
+    return await _list_crawl_candidates_for_job(session, job_id)
+
+
+async def _list_crawl_pages_for_job(session: AsyncSession, job_id: int) -> list[CrawlPage]:
     return list(
         (
             await session.execute(
@@ -118,12 +148,7 @@ async def list_crawl_pages(
     )
 
 
-@router.get("/{job_id}/candidates", response_model=list[CrawlCandidateRead])
-async def list_crawl_candidates(
-    job_id: int,
-    session: AsyncSession = Depends(get_async_session),
-) -> list[CrawlCandidate]:
-    await _get_crawl_job_or_404(session, job_id)
+async def _list_crawl_candidates_for_job(session: AsyncSession, job_id: int) -> list[CrawlCandidate]:
     return list(
         (
             await session.execute(
@@ -239,3 +264,60 @@ async def _get_crawl_job_or_404(session: AsyncSession, job_id: int) -> CrawlJob:
     if job is None:
         raise HTTPException(status_code=404, detail="未找到抓取任务")
     return job
+
+
+async def _build_crawl_job_summaries(
+    session: AsyncSession,
+    jobs: list[CrawlJob],
+) -> list[CrawlJobSummaryRead]:
+    if not jobs:
+        return []
+
+    job_ids = [job.id for job in jobs]
+    page_counts = await _count_by_job_id(session, CrawlPage.job_id, job_ids)
+    candidate_counts = await _count_by_job_id(session, CrawlCandidate.job_id, job_ids)
+
+    return [
+        CrawlJobSummaryRead.model_validate(job).model_copy(
+            update={
+                "page_count": page_counts.get(job.id, 0),
+                "candidate_count": candidate_counts.get(job.id, 0),
+                "latest_event_message": _latest_event_message(job.agent_trace),
+            },
+        )
+        for job in jobs
+    ]
+
+
+async def _count_by_job_id(
+    session: AsyncSession,
+    job_id_column: object,
+    job_ids: list[int],
+) -> dict[int, int]:
+    rows = (
+        await session.execute(
+            select(job_id_column, func.count())
+            .where(job_id_column.in_(job_ids))
+            .group_by(job_id_column),
+        )
+    ).all()
+    return {int(job_id): int(count) for job_id, count in rows}
+
+
+def _latest_event_message(agent_trace: object) -> str | None:
+    if not isinstance(agent_trace, list):
+        return None
+
+    trace_events = [item for item in agent_trace if isinstance(item, dict)]
+    if not trace_events:
+        return None
+
+    latest_event = trace_events[-1]
+    summary = latest_event.get("summary")
+    if isinstance(summary, str) and summary.strip():
+        return summary.strip()
+
+    message = normalize_agent_trace_event(latest_event).get("message")
+    if isinstance(message, str) and message.strip():
+        return message.strip()
+    return None

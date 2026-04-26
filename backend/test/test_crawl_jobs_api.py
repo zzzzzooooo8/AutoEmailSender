@@ -98,14 +98,23 @@ class CrawlJobsApiTests(unittest.TestCase):
 
         self._seed_page_and_candidates(job["id"])
         self._set_job_status(job["id"], "needs_review")
+        self._set_job_trace(job["id"], [{"summary": "Agent 已完成入口页面分析"}])
 
         list_response = self.client.get("/api/crawl-jobs")
         self.assertEqual(list_response.status_code, 200)
-        self.assertEqual(list_response.json()[0]["id"], job["id"])
+        list_job = list_response.json()[0]
+        self.assertEqual(list_job["id"], job["id"])
+        self.assertEqual(list_job["page_count"], 1)
+        self.assertEqual(list_job["candidate_count"], 3)
+        self.assertEqual(list_job["latest_event_message"], "Agent 已完成入口页面分析")
 
         detail_response = self.client.get(f"/api/crawl-jobs/{job['id']}")
         self.assertEqual(detail_response.status_code, 200)
-        self.assertEqual(detail_response.json()["start_url"], "https://example.edu/faculty")
+        detail_job = detail_response.json()
+        self.assertEqual(detail_job["start_url"], "https://example.edu/faculty")
+        self.assertEqual(detail_job["page_count"], 1)
+        self.assertEqual(detail_job["candidate_count"], 3)
+        self.assertEqual(detail_job["latest_event_message"], "Agent 已完成入口页面分析")
 
         pages_response = self.client.get(f"/api/crawl-jobs/{job['id']}/pages")
         self.assertEqual(pages_response.status_code, 200)
@@ -151,6 +160,40 @@ class CrawlJobsApiTests(unittest.TestCase):
         cancel_completed_response = self.client.post(f"/api/crawl-jobs/{job['id']}/cancel")
         self.assertEqual(cancel_completed_response.status_code, 200)
         self.assertEqual(cancel_completed_response.json()["status"], "completed")
+
+    def test_crawl_job_events_include_status_trace_page_and_candidate_messages(self) -> None:
+        create_response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "llm_profile_id": None,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        job_id = create_response.json()["id"]
+        self._seed_page_and_candidates(job_id)
+        self._set_job_status(job_id, "needs_review")
+        self._set_job_trace(
+            job_id,
+            [
+                {
+                    "event_type": "tool_call",
+                    "message": "Agent 调用 crawl_page",
+                    "created_at": "2026-04-26T10:01:00+00:00",
+                },
+            ],
+        )
+
+        response = self.client.get(f"/api/crawl-jobs/{job_id}/events")
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        messages = [event["message"] for event in response.json()]
+        self.assertIn("任务进入待审核", messages)
+        self.assertIn("Agent 调用 crawl_page", messages)
+        self.assertIn("已抓取页面：Faculty", messages)
+        self.assertIn("发现候选导师：高分导师", messages)
 
     def test_approve_requires_candidate_ids(self) -> None:
         create_response = self.client.post(
@@ -317,6 +360,19 @@ class CrawlJobsApiTests(unittest.TestCase):
                 await session.commit()
 
         asyncio.run(_set_status())
+
+    def _set_job_trace(self, job_id: int, trace: list[dict[str, object]]) -> None:
+        async def _set_trace() -> None:
+            from app.core.database import get_session_factory
+            from app.models import CrawlJob
+
+            async with get_session_factory()() as session:
+                job = await session.get(CrawlJob, job_id)
+                self.assertIsNotNone(job)
+                job.agent_trace = trace
+                await session.commit()
+
+        asyncio.run(_set_trace())
 
     def _run_alembic_upgrade(self) -> None:
         env = os.environ.copy()
