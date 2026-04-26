@@ -161,8 +161,14 @@ function readEvents(): DiagnosticEvent[] {
 }
 
 function writeEvents(events: DiagnosticEvent[]): void {
+  const storage = getStorage("local");
+  if (!storage) {
+    memoryEvents = [...events];
+    return;
+  }
+
+  storage.setItem(diagnosticsStorageKey, JSON.stringify(events));
   memoryEvents = [...events];
-  getStorage("local")?.setItem(diagnosticsStorageKey, JSON.stringify(events));
 }
 
 function getStorage(type: "local" | "session"): Storage | undefined {
@@ -246,7 +252,7 @@ function toJsonValue(value: unknown, seen: WeakSet<object>, key?: string): JsonV
     }
 
     seen.add(value);
-    const serializedItems = value.map((item) => safeToJsonValue(item, seen));
+    const serializedItems = value.map((item) => safeToJsonValue(item, seen, key));
     seen.delete(value);
     return serializedItems;
   }
@@ -281,11 +287,15 @@ function isSensitiveKey(key: string): boolean {
 }
 
 function sanitizeStringValue(value: string, key?: string): string {
-  if (key && key.toLowerCase().includes("url")) {
+  if ((key && key.toLowerCase().includes("url")) || looksLikeUrl(value)) {
     return stripUrlQueryAndHash(value);
   }
 
   return value;
+}
+
+function looksLikeUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value);
 }
 
 function stripUrlQueryAndHash(value: string): string {

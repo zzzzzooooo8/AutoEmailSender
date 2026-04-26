@@ -103,16 +103,24 @@ describe("diagnostics", () => {
     vi.stubGlobal("sessionStorage", createThrowingStorage());
     const { exportDiagnosticEvents, getDiagnosticEvents, recordDiagnosticEvent } = await loadDiagnostics();
 
-    expect(() =>
-      recordDiagnosticEvent({
+    let recordedEvent: ReturnType<typeof recordDiagnosticEvent> | undefined;
+    expect(() => {
+      recordedEvent = recordDiagnosticEvent({
         level: "error",
         category: "frontend_error",
         eventName: "render.failed",
         data: { component: "Editor" },
-      }),
-    ).not.toThrow();
+      });
+    }).not.toThrow();
     expect(() => getDiagnosticEvents()).not.toThrow();
     expect(() => exportDiagnosticEvents()).not.toThrow();
+    const events = getDiagnosticEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      eventName: "render.failed",
+      data: { component: "Editor" },
+      sessionId: recordedEvent?.sessionId,
+    });
     expect(JSON.parse(exportDiagnosticEvents())).toMatchObject({
       sessionId: expect.any(String),
       events: expect.any(Array),
@@ -204,6 +212,7 @@ describe("diagnostics", () => {
           url: "https://example.com/callback?token=secret#session",
           safe: "visible",
         },
+        attempted_urls: ["https://api.example.com/v1?api_key=secret#debug"],
         response: new Response("ok", { status: 200 }),
       },
     });
@@ -223,13 +232,16 @@ describe("diagnostics", () => {
         url: "https://example.com/callback",
         safe: "visible",
       },
+      attempted_urls: ["https://api.example.com/v1"],
     });
     const serializedData = JSON.stringify(event.data);
     expect(serializedData).not.toContain("secret-token");
     expect(serializedData).not.toContain("secret-access");
     expect(serializedData).not.toContain("Bearer secret");
     expect(serializedData).not.toContain("?token=secret");
+    expect(serializedData).not.toContain("?api_key=secret");
     expect(serializedData).not.toContain("#session");
+    expect(serializedData).not.toContain("#debug");
   });
 
   it("exports formatted JSON with metadata", async () => {
