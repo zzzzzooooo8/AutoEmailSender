@@ -19,6 +19,7 @@ TOOL_MESSAGES = {
     "investigate_with_browser": "Agent 调用浏览器调查页面",
     "save_professor_candidates": "Agent 保存候选导师",
 }
+KNOWN_TOOL_NAMES = frozenset(TOOL_MESSAGES)
 GENERIC_AGENT_MESSAGES = {
     "Agent 事件：updates",
     "Agent 事件：dict",
@@ -178,12 +179,13 @@ def _find_nested_tool_name(value: object) -> str | None:
     if isinstance(value, str):
         match = TOOL_NAME_PATTERN.search(value)
         if match:
-            return match.group(1).strip()
+            name = match.group(1).strip()
+            return name if name in KNOWN_TOOL_NAMES else None
         return None
 
     if isinstance(value, dict):
         name = value.get("name")
-        if isinstance(name, str) and name.strip():
+        if isinstance(name, str) and name.strip() in KNOWN_TOOL_NAMES:
             return name.strip()
         for item in value.values():
             nested = _find_nested_tool_name(item)
@@ -195,7 +197,7 @@ def _find_nested_tool_name(value: object) -> str | None:
             if nested:
                 return nested
 
-    return _find_nested_name(value)
+    return None
 
 
 def _should_include_agent_trace_event(event: dict[str, object]) -> bool:

@@ -14,10 +14,13 @@ from app.models import CrawlCandidate, CrawlJob, CrawlJobStatus, CrawlPage
 from app.models.base import Base
 from app.services.crawler_tools import (
     CrawlToolContext,
+    CandidateEnrichmentPayload,
     PageSnapshot,
+    build_candidate_enrichment_prompt,
     ProfessorCandidatePayload,
     crawl_page_with_crawl4ai,
     crawl_page_with_http,
+    extract_candidate_profile_enrichment,
     is_allowed_crawl_url,
     is_safe_public_crawl_url,
     normalize_candidate_payload,
@@ -54,6 +57,20 @@ class CrawlerToolTests(unittest.TestCase):
                 is_allowed_crawl_url(
                     "https://cs.example.edu/faculty",
                     "https://evil.example.net/people/a",
+                )
+            )
+
+    def test_is_allowed_crawl_url_allows_same_registrable_domain_subdomains(self) -> None:
+        with patch(
+            "app.services.crawler_tools.socket.getaddrinfo",
+            return_value=[
+                (0, 0, 0, "", ("93.184.216.34", 443)),
+            ],
+        ):
+            self.assertTrue(
+                is_allowed_crawl_url(
+                    "https://cai.jxufe.edu.cn/lists/26.html",
+                    "https://cta.jxufe.edu.cn/home/teacherInfo/detail?uid=1",
                 )
             )
 
@@ -154,6 +171,45 @@ class CrawlerToolTests(unittest.TestCase):
         self.assertEqual(candidate.profile_url, "https://example.edu/faculty/zhang")
         self.assertEqual(candidate.source_url, "https://example.edu/faculty")
         self.assertEqual(candidate.confidence, 0.92)
+
+    def test_build_candidate_enrichment_prompt_contains_saved_candidate_context(self) -> None:
+        candidate = CrawlCandidate(
+            id=1,
+            job_id=1,
+            name="张三",
+            email="zhang@example.edu",
+            title="教授",
+            university="示例大学",
+            school="计算机学院",
+            department=None,
+            research_direction=None,
+            recent_papers=[],
+            profile_url="https://example.edu/faculty/zhang",
+            source_url=None,
+            confidence=0.0,
+        )
+
+        prompt = build_candidate_enrichment_prompt(candidate, "研究方向：大语言模型")
+
+        self.assertIn("张三", prompt)
+        self.assertIn("zhang@example.edu", prompt)
+        self.assertIn("https://example.edu/faculty/zhang", prompt)
+        self.assertIn("只补全缺失字段：department, research_direction, recent_papers", prompt)
+
+    def test_candidate_enrichment_payload_defaults(self) -> None:
+        payload = CandidateEnrichmentPayload.model_validate({})
+        self.assertIsNone(payload.department)
+        self.assertIsNone(payload.research_direction)
+        self.assertEqual(payload.recent_papers, [])
+
+    def test_extract_candidate_profile_enrichment_from_text(self) -> None:
+        updates = extract_candidate_profile_enrichment(
+            "院系：计算机科学系\n研究方向：大语言模型、智能体\n代表论文：Paper A；Paper B"
+        )
+
+        self.assertEqual(updates["department"], "计算机科学系")
+        self.assertEqual(updates["research_direction"], "大语言模型、智能体")
+        self.assertEqual(updates["recent_papers"], ["Paper A", "Paper B"])
 
 
 class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):

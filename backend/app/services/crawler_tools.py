@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 import ipaddress
+import re
 import socket
 from typing import Any, Literal
 from urllib.parse import urljoin, urlparse
@@ -16,12 +17,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.crawl_job import CrawlCandidate, CrawlJob, CrawlJobStatus, CrawlPage
 from app.services.html_text import html_to_text
+from app.services.professor_management import normalize_professor_title
 
 
 MAX_TEXT_CHARS = 12000
 MAX_LINKS = 200
 MAX_HTTP_REDIRECTS = 5
 UNSAFE_CRAWL_URL_MESSAGE = "URL 不允许指向本机、内网或不可解析地址"
+MULTI_LABEL_PUBLIC_SUFFIXES = ("ac.cn", "com.cn", "edu.cn", "gov.cn", "net.cn", "org.cn")
 
 
 class PageSnapshot(BaseModel):
@@ -90,6 +93,12 @@ class ProfessorCandidatePayload(BaseModel):
     )
 
 
+class CandidateEnrichmentPayload(BaseModel):
+    department: str | None = None
+    research_direction: str | None = None
+    recent_papers: list[str] = Field(default_factory=list)
+
+
 @dataclass(frozen=True)
 class CrawlToolContext:
     job_id: int
@@ -113,7 +122,9 @@ def is_allowed_crawl_url(start_url: str, candidate_url: str) -> bool:
         return False
     if not is_safe_public_crawl_url(absolute_candidate_url):
         return False
-    return (start.hostname or "").lower() == (candidate.hostname or "").lower()
+    start_host = (start.hostname or "").lower()
+    candidate_host = (candidate.hostname or "").lower()
+    return _registrable_domain(start_host) == _registrable_domain(candidate_host)
 
 
 def is_safe_public_crawl_url(url: str) -> bool:
@@ -190,6 +201,18 @@ def _resolve_system_host_ips(host: str, port: int) -> tuple[str, ...]:
 
 def _default_port_for_scheme(scheme: str) -> int:
     return 80 if scheme == "http" else 443
+
+
+def _registrable_domain(hostname: str) -> str:
+    normalized = hostname.rstrip(".").lower()
+    labels = [label for label in normalized.split(".") if label]
+    if len(labels) <= 2:
+        return normalized
+
+    suffix = ".".join(labels[-2:])
+    if suffix in MULTI_LABEL_PUBLIC_SUFFIXES and len(labels) >= 3:
+        return ".".join(labels[-3:])
+    return ".".join(labels[-2:])
 
 
 class _PinnedCrawlNetworkBackend(httpcore.AsyncNetworkBackend):
@@ -294,7 +317,7 @@ def normalize_candidate_payload(
     return {
         "name": _clean_required(candidate.name),
         "email": _clean_optional(candidate.email),
-        "title": _clean_optional(candidate.title),
+        "title": normalize_professor_title(_clean_optional(candidate.title)),
         "university": _clean_optional(candidate.university) or _clean_required(university),
         "school": _clean_optional(candidate.school) or _clean_required(school),
         "department": _clean_optional(candidate.department),
@@ -305,6 +328,39 @@ def normalize_candidate_payload(
         "confidence": _clamp_confidence(candidate.confidence),
         "field_confidence": field_confidence,
         "evidence": candidate.evidence,
+    }
+
+
+def build_candidate_enrichment_prompt(
+    candidate: CrawlCandidate,
+    page_text: str,
+) -> str:
+    return f"""
+你正在补全已发现的导师候选详情。
+已知基础信息：
+- 姓名：{candidate.name or "未知"}
+- 邮箱：{candidate.email or "未知"}
+- 职称：{candidate.title or "未知"}
+- 资料页：{candidate.profile_url or "未知"}
+
+要求：
+- 只补全缺失字段：department, research_direction, recent_papers
+- 不要改写已有基础字段
+- 没有证据就保持为空
+
+资料页正文：
+{page_text}
+"""
+
+
+def extract_candidate_profile_enrichment(text: str) -> dict[str, Any]:
+    return {
+        "department": _extract_prefixed_line(text, ("院系：", "部门：", "所在系：")),
+        "research_direction": _extract_prefixed_line(
+            text,
+            ("研究方向：", "研究领域：", "主要研究方向："),
+        ),
+        "recent_papers": _extract_paper_list(text),
     }
 
 
@@ -557,6 +613,27 @@ def _clamp_confidence(value: object) -> float:
     except (TypeError, ValueError):
         return 0.0
     return min(1.0, max(0.0, number))
+
+
+def _extract_prefixed_line(text: str, prefixes: tuple[str, ...]) -> str | None:
+    lines = [line.strip() for line in text.splitlines()]
+    for line in lines:
+        for prefix in prefixes:
+            if line.startswith(prefix):
+                value = line.removeprefix(prefix).strip()
+                return value or None
+    return None
+
+
+def _extract_paper_list(text: str) -> list[str]:
+    line = _extract_prefixed_line(text, ("代表论文：", "近期论文：", "论文："))
+    if not line:
+        return []
+    return [
+        item.strip()
+        for item in re.split(r"[；;|]+", line)
+        if item.strip()
+    ]
 
 
 async def _load_existing_candidate_emails(session: AsyncSession, job_id: int) -> set[str]:

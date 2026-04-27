@@ -110,6 +110,36 @@ class CrawlJobEventsTests(unittest.TestCase):
 
         self.assertEqual(message, "Agent 调用 crawl_page 抓取页面")
 
+    def test_trace_with_candidate_name_does_not_treat_name_as_tool(self) -> None:
+        message = summarize_agent_trace_event(
+            {
+                "type": "updates",
+                "data": {
+                    "tool_result": {
+                        "candidate": {
+                            "name": "万常选",
+                            "email": "example@example.edu",
+                        },
+                    },
+                },
+            },
+        )
+
+        self.assertEqual(message, "Agent 事件：updates")
+
+    def test_trace_keeps_enrichment_event_message(self) -> None:
+        message = summarize_agent_trace_event(
+            {
+                "event_type": "enrichment",
+                "message": "候选导师详情补全成功：张三（院系、研究方向）",
+                "raw": {
+                    "candidate_id": 1,
+                },
+            }
+        )
+
+        self.assertEqual(message, "候选导师详情补全成功：张三（院系、研究方向）")
+
     def test_build_events_omits_generic_agent_update_messages(self) -> None:
         job = CrawlJob(
             id=3,
