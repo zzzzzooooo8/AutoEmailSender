@@ -758,6 +758,73 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(http_path.call_count, 1)
         self.assertEqual(direct_calls, [])
 
+    async def test_crawl_page_with_crawl4ai_falls_back_to_browser_on_empty_content(self) -> None:
+        session_factory = _FakeSessionFactory()
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://faculty.example.edu/faculty",
+            university="University",
+            school="School",
+            session_factory=session_factory,  # type: ignore[arg-type]
+        )
+        empty_http_snapshot = PageSnapshot(
+            url="https://faculty.example.edu/faculty",
+            text="",
+            html="",
+            fetch_method="http",
+            status="succeeded",
+            suspicious_empty=True,
+        )
+        browser_snapshot = PageSnapshot(
+            url="https://faculty.example.edu/faculty",
+            text="Faculty page",
+            html="<html><body><table><tr><td>mock</td></tr></table></body></html>",
+            fetch_method="browser",
+            status="succeeded",
+        )
+
+        with patch(
+            "app.services.crawler_tools.crawl_page_with_http",
+            return_value=empty_http_snapshot,
+        ) as http_path, patch(
+            "app.services.crawler_tools._crawl_page_with_crawl4ai_browser",
+            return_value=browser_snapshot,
+        ) as browser_path:
+            snapshot = await crawl_page_with_crawl4ai(ctx, "https://faculty.example.edu/faculty")
+
+        self.assertIs(snapshot, browser_snapshot)
+        self.assertEqual(http_path.call_count, 1)
+        self.assertEqual(browser_path.call_count, 1)
+
+    async def test_browser_investigate_uses_crawl4ai_browser(self) -> None:
+        session_factory = _FakeSessionFactory()
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://faculty.example.edu/faculty",
+            university="University",
+            school="School",
+            session_factory=session_factory,  # type: ignore[arg-type]
+        )
+        browser_snapshot = PageSnapshot(
+            url="https://faculty.example.edu/faculty",
+            text="Faculty page",
+            html="<html></html>",
+            fetch_method="browser",
+            status="succeeded",
+        )
+
+        with patch(
+            "app.services.crawler_tools._crawl_page_with_crawl4ai_browser",
+            return_value=browser_snapshot,
+        ) as browser_path:
+            snapshot = await crawler_tools.browser_investigate(
+                ctx,
+                "https://faculty.example.edu/faculty",
+                "table",
+            )
+
+        self.assertIs(snapshot, browser_snapshot)
+        self.assertEqual(browser_path.call_count, 1)
 
 class _FakeSessionFactory:
     def __init__(self, *, job_status: str = "running", job_statuses: list[str] | None = None) -> None:
