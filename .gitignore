@@ -17,3 +17,4 @@ docs/superpowers/plans/
 .codex
 .agents
 skills-lock.json
+.env

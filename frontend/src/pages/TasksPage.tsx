@@ -28,17 +28,25 @@ import {
 } from "@/lib/api/batchTasksApi";
 import {
   cancelCrawlJob,
+  approveCrawlCandidates,
   getCrawlJobEvents,
   listCrawlCandidates,
   listCrawlJobs,
   listCrawlPages,
+  updateCrawlCandidate,
 } from "@/lib/api/crawlJobsApi";
+import {
+  buildCandidateReviewPayload,
+  getReviewableCandidateIds,
+  pruneSelectedCandidateIds,
+} from "@/features/crawl-review/client/reviewCandidates";
 import {
   BATCH_TASK_STATUS_LABELS,
   PROFESSOR_STATUS_LABELS,
   type BatchTaskCardDTO,
   type BatchTaskItemDTO,
   type CrawlCandidateDTO,
+  type CrawlCandidateReviewStatusDTO,
   type CrawlJobEventDTO,
   type CrawlJobStatusDTO,
   type CrawlJobSummaryDTO,
@@ -64,6 +72,26 @@ const CRAWL_JOB_STATUS_TONES: Record<CrawlJobStatusDTO, string> = {
   completed: "border-emerald-200 bg-emerald-50 text-emerald-700",
   failed: "border-red-200 bg-red-50 text-red-700",
   canceled: "border-stone-200 bg-stone-100 text-stone-600",
+};
+
+const CRAWL_CANDIDATE_REVIEW_STATUS_LABELS: Record<
+  CrawlCandidateReviewStatusDTO,
+  string
+> = {
+  pending: "待审核",
+  accepted: "已通过",
+  rejected: "已拒绝",
+  merged: "已合并",
+};
+
+const CRAWL_CANDIDATE_REVIEW_STATUS_TONES: Record<
+  CrawlCandidateReviewStatusDTO,
+  string
+> = {
+  pending: "border-amber-200 bg-amber-50 text-amber-700",
+  accepted: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  rejected: "border-red-200 bg-red-50 text-red-700",
+  merged: "border-sky-200 bg-sky-50 text-sky-700",
 };
 
 const BATCH_ITEM_STATUS_TONES: Record<WorkspaceTaskStatus, string> = {
@@ -196,7 +224,7 @@ const formatDisplayTime = (value: string | null | undefined) => {
 
 export const TasksPage = () => {
   const { selectedIdentityId, selectedLlmProfileId } = useSelectionContext();
-  const { notifyError } = useNotification();
+  const { notifyError, notifySuccess } = useNotification();
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const [activeTab, setActiveTab] = useState<TasksTab>("batch");
   const [tasks, setTasks] = useState<BatchTaskCardDTO[]>([]);
@@ -219,6 +247,13 @@ export const TasksPage = () => {
   >([]);
   const [crawlJobEvents, setCrawlJobEvents] = useState<CrawlJobEventDTO[]>([]);
   const [crawlJobDetailsLoading, setCrawlJobDetailsLoading] = useState(false);
+  const [selectedCrawlCandidateIds, setSelectedCrawlCandidateIds] = useState<
+    number[]
+  >([]);
+  const [crawlJobApproveLoading, setCrawlJobApproveLoading] = useState(false);
+  const [crawlCandidateMutatingIds, setCrawlCandidateMutatingIds] = useState<
+    number[]
+  >([]);
   const lastLoadErrorRef = useRef<string | null>(null);
   const lastBatchTaskDetailsLoadErrorRef = useRef<string | null>(null);
   const lastCrawlJobsLoadErrorRef = useRef<string | null>(null);
@@ -291,6 +326,23 @@ export const TasksPage = () => {
     [crawlJobs, crawlPage],
   );
   const selectedCrawlJobId = selectedCrawlJob?.id ?? null;
+  const reviewableCrawlCandidateIds = useMemo(
+    () => getReviewableCandidateIds(crawlJobCandidates),
+    [crawlJobCandidates],
+  );
+  const selectedReviewableCrawlCandidateIds = useMemo(
+    () =>
+      pruneSelectedCandidateIds(selectedCrawlCandidateIds, crawlJobCandidates),
+    [crawlJobCandidates, selectedCrawlCandidateIds],
+  );
+  const allReviewableCrawlCandidatesSelected = useMemo(
+    () =>
+      reviewableCrawlCandidateIds.length > 0 &&
+      reviewableCrawlCandidateIds.every((candidateId) =>
+        selectedReviewableCrawlCandidateIds.includes(candidateId),
+      ),
+    [reviewableCrawlCandidateIds, selectedReviewableCrawlCandidateIds],
+  );
 
   const loadTasks = useCallback(async () => {
     if (!tasksRequestKey || !selectedIdentityId || !selectedLlmProfileId) {
@@ -534,6 +586,18 @@ export const TasksPage = () => {
     };
   }, [loadCrawlJobDetails, selectedCrawlJobId]);
 
+  useEffect(() => {
+    setSelectedCrawlCandidateIds((currentIds) =>
+      pruneSelectedCandidateIds(currentIds, crawlJobCandidates),
+    );
+  }, [crawlJobCandidates]);
+
+  useEffect(() => {
+    setSelectedCrawlCandidateIds([]);
+    setCrawlJobApproveLoading(false);
+    setCrawlCandidateMutatingIds([]);
+  }, [selectedCrawlJobId]);
+
   const handleAction = async (
     taskId: number,
     action: "pause" | "resume" | "stop",
@@ -622,12 +686,99 @@ export const TasksPage = () => {
     }
   };
 
+  const handleToggleCrawlCandidateSelection = (candidateId: number) => {
+    if (!reviewableCrawlCandidateIds.includes(candidateId)) {
+      return;
+    }
+
+    setSelectedCrawlCandidateIds((currentIds) =>
+      currentIds.includes(candidateId)
+        ? currentIds.filter((id) => id !== candidateId)
+        : [...currentIds, candidateId],
+    );
+  };
+
+  const handleUpdateCrawlCandidateReviewStatus = async (
+    candidate: CrawlCandidateDTO,
+    reviewStatus: CrawlCandidateReviewStatusDTO,
+  ) => {
+    setCrawlCandidateMutatingIds((currentIds) =>
+      currentIds.includes(candidate.id)
+        ? currentIds
+        : [...currentIds, candidate.id],
+    );
+    try {
+      const updatedCandidate = await updateCrawlCandidate(
+        candidate.id,
+        buildCandidateReviewPayload(candidate, reviewStatus),
+      );
+      setCrawlJobCandidates((currentCandidates) =>
+        currentCandidates.map((item) =>
+          item.id === updatedCandidate.id ? updatedCandidate : item,
+        ),
+      );
+      notifySuccess(
+        reviewStatus === "rejected" ? "已拒绝候选导师" : "已恢复待审核",
+        `已更新“${candidate.name}”的审核状态。`,
+      );
+    } catch (actionError) {
+      const message =
+        actionError instanceof Error
+          ? actionError.message
+          : "更新候选导师审核状态失败";
+      notifyError("更新候选导师审核状态失败", message);
+    } finally {
+      setCrawlCandidateMutatingIds((currentIds) =>
+        currentIds.filter((id) => id !== candidate.id),
+      );
+    }
+  };
+
+  const handleApproveSelectedCrawlCandidates = async () => {
+    if (!selectedCrawlJobId || selectedReviewableCrawlCandidateIds.length === 0) {
+      return;
+    }
+
+    const confirmed = await confirm({
+      title: `确认通过并导入这 ${selectedReviewableCrawlCandidateIds.length} 位候选导师吗？`,
+      description:
+        "通过后，这些候选导师会写入导师库，当前抓取任务会标记为已完成。",
+      confirmLabel: "确认导入",
+      cancelLabel: "先保留",
+      tone: "danger",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    setCrawlJobApproveLoading(true);
+    try {
+      const result = await approveCrawlCandidates(
+        selectedCrawlJobId,
+        selectedReviewableCrawlCandidateIds,
+      );
+      setSelectedCrawlCandidateIds([]);
+      notifySuccess("审核完成", result.message);
+      await loadCrawlJobs({ showLoading: false });
+      await loadCrawlJobDetails(selectedCrawlJobId, { showLoading: false });
+    } catch (actionError) {
+      const message =
+        actionError instanceof Error ? actionError.message : "审核导入候选导师失败";
+      notifyError("审核导入候选导师失败", message);
+    } finally {
+      setCrawlJobApproveLoading(false);
+    }
+  };
+
   const closeCrawlJobDetails = () => {
     latestCrawlJobDetailsRequestIdRef.current += 1;
     setSelectedCrawlJob(null);
     setCrawlJobPages([]);
     setCrawlJobCandidates([]);
     setCrawlJobEvents([]);
+    setSelectedCrawlCandidateIds([]);
+    setCrawlJobApproveLoading(false);
+    setCrawlCandidateMutatingIds([]);
     setCrawlJobDetailsLoading(false);
     lastCrawlJobDetailsLoadErrorRef.current = null;
   };
@@ -1405,6 +1556,58 @@ export const TasksPage = () => {
                     候选导师
                   </h3>
                   <div className="mt-3 space-y-2">
+                    {selectedCrawlJob.status === "needs_review" ? (
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div className="text-sm text-amber-900">
+                            可导入 {reviewableCrawlCandidateIds.length} 位，已选{" "}
+                            {selectedReviewableCrawlCandidateIds.length} 位
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSelectedCrawlCandidateIds(
+                                  reviewableCrawlCandidateIds,
+                                )
+                              }
+                              disabled={
+                                reviewableCrawlCandidateIds.length === 0 ||
+                                allReviewableCrawlCandidatesSelected ||
+                                crawlJobApproveLoading
+                              }
+                              className="ui-btn-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              全选可导入
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedCrawlCandidateIds([])}
+                              disabled={
+                                selectedReviewableCrawlCandidateIds.length ===
+                                  0 || crawlJobApproveLoading
+                              }
+                              className="ui-btn-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              清空选择
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handleApproveSelectedCrawlCandidates()
+                              }
+                              disabled={
+                                selectedReviewableCrawlCandidateIds.length ===
+                                  0 || crawlJobApproveLoading
+                              }
+                              className="ui-btn-primary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {crawlJobApproveLoading ? "导入中..." : "审核通过并导入"}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
                     {crawlJobCandidates.length > 0 ? (
                       crawlJobCandidates.map((candidate) => (
                         <div
@@ -1412,13 +1615,93 @@ export const TasksPage = () => {
                           className="rounded-2xl border border-stone-100 px-4 py-3"
                         >
                           <div className="flex flex-wrap items-center justify-between gap-2">
-                            <p className="text-sm font-medium text-stone-800">
-                              {candidate.name}
-                            </p>
+                            <div className="flex min-w-0 items-center gap-3">
+                              {selectedCrawlJob.status === "needs_review" ? (
+                                <input
+                                  type="checkbox"
+                                  checked={selectedReviewableCrawlCandidateIds.includes(
+                                    candidate.id,
+                                  )}
+                                  disabled={
+                                    candidate.review_status === "rejected" ||
+                                    crawlJobApproveLoading ||
+                                    crawlCandidateMutatingIds.includes(
+                                      candidate.id,
+                                    )
+                                  }
+                                  onChange={() =>
+                                    handleToggleCrawlCandidateSelection(
+                                      candidate.id,
+                                    )
+                                  }
+                                  aria-label={`选择候选导师 ${candidate.name}`}
+                                  className="h-4 w-4 rounded border-stone-300 text-primary focus:ring-primary/30"
+                                />
+                              ) : null}
+                              <p className="text-sm font-medium text-stone-800">
+                                {candidate.name}
+                              </p>
+                            </div>
                             <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700">
                               置信度 {Math.round(candidate.confidence * 100)}%
                             </span>
+                            <span
+                              className={`rounded-full border px-3 py-1 text-xs ${
+                                CRAWL_CANDIDATE_REVIEW_STATUS_TONES[
+                                  candidate.review_status
+                                ]
+                              }`}
+                            >
+                              {
+                                CRAWL_CANDIDATE_REVIEW_STATUS_LABELS[
+                                  candidate.review_status
+                                ]
+                              }
+                            </span>
                           </div>
+                          {selectedCrawlJob.status === "needs_review" ? (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {candidate.review_status === "rejected" ? (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void handleUpdateCrawlCandidateReviewStatus(
+                                      candidate,
+                                      "pending",
+                                    )
+                                  }
+                                  disabled={
+                                    crawlJobApproveLoading ||
+                                    crawlCandidateMutatingIds.includes(
+                                      candidate.id,
+                                    )
+                                  }
+                                  className="ui-btn-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  恢复待审核
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void handleUpdateCrawlCandidateReviewStatus(
+                                      candidate,
+                                      "rejected",
+                                    )
+                                  }
+                                  disabled={
+                                    crawlJobApproveLoading ||
+                                    crawlCandidateMutatingIds.includes(
+                                      candidate.id,
+                                    )
+                                  }
+                                  className="ui-btn-danger px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  拒绝
+                                </button>
+                              )}
+                            </div>
+                          ) : null}
                           <p className="mt-1 text-sm text-stone-500">
                             {candidate.email ?? "暂无邮箱"}
                           </p>

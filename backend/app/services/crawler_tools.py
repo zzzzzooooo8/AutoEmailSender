@@ -10,7 +10,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 import httpcore
 from bs4 import BeautifulSoup
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -37,21 +37,57 @@ class PageSnapshot(BaseModel):
 
 
 class ProfessorCandidatePayload(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
-    name: str
-    email: str | None = None
-    title: str | None = None
-    university: str | None = None
-    school: str | None = None
-    department: str | None = None
-    research_direction: str | None = None
-    recent_papers: list[str] = Field(default_factory=list)
-    profile_url: str | None = None
-    source_url: str | None = None
-    confidence: float = 0.0
-    field_confidence: dict[str, float] | None = None
-    evidence: dict[str, object] | None = None
+    name: str = Field(validation_alias=AliasChoices("name", "姓名"))
+    email: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("email", "邮箱", "邮箱地址"),
+    )
+    title: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("title", "职称", "岗位"),
+    )
+    university: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("university", "学校", "院校"),
+    )
+    school: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("school", "学院", "院系", "学院/单位", "单位"),
+    )
+    department: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("department", "部门", "系别"),
+    )
+    research_direction: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("research_direction", "研究方向", "研究领域"),
+    )
+    recent_papers: list[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("recent_papers", "近期论文", "代表论文"),
+    )
+    profile_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("profile_url", "主页URL", "主页链接", "个人主页"),
+    )
+    source_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("source_url", "证据来源", "来源页面", "页面URL"),
+    )
+    confidence: float = Field(
+        default=0.0,
+        validation_alias=AliasChoices("confidence", "置信度"),
+    )
+    field_confidence: dict[str, float] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("field_confidence", "字段置信度"),
+    )
+    evidence: dict[str, object] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("evidence", "证据"),
+    )
 
 
 @dataclass(frozen=True)

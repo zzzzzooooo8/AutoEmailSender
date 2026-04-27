@@ -18,6 +18,7 @@ class Settings:
     project_root: Path
     data_dir: Path
     uploads_dir: Path
+    crawler_debug_dir: Path
     database_url: str
     default_mail_delivery_mode: str
     draft_worker_interval_seconds: int
@@ -28,6 +29,7 @@ class Settings:
     imap_lookback_hours: int
     operation_log_retention_days: int
     enable_background_workers: bool
+    crawler_debug_enabled: bool
 
 
 def _get_int_env(name: str, default: int) -> int:
@@ -57,6 +59,10 @@ def _normalize_database_url(database_url: str) -> str:
 def get_settings() -> Settings:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    crawler_debug_dir = Path(
+        os.getenv("CRAWLER_DEBUG_DIR", (DATA_DIR / "logs" / "crawler").as_posix())
+    )
+    crawler_debug_dir.mkdir(parents=True, exist_ok=True)
     database_url = _normalize_database_url(
         os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL),
     )
@@ -64,6 +70,7 @@ def get_settings() -> Settings:
         project_root=PROJECT_ROOT,
         data_dir=DATA_DIR,
         uploads_dir=UPLOADS_DIR,
+        crawler_debug_dir=crawler_debug_dir,
         database_url=database_url,
         default_mail_delivery_mode=os.getenv("DEFAULT_MAIL_DELIVERY_MODE", "dry_run"),
         draft_worker_interval_seconds=_get_int_env("DRAFT_WORKER_INTERVAL_SECONDS", 10),
@@ -74,6 +81,7 @@ def get_settings() -> Settings:
         imap_lookback_hours=_get_int_env("IMAP_LOOKBACK_HOURS", 72),
         operation_log_retention_days=_get_int_env("OPERATION_LOG_RETENTION_DAYS", 30),
         enable_background_workers=_get_bool_env("ENABLE_BACKGROUND_WORKERS", True),
+        crawler_debug_enabled=_get_bool_env("CRAWLER_DEBUG", False),
     )
 
 

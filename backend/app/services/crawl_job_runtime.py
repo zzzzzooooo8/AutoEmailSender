@@ -4,17 +4,25 @@ import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.faculty_crawler_agent import run_faculty_crawler_agent
-from app.models import CrawlJob, CrawlJobStatus, LLMProfile
+from app.models import CrawlCandidate, CrawlJob, CrawlJobStatus, LLMProfile
+from app.services.crawler_debug import append_crawler_debug_event
 from app.services.crawl_job_events import normalize_agent_trace_event
 from app.services.crawler_tools import CrawlToolContext
 
 
 NO_LLM_PROFILE_ERROR = "请先配置可用的 LLM Profile"
 WORKER_CANCELLED_ERROR = "抓取任务被后台 worker 取消"
+NO_CANDIDATES_SAVED_ERROR = "抓取结束但未成功保存任何候选导师"
+INVALID_SAVE_TOOL_CALL_ERROR = (
+    "抓取结果未成功保存：Agent 生成了无效的 save_professor_candidates 调用"
+)
+TRUNCATED_SAVE_TOOL_CALL_ERROR = (
+    "抓取结果未成功保存：模型在调用 save_professor_candidates 时输出被截断"
+)
 MAX_AGENT_TRACE_EVENTS = 100
 
 
@@ -76,7 +84,8 @@ async def run_queued_crawl_jobs_once(
             session_factory=session_factory,
         )
 
-    async def trace_callback(event: dict[str, object]) -> None:
+    async def trace_callback(event: Any) -> None:
+        append_crawler_debug_event(job_id, event)
         await _append_agent_trace(session_factory, job_id, event)
 
     try:
@@ -87,7 +96,7 @@ async def run_queued_crawl_jobs_once(
     except Exception as exc:
         await _mark_job_failed(session_factory, job_id, str(exc))
     else:
-        await _mark_running_job_needs_review(session_factory, job_id)
+        await _complete_running_job(session_factory, job_id)
 
     return 1
 
@@ -128,7 +137,7 @@ async def _append_agent_trace(
         await session.commit()
 
 
-async def _mark_running_job_needs_review(
+async def _complete_running_job(
     session_factory: async_sessionmaker[AsyncSession],
     job_id: int,
 ) -> None:
@@ -137,8 +146,15 @@ async def _mark_running_job_needs_review(
         if job is None or job.status != CrawlJobStatus.RUNNING.value:
             return
 
-        job.status = CrawlJobStatus.NEEDS_REVIEW.value
-        job.error_message = None
+        candidate_count = await session.scalar(
+            select(func.count()).select_from(CrawlCandidate).where(CrawlCandidate.job_id == job_id)
+        )
+        if int(candidate_count or 0) > 0:
+            job.status = CrawlJobStatus.NEEDS_REVIEW.value
+            job.error_message = None
+        else:
+            job.status = CrawlJobStatus.FAILED.value
+            job.error_message = _derive_candidate_save_failure(job.agent_trace)
         job.updated_at = datetime.now(UTC)
         await session.commit()
 
@@ -163,3 +179,28 @@ def _normalize_trace(value: Any) -> list[dict[str, object]]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, dict)]
+
+
+def _derive_candidate_save_failure(agent_trace: Any) -> str:
+    trace_events = _normalize_trace(agent_trace)
+    for event in reversed(trace_events):
+        haystack = _stringify_trace_payload(event)
+        if "save_professor_candidates" not in haystack:
+            continue
+        if "invalid_tool_call" in haystack or "invalid_tool_calls" in haystack:
+            if "finish_reason='length'" in haystack or '"finish_reason": "length"' in haystack:
+                return TRUNCATED_SAVE_TOOL_CALL_ERROR
+            return INVALID_SAVE_TOOL_CALL_ERROR
+    return NO_CANDIDATES_SAVED_ERROR
+
+
+def _stringify_trace_payload(event: dict[str, object]) -> str:
+    parts: list[str] = []
+    for key in ("message", "summary"):
+        value = event.get(key)
+        if isinstance(value, str):
+            parts.append(value)
+    raw = event.get("raw")
+    if raw is not None:
+        parts.append(str(raw))
+    return "\n".join(parts)

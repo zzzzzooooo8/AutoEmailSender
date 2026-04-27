@@ -132,6 +132,29 @@ class CrawlerToolTests(unittest.TestCase):
         self.assertEqual(payload["confidence"], 1.0)
         self.assertEqual(payload["field_confidence"], {"email": 1.0})
 
+    def test_professor_candidate_payload_accepts_chinese_aliases(self) -> None:
+        candidate = ProfessorCandidatePayload.model_validate(
+            {
+                "姓名": "张三",
+                "邮箱": "zhang@example.edu",
+                "职称": "教授",
+                "学校": "示例大学",
+                "院系": "计算机学院",
+                "主页URL": "https://example.edu/faculty/zhang",
+                "证据来源": "https://example.edu/faculty",
+                "置信度": 0.92,
+            }
+        )
+
+        self.assertEqual(candidate.name, "张三")
+        self.assertEqual(candidate.email, "zhang@example.edu")
+        self.assertEqual(candidate.title, "教授")
+        self.assertEqual(candidate.university, "示例大学")
+        self.assertEqual(candidate.school, "计算机学院")
+        self.assertEqual(candidate.profile_url, "https://example.edu/faculty/zhang")
+        self.assertEqual(candidate.source_url, "https://example.edu/faculty")
+        self.assertEqual(candidate.confidence, 0.92)
+
 
 class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
     async def test_save_candidates_skips_canceled_job(self) -> None:
