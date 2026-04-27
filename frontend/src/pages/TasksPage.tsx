@@ -29,17 +29,18 @@ import {
 import {
   cancelCrawlJob,
   approveCrawlCandidates,
+  getCrawlJob,
   getCrawlJobEvents,
   listCrawlCandidates,
   listCrawlJobs,
   listCrawlPages,
-  updateCrawlCandidate,
 } from "@/lib/api/crawlJobsApi";
 import {
-  buildCandidateReviewPayload,
   getReviewableCandidateIds,
   pruneSelectedCandidateIds,
 } from "@/features/crawl-review/client/reviewCandidates";
+import { formatApiDateTime } from "@/lib/dateTime";
+import { getPageItems, getTotalPages } from "@/lib/pagination";
 import {
   BATCH_TASK_STATUS_LABELS,
   PROFESSOR_STATUS_LABELS,
@@ -108,9 +109,9 @@ const BATCH_ITEM_STATUS_TONES: Record<WorkspaceTaskStatus, string> = {
 
 const CRAWL_REFRESH_INTERVAL_MS = 5000;
 const CRAWL_DETAILS_REFRESH_INTERVAL_MS = 5000;
-const TASKS_PAGE_SIZE = 8;
-const API_TIMEZONE_SUFFIX_PATTERN = /(Z|[+-]\d{2}:?\d{2})$/i;
 const SCHEDULE_DATE_PATTERN = /^\d{4}-(\d{2})-(\d{2})$/;
+const TASKS_PAGE_SIZE = 8;
+const MONITOR_SECTION_PAGE_SIZE = 5;
 
 const formatScheduleDate = (value: string) => {
   const match = SCHEDULE_DATE_PATTERN.exec(value);
@@ -141,32 +142,41 @@ const buildScheduleLabel = (task: BatchTaskCardDTO) => {
   return `${task.window_start_time ?? "--:--"} - ${task.window_end_time ?? "--:--"}，窗口内 ${task.emails_per_window ?? 0} 封`;
 };
 
-const getTotalPages = (totalCount: number) =>
-  Math.max(1, Math.ceil(totalCount / TASKS_PAGE_SIZE));
-
-const getPageItems = <T,>(items: T[], page: number) => {
-  const startIndex = (page - 1) * TASKS_PAGE_SIZE;
-  return items.slice(startIndex, startIndex + TASKS_PAGE_SIZE);
-};
-
 type TaskListPaginationProps = {
   page: number;
   totalCount: number;
   onPageChange: (page: number) => void;
+  pageSize?: number;
 };
 
 const TaskListPagination = ({
   page,
   totalCount,
   onPageChange,
+  pageSize = TASKS_PAGE_SIZE,
 }: TaskListPaginationProps) => {
-  if (totalCount <= TASKS_PAGE_SIZE) {
+  const [jumpValue, setJumpValue] = useState(String(page));
+
+  useEffect(() => {
+    setJumpValue(String(page));
+  }, [page]);
+
+  if (totalCount <= pageSize) {
     return null;
   }
 
-  const totalPages = getTotalPages(totalCount);
-  const startItem = (page - 1) * TASKS_PAGE_SIZE + 1;
-  const endItem = Math.min(totalCount, page * TASKS_PAGE_SIZE);
+  const totalPages = getTotalPages(totalCount, pageSize);
+  const startItem = (page - 1) * pageSize + 1;
+  const endItem = Math.min(totalCount, page * pageSize);
+
+  const commitJump = () => {
+    const nextPage = Number.parseInt(jumpValue, 10);
+    if (Number.isNaN(nextPage)) {
+      setJumpValue(String(page));
+      return;
+    }
+    onPageChange(Math.min(totalPages, Math.max(1, nextPage)));
+  };
 
   return (
     <nav
@@ -198,28 +208,55 @@ const TaskListPagination = ({
           下一页
           <ChevronRight className="h-4 w-4" />
         </button>
+        <input
+          type="number"
+          min={1}
+          max={totalPages}
+          value={jumpValue}
+          onChange={(event) => setJumpValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              commitJump();
+            }
+          }}
+          className="h-10 w-20 rounded-xl border border-stone-200 px-3 text-sm text-stone-700 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/20"
+          aria-label="输入页码"
+        />
+        <button
+          type="button"
+          onClick={commitJump}
+          className="ui-btn-secondary px-3 py-2 text-sm"
+        >
+          跳转
+        </button>
       </div>
     </nav>
   );
 };
 
-const parseApiDate = (value: string) => {
-  const normalizedValue = API_TIMEZONE_SUFFIX_PATTERN.test(value)
-    ? value
-    : `${value}Z`;
-  return new Date(normalizedValue);
-};
-
-const formatDisplayTime = (value: string | null | undefined) => {
+const formatDisplayTime = (
+  value: string | null | undefined,
+  options?: { withSeconds?: boolean },
+) => {
   if (!value) {
     return "--";
   }
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(parseApiDate(value));
+  return formatApiDateTime(value, options?.withSeconds ? { second: "2-digit" } : undefined);
+};
+
+const formatDuration = (seconds: number) => {
+  const safeSeconds = Math.max(0, seconds);
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const remainingSeconds = safeSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}小时 ${minutes}分 ${remainingSeconds}秒`;
+  }
+  if (minutes > 0) {
+    return `${minutes}分 ${remainingSeconds}秒`;
+  }
+  return `${remainingSeconds}秒`;
 };
 
 export const TasksPage = () => {
@@ -239,6 +276,9 @@ export const TasksPage = () => {
   const [crawlJobsLoading, setCrawlJobsLoading] = useState(false);
   const [batchPage, setBatchPage] = useState(1);
   const [crawlPage, setCrawlPage] = useState(1);
+  const [crawlEventPage, setCrawlEventPage] = useState(1);
+  const [crawlDetailPagePage, setCrawlDetailPagePage] = useState(1);
+  const [crawlCandidatePage, setCrawlCandidatePage] = useState(1);
   const [selectedCrawlJob, setSelectedCrawlJob] =
     useState<CrawlJobSummaryDTO | null>(null);
   const [crawlJobPages, setCrawlJobPages] = useState<CrawlPageDTO[]>([]);
@@ -251,9 +291,8 @@ export const TasksPage = () => {
     number[]
   >([]);
   const [crawlJobApproveLoading, setCrawlJobApproveLoading] = useState(false);
-  const [crawlCandidateMutatingIds, setCrawlCandidateMutatingIds] = useState<
-    number[]
-  >([]);
+  const [selectedCandidateDetail, setSelectedCandidateDetail] =
+    useState<CrawlCandidateDTO | null>(null);
   const lastLoadErrorRef = useRef<string | null>(null);
   const lastBatchTaskDetailsLoadErrorRef = useRef<string | null>(null);
   const lastCrawlJobsLoadErrorRef = useRef<string | null>(null);
@@ -318,12 +357,29 @@ export const TasksPage = () => {
     [selectedBatchTaskItems],
   );
   const visibleBatchTasks = useMemo(
-    () => getPageItems(tasks, batchPage),
+    () => getPageItems(tasks, batchPage, TASKS_PAGE_SIZE),
     [batchPage, tasks],
   );
   const visibleCrawlJobs = useMemo(
-    () => getPageItems(crawlJobs, crawlPage),
+    () => getPageItems(crawlJobs, crawlPage, TASKS_PAGE_SIZE),
     [crawlJobs, crawlPage],
+  );
+  const visibleCrawlJobEvents = useMemo(
+    () => getPageItems(crawlJobEvents, crawlEventPage, MONITOR_SECTION_PAGE_SIZE),
+    [crawlEventPage, crawlJobEvents],
+  );
+  const visibleCrawlJobPages = useMemo(
+    () => getPageItems(crawlJobPages, crawlDetailPagePage, MONITOR_SECTION_PAGE_SIZE),
+    [crawlDetailPagePage, crawlJobPages],
+  );
+  const visibleCrawlJobCandidates = useMemo(
+    () =>
+      getPageItems(
+        crawlJobCandidates,
+        crawlCandidatePage,
+        MONITOR_SECTION_PAGE_SIZE,
+      ),
+    [crawlCandidatePage, crawlJobCandidates],
   );
   const selectedCrawlJobId = selectedCrawlJob?.id ?? null;
   const reviewableCrawlCandidateIds = useMemo(
@@ -478,7 +534,8 @@ export const TasksPage = () => {
         setCrawlJobDetailsLoading(true);
       }
       try {
-        const [pages, candidates, events] = await Promise.all([
+        const [job, pages, candidates, events] = await Promise.all([
+          getCrawlJob(jobId),
           listCrawlPages(jobId),
           listCrawlCandidates(jobId),
           getCrawlJobEvents(jobId),
@@ -486,6 +543,7 @@ export const TasksPage = () => {
         if (latestCrawlJobDetailsRequestIdRef.current !== requestId) {
           return;
         }
+        setSelectedCrawlJob(job);
         setCrawlJobPages(pages);
         setCrawlJobCandidates(candidates);
         setCrawlJobEvents(events);
@@ -527,15 +585,42 @@ export const TasksPage = () => {
 
   useEffect(() => {
     setBatchPage((currentPage) =>
-      Math.min(currentPage, getTotalPages(tasks.length)),
+      Math.min(currentPage, getTotalPages(tasks.length, TASKS_PAGE_SIZE)),
     );
   }, [tasks.length]);
 
   useEffect(() => {
     setCrawlPage((currentPage) =>
-      Math.min(currentPage, getTotalPages(crawlJobs.length)),
+      Math.min(currentPage, getTotalPages(crawlJobs.length, TASKS_PAGE_SIZE)),
     );
   }, [crawlJobs.length]);
+
+  useEffect(() => {
+    setCrawlEventPage((currentPage) =>
+      Math.min(
+        currentPage,
+        getTotalPages(crawlJobEvents.length, MONITOR_SECTION_PAGE_SIZE),
+      ),
+    );
+  }, [crawlJobEvents.length]);
+
+  useEffect(() => {
+    setCrawlDetailPagePage((currentPage) =>
+      Math.min(
+        currentPage,
+        getTotalPages(crawlJobPages.length, MONITOR_SECTION_PAGE_SIZE),
+      ),
+    );
+  }, [crawlJobPages.length]);
+
+  useEffect(() => {
+    setCrawlCandidatePage((currentPage) =>
+      Math.min(
+        currentPage,
+        getTotalPages(crawlJobCandidates.length, MONITOR_SECTION_PAGE_SIZE),
+      ),
+    );
+  }, [crawlJobCandidates.length]);
 
   useEffect(() => {
     if (crawlJobsPreloadedRef.current) {
@@ -595,7 +680,10 @@ export const TasksPage = () => {
   useEffect(() => {
     setSelectedCrawlCandidateIds([]);
     setCrawlJobApproveLoading(false);
-    setCrawlCandidateMutatingIds([]);
+    setSelectedCandidateDetail(null);
+    setCrawlEventPage(1);
+    setCrawlDetailPagePage(1);
+    setCrawlCandidatePage(1);
   }, [selectedCrawlJobId]);
 
   const handleAction = async (
@@ -698,42 +786,6 @@ export const TasksPage = () => {
     );
   };
 
-  const handleUpdateCrawlCandidateReviewStatus = async (
-    candidate: CrawlCandidateDTO,
-    reviewStatus: CrawlCandidateReviewStatusDTO,
-  ) => {
-    setCrawlCandidateMutatingIds((currentIds) =>
-      currentIds.includes(candidate.id)
-        ? currentIds
-        : [...currentIds, candidate.id],
-    );
-    try {
-      const updatedCandidate = await updateCrawlCandidate(
-        candidate.id,
-        buildCandidateReviewPayload(candidate, reviewStatus),
-      );
-      setCrawlJobCandidates((currentCandidates) =>
-        currentCandidates.map((item) =>
-          item.id === updatedCandidate.id ? updatedCandidate : item,
-        ),
-      );
-      notifySuccess(
-        reviewStatus === "rejected" ? "已拒绝候选导师" : "已恢复待审核",
-        `已更新“${candidate.name}”的审核状态。`,
-      );
-    } catch (actionError) {
-      const message =
-        actionError instanceof Error
-          ? actionError.message
-          : "更新候选导师审核状态失败";
-      notifyError("更新候选导师审核状态失败", message);
-    } finally {
-      setCrawlCandidateMutatingIds((currentIds) =>
-        currentIds.filter((id) => id !== candidate.id),
-      );
-    }
-  };
-
   const handleApproveSelectedCrawlCandidates = async () => {
     if (!selectedCrawlJobId || selectedReviewableCrawlCandidateIds.length === 0) {
       return;
@@ -778,7 +830,10 @@ export const TasksPage = () => {
     setCrawlJobEvents([]);
     setSelectedCrawlCandidateIds([]);
     setCrawlJobApproveLoading(false);
-    setCrawlCandidateMutatingIds([]);
+    setSelectedCandidateDetail(null);
+    setCrawlEventPage(1);
+    setCrawlDetailPagePage(1);
+    setCrawlCandidatePage(1);
     setCrawlJobDetailsLoading(false);
     lastCrawlJobDetailsLoadErrorRef.current = null;
   };
@@ -1088,7 +1143,7 @@ export const TasksPage = () => {
 
                 <div className="min-w-0">
                   <div className="text-xs font-medium text-stone-500">
-                    更新 {formatDisplayTime(job.updated_at)}
+                      更新 {formatDisplayTime(job.updated_at, { withSeconds: true })}
                   </div>
                   {job.latest_event_message ? (
                     <div className="mt-2 flex items-start gap-2 rounded-2xl border border-primary/10 bg-primary/5 px-3 py-2 text-sm text-stone-700">
@@ -1417,13 +1472,13 @@ export const TasksPage = () => {
       ) : null}
       {selectedCrawlJob ? (
         <div
-          className="fixed inset-0 z-50 flex items-stretch justify-end bg-stone-950/30 p-0 sm:p-6"
+          className="fixed inset-0 z-50 flex items-stretch justify-center bg-stone-950/30 p-0 sm:p-6"
           onClick={closeCrawlJobDetails}
         >
           <section
             role="dialog"
             aria-label="抓取任务详情"
-            className="flex h-full w-full flex-col overflow-hidden bg-white shadow-xl sm:max-w-3xl sm:rounded-3xl"
+            className="flex h-full w-full flex-col overflow-hidden bg-white shadow-xl sm:max-w-[min(94vw,1280px)] sm:rounded-3xl"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4 border-b border-stone-200 bg-[#fcfbf8] px-6 py-5">
@@ -1450,8 +1505,8 @@ export const TasksPage = () => {
               </button>
             </div>
 
-            <div className="border-b border-stone-100 px-6 py-4">
-              <div className="grid gap-3 sm:grid-cols-3">
+            <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
                 <div className="rounded-2xl border border-stone-100 bg-white px-4 py-3">
                   <div className="text-xs font-medium text-stone-500">
                     当前状态
@@ -1476,10 +1531,39 @@ export const TasksPage = () => {
                     {selectedCrawlJob.candidate_count}
                   </div>
                 </div>
+                <div className="rounded-2xl border border-stone-100 bg-white px-4 py-3">
+                  <div className="text-xs font-medium text-stone-500">
+                    输入 Token
+                  </div>
+                  <div className="mt-2 text-sm font-semibold text-stone-900">
+                    {selectedCrawlJob.input_tokens.toLocaleString("zh-CN")}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-stone-100 bg-white px-4 py-3">
+                  <div className="text-xs font-medium text-stone-500">
+                    输出 Token
+                  </div>
+                  <div className="mt-2 text-sm font-semibold text-stone-900">
+                    {selectedCrawlJob.output_tokens.toLocaleString("zh-CN")}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-stone-100 bg-white px-4 py-3">
+                  <div className="text-xs font-medium text-stone-500">
+                    总 Token
+                  </div>
+                  <div className="mt-2 text-sm font-semibold text-stone-900">
+                    {selectedCrawlJob.total_tokens.toLocaleString("zh-CN")}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-stone-100 bg-white px-4 py-3">
+                  <div className="text-xs font-medium text-stone-500">
+                    已耗时长
+                  </div>
+                  <div className="mt-2 text-sm font-semibold text-stone-900">
+                    {formatDuration(selectedCrawlJob.duration_seconds)}
+                  </div>
+                </div>
               </div>
-            </div>
-
-            <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
               {selectedCrawlJob.error_message ? (
                 <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
                   {selectedCrawlJob.error_message}
@@ -1493,35 +1577,41 @@ export const TasksPage = () => {
                 </div>
               ) : null}
 
-              <section>
-                <h3 className="flex items-center gap-2 text-sm font-semibold text-stone-900">
-                  <Activity className="h-4 w-4 text-primary" />
-                  执行日志
-                </h3>
-                <div className="mt-3 space-y-3">
-                  {crawlJobEvents.length > 0 ? (
-                    crawlJobEvents.map((event) => (
-                      <div key={event.id} className="flex gap-3">
-                        <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" />
-                        <div className="min-w-0 flex-1 rounded-2xl border border-stone-100 px-4 py-3">
-                          <p className="text-sm text-stone-800">
-                            {event.message}
-                          </p>
-                          <p className="mt-1 text-xs text-stone-500">
-                            {formatDisplayTime(event.created_at)}
-                          </p>
+              <div className="grid gap-6 xl:grid-cols-2">
+                <section>
+                  <h3 className="flex items-center gap-2 text-sm font-semibold text-stone-900">
+                    <Activity className="h-4 w-4 text-primary" />
+                    执行日志
+                  </h3>
+                  <div className="mt-3 space-y-3">
+                    {crawlJobEvents.length > 0 ? (
+                      visibleCrawlJobEvents.map((event) => (
+                        <div key={event.id} className="flex gap-3">
+                          <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" />
+                          <div className="min-w-0 flex-1 rounded-2xl border border-stone-100 px-4 py-3">
+                            <p className="text-sm text-stone-800">
+                              {event.message}
+                            </p>
+                            <p className="mt-1 text-xs text-stone-500">
+                              {formatDisplayTime(event.created_at, { withSeconds: true })}
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="rounded-2xl border border-dashed border-stone-200 px-4 py-3 text-sm text-stone-500">
-                      暂无执行日志。
-                    </p>
-                  )}
-                </div>
-              </section>
+                      ))
+                    ) : (
+                      <p className="rounded-2xl border border-dashed border-stone-200 px-4 py-3 text-sm text-stone-500">
+                        暂无执行日志。
+                      </p>
+                    )}
+                  </div>
+                  <TaskListPagination
+                    page={crawlEventPage}
+                    totalCount={crawlJobEvents.length}
+                    onPageChange={setCrawlEventPage}
+                    pageSize={MONITOR_SECTION_PAGE_SIZE}
+                  />
+                </section>
 
-              <div className="grid gap-6 lg:grid-cols-2">
                 <section>
                   <h3 className="flex items-center gap-2 text-sm font-semibold text-stone-900">
                     <FileSearch className="h-4 w-4 text-sky-600" />
@@ -1529,7 +1619,7 @@ export const TasksPage = () => {
                   </h3>
                   <div className="mt-3 space-y-2">
                     {crawlJobPages.length > 0 ? (
-                      crawlJobPages.map((page) => (
+                      visibleCrawlJobPages.map((page) => (
                         <div
                           key={page.id}
                           className="rounded-2xl border border-stone-100 px-4 py-3"
@@ -1548,100 +1638,107 @@ export const TasksPage = () => {
                       </p>
                     )}
                   </div>
+                  <TaskListPagination
+                    page={crawlDetailPagePage}
+                    totalCount={crawlJobPages.length}
+                    onPageChange={setCrawlDetailPagePage}
+                    pageSize={MONITOR_SECTION_PAGE_SIZE}
+                  />
                 </section>
+              </div>
 
-                <section>
-                  <h3 className="flex items-center gap-2 text-sm font-semibold text-stone-900">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                    候选导师
-                  </h3>
-                  <div className="mt-3 space-y-2">
-                    {selectedCrawlJob.status === "needs_review" ? (
-                      <div className="rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div className="text-sm text-amber-900">
-                            可导入 {reviewableCrawlCandidateIds.length} 位，已选{" "}
-                            {selectedReviewableCrawlCandidateIds.length} 位
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setSelectedCrawlCandidateIds(
-                                  reviewableCrawlCandidateIds,
-                                )
-                              }
-                              disabled={
-                                reviewableCrawlCandidateIds.length === 0 ||
-                                allReviewableCrawlCandidatesSelected ||
-                                crawlJobApproveLoading
-                              }
-                              className="ui-btn-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              全选可导入
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedCrawlCandidateIds([])}
-                              disabled={
-                                selectedReviewableCrawlCandidateIds.length ===
-                                  0 || crawlJobApproveLoading
-                              }
-                              className="ui-btn-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              清空选择
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                void handleApproveSelectedCrawlCandidates()
-                              }
-                              disabled={
-                                selectedReviewableCrawlCandidateIds.length ===
-                                  0 || crawlJobApproveLoading
-                              }
-                              className="ui-btn-primary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              {crawlJobApproveLoading ? "导入中..." : "审核通过并导入"}
-                            </button>
-                          </div>
+              <section>
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-stone-900">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                  候选导师
+                </h3>
+                <div className="mt-3 space-y-2">
+                  {selectedCrawlJob.status === "needs_review" ? (
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="text-sm text-amber-900">
+                          可导入 {reviewableCrawlCandidateIds.length} 位，已选{" "}
+                          {selectedReviewableCrawlCandidateIds.length} 位
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedCrawlCandidateIds(
+                                reviewableCrawlCandidateIds,
+                              )
+                            }
+                            disabled={
+                              reviewableCrawlCandidateIds.length === 0 ||
+                              allReviewableCrawlCandidatesSelected ||
+                              crawlJobApproveLoading
+                            }
+                            className="ui-btn-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            全选可导入
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedCrawlCandidateIds([])}
+                            disabled={
+                              selectedReviewableCrawlCandidateIds.length === 0 ||
+                              crawlJobApproveLoading
+                            }
+                            className="ui-btn-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            清空选择
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void handleApproveSelectedCrawlCandidates()
+                            }
+                            disabled={
+                              selectedReviewableCrawlCandidateIds.length === 0 ||
+                              crawlJobApproveLoading
+                            }
+                            className="ui-btn-primary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {crawlJobApproveLoading ? "导入中..." : "审核通过并导入"}
+                          </button>
                         </div>
                       </div>
-                    ) : null}
-                    {crawlJobCandidates.length > 0 ? (
-                      crawlJobCandidates.map((candidate) => (
-                        <div
-                          key={candidate.id}
-                          className="rounded-2xl border border-stone-100 px-4 py-3"
-                        >
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="flex min-w-0 items-center gap-3">
+                    </div>
+                  ) : null}
+                  {crawlJobCandidates.length > 0 ? (
+                    visibleCrawlJobCandidates.map((candidate) => (
+                      <div
+                        key={candidate.id}
+                        className="rounded-2xl border border-stone-100 px-4 py-3"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="flex min-w-0 items-center gap-3">
                               {selectedCrawlJob.status === "needs_review" ? (
                                 <input
                                   type="checkbox"
                                   checked={selectedReviewableCrawlCandidateIds.includes(
                                     candidate.id,
                                   )}
-                                  disabled={
-                                    candidate.review_status === "rejected" ||
-                                    crawlJobApproveLoading ||
-                                    crawlCandidateMutatingIds.includes(
-                                      candidate.id,
-                                    )
-                                  }
+                                  disabled={crawlJobApproveLoading}
                                   onChange={() =>
                                     handleToggleCrawlCandidateSelection(
                                       candidate.id,
-                                    )
-                                  }
-                                  aria-label={`选择候选导师 ${candidate.name}`}
-                                  className="h-4 w-4 rounded border-stone-300 text-primary focus:ring-primary/30"
-                                />
-                              ) : null}
+                                  )
+                                }
+                                aria-label={`选择候选导师 ${candidate.name}`}
+                                className="h-4 w-4 rounded border-stone-300 text-primary focus:ring-primary/30"
+                              />
+                            ) : null}
+                            <div className="min-w-0">
                               <p className="text-sm font-medium text-stone-800">
                                 {candidate.name}
                               </p>
+                              <p className="mt-1 text-sm text-stone-500">
+                                {candidate.email ?? "暂无邮箱"}
+                              </p>
                             </div>
+                          </div>
+                          <div className="flex shrink-0 flex-wrap items-center gap-2">
                             <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700">
                               置信度 {Math.round(candidate.confidence * 100)}%
                             </span>
@@ -1658,62 +1755,130 @@ export const TasksPage = () => {
                                 ]
                               }
                             </span>
-                          </div>
-                          {selectedCrawlJob.status === "needs_review" ? (
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              {candidate.review_status === "rejected" ? (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    void handleUpdateCrawlCandidateReviewStatus(
-                                      candidate,
-                                      "pending",
-                                    )
-                                  }
-                                  disabled={
-                                    crawlJobApproveLoading ||
-                                    crawlCandidateMutatingIds.includes(
-                                      candidate.id,
-                                    )
-                                  }
-                                  className="ui-btn-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                  恢复待审核
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    void handleUpdateCrawlCandidateReviewStatus(
-                                      candidate,
-                                      "rejected",
-                                    )
-                                  }
-                                  disabled={
-                                    crawlJobApproveLoading ||
-                                    crawlCandidateMutatingIds.includes(
-                                      candidate.id,
-                                    )
-                                  }
-                                  className="ui-btn-danger px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                  拒绝
-                                </button>
-                              )}
+                            <button
+                              type="button"
+                              onClick={() => setSelectedCandidateDetail(candidate)}
+                              className="ui-btn-secondary px-3 py-2 text-sm"
+                            >
+                              查看详情
+                              </button>
                             </div>
-                          ) : null}
-                          <p className="mt-1 text-sm text-stone-500">
-                            {candidate.email ?? "暂无邮箱"}
-                          </p>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="rounded-2xl border border-dashed border-stone-200 px-4 py-3 text-sm text-stone-500">
-                        暂无候选导师。
-                      </p>
-                    )}
+                          </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="rounded-2xl border border-dashed border-stone-200 px-4 py-3 text-sm text-stone-500">
+                      暂无候选导师。
+                    </p>
+                  )}
+                </div>
+                <TaskListPagination
+                  page={crawlCandidatePage}
+                  totalCount={crawlJobCandidates.length}
+                  onPageChange={setCrawlCandidatePage}
+                  pageSize={MONITOR_SECTION_PAGE_SIZE}
+                />
+              </section>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {selectedCandidateDetail ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-stone-950/35 p-4"
+          onClick={() => setSelectedCandidateDetail(null)}
+        >
+          <section
+            role="dialog"
+            aria-label="候选导师详情"
+            className="w-full max-w-3xl rounded-3xl bg-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-stone-200 px-6 py-5">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-[0.18em] text-stone-400">
+                  候选导师详情
+                </p>
+                <h3 className="mt-2 text-xl font-semibold text-stone-900">
+                  {selectedCandidateDetail.name}
+                </h3>
+                <p className="mt-1 text-sm text-stone-500">
+                  {selectedCandidateDetail.email ?? "暂无邮箱"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedCandidateDetail(null)}
+                className="ui-btn-secondary shrink-0"
+                aria-label="关闭候选导师详情"
+              >
+                <X className="h-4 w-4" />
+                关闭
+              </button>
+            </div>
+            <div className="grid gap-4 px-6 py-5 md:grid-cols-2">
+              <div className="rounded-2xl border border-stone-100 bg-stone-50/70 px-4 py-3">
+                <div className="text-xs font-medium text-stone-500">职称</div>
+                <div className="mt-2 text-sm text-stone-900">
+                  {selectedCandidateDetail.title || "暂无"}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-stone-100 bg-stone-50/70 px-4 py-3">
+                <div className="text-xs font-medium text-stone-500">院校 / 学院</div>
+                <div className="mt-2 text-sm text-stone-900">
+                  {[selectedCandidateDetail.university, selectedCandidateDetail.school]
+                    .filter(Boolean)
+                    .join(" / ") || "暂无"}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-stone-100 bg-stone-50/70 px-4 py-3">
+                <div className="text-xs font-medium text-stone-500">部门</div>
+                <div className="mt-2 text-sm text-stone-900">
+                  {selectedCandidateDetail.department || "暂无"}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-stone-100 bg-stone-50/70 px-4 py-3">
+                <div className="text-xs font-medium text-stone-500">审核状态</div>
+                <div className="mt-2 text-sm text-stone-900">
+                  {
+                    CRAWL_CANDIDATE_REVIEW_STATUS_LABELS[
+                      selectedCandidateDetail.review_status
+                    ]
+                  }
+                </div>
+              </div>
+              <div className="rounded-2xl border border-stone-100 bg-stone-50/70 px-4 py-3 md:col-span-2">
+                <div className="text-xs font-medium text-stone-500">研究方向</div>
+                <div className="mt-2 text-sm leading-6 text-stone-900">
+                  {selectedCandidateDetail.research_direction || "暂无"}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-stone-100 bg-stone-50/70 px-4 py-3 md:col-span-2">
+                <div className="text-xs font-medium text-stone-500">近期论文</div>
+                {selectedCandidateDetail.recent_papers.length > 0 ? (
+                  <ul className="mt-2 space-y-2 text-sm text-stone-900">
+                    {selectedCandidateDetail.recent_papers.map((paper) => (
+                      <li key={paper} className="rounded-xl bg-white px-3 py-2">
+                        {paper}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="mt-2 text-sm text-stone-900">暂无</div>
+                )}
+              </div>
+              <div className="rounded-2xl border border-stone-100 bg-stone-50/70 px-4 py-3 md:col-span-2">
+                <div className="text-xs font-medium text-stone-500">链接信息</div>
+                <div className="mt-2 space-y-2 text-sm text-stone-900">
+                  <div>
+                    <span className="text-stone-500">资料页：</span>
+                    {selectedCandidateDetail.profile_url || "暂无"}
                   </div>
-                </section>
+                  <div>
+                    <span className="text-stone-500">来源页：</span>
+                    {selectedCandidateDetail.source_url || "暂无"}
+                  </div>
+                </div>
               </div>
             </div>
           </section>

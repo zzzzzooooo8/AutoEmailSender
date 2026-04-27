@@ -333,6 +333,10 @@ export interface CrawlJobSummaryDTO extends CrawlJobDTO {
   page_count: number;
   candidate_count: number;
   latest_event_message: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  duration_seconds: number;
 }
 
 export interface CrawlPageDTO {

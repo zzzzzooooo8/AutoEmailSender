@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CrawlCandidateDTO } from '@/types';
 import {
-  buildCandidateReviewPayload,
   getReviewableCandidateIds,
   pruneSelectedCandidateIds,
 } from './reviewCandidates';
@@ -50,26 +49,5 @@ describe('reviewCandidates', () => {
     ];
 
     expect(pruneSelectedCandidateIds([3, 2, 999, 1], candidates)).toEqual([3, 1]);
-  });
-
-  it('builds a full candidate update payload while overriding review status', () => {
-    const candidate = buildCandidate({
-      review_status: 'pending',
-      recent_papers: ['Paper A', 'Paper B'],
-    });
-
-    expect(buildCandidateReviewPayload(candidate, 'rejected')).toEqual({
-      name: 'Alice',
-      email: 'alice@example.edu',
-      title: 'Professor',
-      university: 'Test University',
-      school: 'Computer Science',
-      department: 'AI Lab',
-      research_direction: 'LLM',
-      recent_papers: ['Paper A', 'Paper B'],
-      profile_url: 'https://example.edu/alice',
-      source_url: 'https://example.edu/faculty/alice',
-      review_status: 'rejected',
-    });
   });
 });
