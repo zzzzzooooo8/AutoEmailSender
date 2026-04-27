@@ -27,6 +27,7 @@ from app.schemas.crawl_job import (
     CrawlPageRead,
 )
 from app.services.crawl_job_events import build_crawl_job_events, normalize_agent_trace_event
+from app.services.crawl_job_metrics import build_crawl_job_metrics
 from app.services.operation_logs import record_operation_log
 from app.services.professor_management import is_valid_professor_email
 
@@ -331,9 +332,14 @@ async def _build_crawl_job_summaries(
                 "page_count": page_counts.get(job.id, 0),
                 "candidate_count": candidate_counts.get(job.id, 0),
                 "latest_event_message": _latest_event_message(job.agent_trace),
+                "input_tokens": metrics.input_tokens,
+                "output_tokens": metrics.output_tokens,
+                "total_tokens": metrics.total_tokens,
+                "duration_seconds": metrics.duration_seconds,
             },
         )
         for job in jobs
+        for metrics in [build_crawl_job_metrics(job)]
     ]
 
 

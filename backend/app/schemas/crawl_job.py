@@ -67,6 +67,10 @@ class CrawlJobSummaryRead(CrawlJobRead):
     page_count: int = 0
     candidate_count: int = 0
     latest_event_message: str | None = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    duration_seconds: int = 0
 
 
 class CrawlJobEventRead(BaseModel):
