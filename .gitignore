@@ -18,3 +18,4 @@ docs/superpowers/plans/
 .agents
 skills-lock.json
 .env
+logs
