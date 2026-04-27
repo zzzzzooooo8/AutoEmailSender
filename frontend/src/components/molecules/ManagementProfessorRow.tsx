@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Archive, PencilLine, RotateCcw } from "lucide-react";
 import { SelectionToggleButton } from "@/components/molecules/SelectionToggleButton";
 import { formatApiDateTime } from "@/lib/dateTime";
+import { normalizeProfessorTitleDisplay } from "@/lib/professorTitle";
 import type { ProfessorManagementItemDTO } from "@/types";
 
 type ManagementProfessorRowProps = {
@@ -74,7 +75,7 @@ export const ManagementProfessorRow = ({
         </div>
 
         <FieldCell label="职称" valueClassName="text-sm text-stone-600 lg:text-center">
-          {professor.title || "未填写职称"}
+          {normalizeProfessorTitleDisplay(professor.title) || "未填写职称"}
         </FieldCell>
 
         <FieldCell label="邮箱" valueClassName="break-all text-sm text-stone-700 lg:text-center">

@@ -1,5 +1,6 @@
 import { AtSign, GraduationCap, Microscope } from "lucide-react";
 import type { ReactNode } from "react";
+import { normalizeProfessorTitleDisplay } from "@/lib/professorTitle";
 import type { WorkspaceThreadDTO } from "@/types";
 
 type WorkspaceSidebarProps = {
@@ -31,6 +32,7 @@ const ArchiveField = ({
 
 const ArchiveCard = ({ thread }: WorkspaceSidebarProps) => {
   const professor = thread.professor;
+  const normalizedTitle = normalizeProfessorTitleDisplay(professor.title);
   const organization =
     [professor.university, professor.school].filter(Boolean).join(" / ") ||
     "未填写学校信息";
@@ -51,7 +53,7 @@ const ArchiveCard = ({ thread }: WorkspaceSidebarProps) => {
                 {professor.name}
               </h2>
               <p className="mt-1 text-sm text-stone-500">
-                {professor.title || "未填写职称"}
+                {normalizedTitle || "未填写职称"}
               </p>
             </div>
           </div>

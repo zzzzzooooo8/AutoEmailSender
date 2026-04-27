@@ -26,6 +26,10 @@ import { NativeSelectField } from "@/components/atoms/NativeSelectField";
 import { ManagementProfessorRow } from "@/components/molecules/ManagementProfessorRow";
 import { useNotification } from "@/context/NotificationContext";
 import { safeRecordUserAction } from "@/lib/diagnosticUserActions";
+import {
+  extractProfessorTitleTags,
+  matchesProfessorTitleTag,
+} from "@/lib/professorTitle";
 import { useConfirmDialog } from "@/lib/useConfirmDialog";
 import { createCrawlJob } from "@/lib/api/crawlJobsApi";
 import {
@@ -371,7 +375,7 @@ export const ProfessorsPage = () => {
       Array.from(
         new Set(
           professors
-            .map((professor) => professor.title?.trim())
+            .flatMap((professor) => extractProfessorTitleTags(professor.title))
             .filter((title): title is string => Boolean(title)),
         ),
       ).sort((first, second) => first.localeCompare(second)),
@@ -413,7 +417,7 @@ export const ProfessorsPage = () => {
           .some((value) => value?.toLowerCase().includes(query));
       const titleMatched =
         titleFilter === ALL_PROFESSOR_FILTER_VALUE ||
-        professor.title === titleFilter;
+        matchesProfessorTitleTag(professor.title, titleFilter);
       const schoolPairMatched =
         schoolPairFilter === ALL_PROFESSOR_FILTER_VALUE ||
         getSchoolPairValue(professor) === schoolPairFilter;
@@ -774,7 +778,7 @@ export const ProfessorsPage = () => {
                     data-testid="professor-title-filter-label"
                     className={filterFieldLabelClassName}
                   >
-                    职称
+                      职称 / 导师资格
                   </div>
                   <NativeSelectField
                     ariaLabel="职称筛选"
@@ -782,7 +786,7 @@ export const ProfessorsPage = () => {
                     onChange={(event) => setTitleFilter(event.target.value)}
                     shellClassName="min-h-[3.1rem] rounded-3xl bg-white shadow-sm"
                   >
-                    <option value={ALL_PROFESSOR_FILTER_VALUE}>全部职称</option>
+                      <option value={ALL_PROFESSOR_FILTER_VALUE}>全部职称 / 导师资格</option>
                     {titleOptions.map((title) => (
                       <option key={title} value={title}>
                         {title}

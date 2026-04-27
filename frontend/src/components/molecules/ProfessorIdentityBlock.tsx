@@ -1,4 +1,5 @@
 import clsx from "clsx";
+import { normalizeProfessorTitleDisplay } from "@/lib/professorTitle";
 
 type ProfessorIdentityBlockProps = {
   name: string;
@@ -25,7 +26,8 @@ export const ProfessorIdentityBlock = ({
   showResearchDirection = true,
   className,
 }: ProfessorIdentityBlockProps) => {
-  const affiliation = [title, university, school].filter(Boolean).join(" / ");
+  const normalizedTitle = normalizeProfessorTitleDisplay(title);
+  const affiliation = [normalizedTitle, university, school].filter(Boolean).join(" / ");
 
   return (
     <div className={clsx("min-w-0", className)}>
@@ -48,8 +50,8 @@ export const ProfessorIdentityBlock = ({
         <div className="mt-1 text-sm text-stone-500">
           {affiliation || "未填写职称 / 学校 / 学院"}
         </div>
-      ) : title ? (
-        <div className="mt-1 text-sm text-stone-500">{title}</div>
+      ) : normalizedTitle ? (
+        <div className="mt-1 text-sm text-stone-500">{normalizedTitle}</div>
       ) : null}
       {showResearchDirection ? (
         <p
