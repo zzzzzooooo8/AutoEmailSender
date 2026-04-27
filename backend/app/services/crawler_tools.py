@@ -23,6 +23,12 @@ from app.services.professor_management import normalize_professor_title
 MAX_TEXT_CHARS = 12000
 MAX_LINKS = 200
 MAX_HTTP_REDIRECTS = 5
+MAX_RETRIES_FOR_BROWSER_RENDER = 2
+CRAWL4AI_BROWSER_FALLBACK_STATUS = {403, 412, 429}
+JS_RENDER_TIMEOUT_MS = 30000
+CRAWL4AI_BROWSER_WAIT_TIMEOUT_MS = 15000
+CRAWL4AI_BROWSER_DELAY_SECONDS = 1.5
+CRAWL4AI_BROWSER_WAIT_SELECTOR = "css:table"
 UNSAFE_CRAWL_URL_MESSAGE = "URL 不允许指向本机、内网或不可解析地址"
 MULTI_LABEL_PUBLIC_SUFFIXES = ("ac.cn", "com.cn", "edu.cn", "gov.cn", "net.cn", "org.cn")
 
@@ -462,17 +468,22 @@ async def crawl_page_with_http(ctx: CrawlToolContext, url: str) -> PageSnapshot:
 
 
 async def crawl_page_with_crawl4ai(ctx: CrawlToolContext, url: str) -> PageSnapshot:
-    # Crawl4AI owns redirect/DNS behavior; re-enable after safe transport controls exist.
-    return await crawl_page_with_http(ctx, url)
+    http_snapshot = await crawl_page_with_http(ctx, url)
+    if _should_use_crawl4ai_fallback(http_snapshot):
+        return await browser_investigate(
+            ctx,
+            url,
+            goal="",
+        )
+    return http_snapshot
 
 
 async def browser_investigate(ctx: CrawlToolContext, url: str, goal: str) -> PageSnapshot:
-    _ = goal
     absolute_url = urljoin(ctx.start_url, url)
     if _has_unsafe_public_crawl_url(ctx.start_url, absolute_url):
         snapshot = _failed_snapshot(
             url=absolute_url,
-            fetch_method="browser_use",
+            fetch_method="browser",
             error_message=UNSAFE_CRAWL_URL_MESSAGE,
         )
         await record_page_snapshot(ctx, snapshot)
@@ -481,18 +492,131 @@ async def browser_investigate(ctx: CrawlToolContext, url: str, goal: str) -> Pag
     if not is_allowed_crawl_url(ctx.start_url, url):
         snapshot = _failed_snapshot(
             url=url,
-            fetch_method="browser_use",
+            fetch_method="browser",
             error_message="URL 不在入口页面同域范围内，已拒绝浏览器调查",
         )
         await record_page_snapshot(ctx, snapshot)
         return snapshot
 
-    snapshot = _failed_snapshot(
-        url=absolute_url,
-        fetch_method="browser_use",
-        error_message="Browser Use 需要在任务 6 通过 LLMProfile 注入模型后启用",
-    )
+    snapshot = await _crawl_page_with_crawl4ai_browser(ctx, absolute_url, goal)
     await record_page_snapshot(ctx, snapshot)
+    return snapshot
+
+
+def _should_use_crawl4ai_fallback(snapshot: PageSnapshot) -> bool:
+    if snapshot.fetch_method != "http":
+        return False
+
+    if snapshot.suspicious_empty:
+        return True
+
+    if snapshot.status == "failed":
+        error_message = (snapshot.error_message or "").lower()
+        if any(str(marker) in error_message for marker in CRAWL4AI_BROWSER_FALLBACK_STATUS):
+            return True
+        if "cf-" in error_message:
+            return True
+        return any(
+            marker in error_message
+            for marker in (
+                "cloudflare",
+                "please",
+                "anti-bot",
+                "captcha",
+                "security check",
+                "verify you",
+                "enable javascript",
+            )
+        )
+
+    text = (snapshot.text or "").lower()
+    if not text.strip():
+        return True
+    if len(text) >= 80:
+        return False
+
+    return any(
+        marker in text
+        for marker in (
+            "cloudflare",
+            "just a moment",
+            "please enable javascript",
+            "please verify",
+            "anti-bot",
+            "access denied",
+            "captcha",
+            "security check",
+        )
+    )
+
+
+def _browser_run_config_for_goal(goal: str) -> "CrawlerRunConfig":
+    from crawl4ai import CrawlerRunConfig
+
+    return CrawlerRunConfig(
+        process_in_browser=True,
+        wait_until="networkidle",
+        wait_for=CRAWL4AI_BROWSER_WAIT_SELECTOR,
+        wait_for_timeout=CRAWL4AI_BROWSER_WAIT_TIMEOUT_MS,
+        delay_before_return_html=CRAWL4AI_BROWSER_DELAY_SECONDS,
+        page_timeout=JS_RENDER_TIMEOUT_MS,
+        max_retries=MAX_RETRIES_FOR_BROWSER_RENDER,
+        user_agent=(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        verbose=False,
+    )
+
+
+async def _crawl_page_with_crawl4ai_browser(
+    ctx: CrawlToolContext,
+    absolute_url: str,
+    goal: str,
+) -> PageSnapshot:
+    _ = goal
+    try:
+        from crawl4ai import AsyncWebCrawler
+    except Exception as exc:
+        return _failed_snapshot(
+            url=absolute_url,
+            fetch_method="browser",
+            error_message=f"Failed to load Crawl4AI: {exc}",
+        )
+
+    config = _browser_run_config_for_goal(goal)
+
+    try:
+        async with AsyncWebCrawler(verbose=False) as crawler:
+            crawl_result = await crawler.arun(absolute_url, config=config)
+    except Exception as exc:
+        return _failed_snapshot(
+            url=absolute_url,
+            fetch_method="browser",
+            error_message=f"Crawl4AI browser fetch failed: {exc}",
+        )
+
+    if not crawl_result:
+        return _failed_snapshot(
+            url=absolute_url,
+            fetch_method="browser",
+            error_message="Crawl4AI browser returned no result",
+        )
+
+    crawl_item = crawl_result[0]
+    if not getattr(crawl_item, "success", False):
+        return _failed_snapshot(
+            url=str(getattr(crawl_item, "url", absolute_url) or absolute_url),
+            fetch_method="browser",
+            error_message=str(getattr(crawl_item, "error_message", "") or ""),
+        )
+
+    content = str(getattr(crawl_item, "html", "") or "")
+    final_url = str(getattr(crawl_item, "redirected_url", "") or absolute_url)
+    snapshot = html_to_snapshot(final_url, content, "browser")
+    if not snapshot.text.strip():
+        snapshot.suspicious_empty = True
     return snapshot
 
 
