@@ -340,6 +340,171 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(candidate.department, "计算机科学系")
             self.assertEqual(candidate.recent_papers, ["Paper A", "Paper B"])
 
+    async def test_run_queued_crawl_job_enriches_candidate_email_when_missing(self) -> None:
+        job_id = await self._create_default_profile_and_job(
+            start_url="https://cai.jxufe.edu.cn/lists/26.html",
+        )
+
+        async def fake_run(
+            ctx: CrawlToolContext,
+            llm_profile: LLMProfile,
+            trace_callback=None,
+        ) -> dict[str, object]:
+            _ = llm_profile
+            if trace_callback is not None:
+                await trace_callback(
+                    {
+                        "type": "updates",
+                        "data": {
+                            "model": {
+                                "messages": [
+                                    "tool_calls=[{'name': 'save_professor_candidates'}]",
+                                ]
+                            }
+                        },
+                    }
+                )
+            await save_candidates(
+                ctx,
+                [
+                    ProfessorCandidatePayload(
+                        name="王五",
+                        email=None,
+                        title="教授、博导",
+                        department="计算机学院",
+                        research_direction="网络安全",
+                        recent_papers=["Paper X"],
+                        profile_url="https://cta.jxufe.edu.cn/home/teacherInfo/detail?uid=3",
+                    )
+                ],
+            )
+            return {}
+
+        async def fake_crawl_page_with_crawl4ai(
+            ctx: CrawlToolContext,
+            url: str,
+        ) -> PageSnapshot:
+            _ = ctx
+            return PageSnapshot(
+                url=url,
+                title="王五",
+                text="邮箱：wang5 (AT) example DOT edu\n院系：计算机学院\n研究方向：教育学",
+                html="<html></html>",
+                links=[],
+                fetch_method="http",
+                status="succeeded",
+            )
+
+        async def fake_enrich_with_llm(
+            ctx: CrawlToolContext,
+            llm_profile: LLMProfile,
+            candidate: CrawlCandidate,
+            page_text: str,
+        ) -> CandidateEnrichmentPayload:
+            _ = ctx, llm_profile, candidate, page_text
+            return CandidateEnrichmentPayload()
+
+        with patch(
+            "app.services.crawl_job_runtime.run_faculty_crawler_agent",
+            new=fake_run,
+        ), patch(
+            "app.services.crawl_job_runtime.crawl_page_with_crawl4ai",
+            new=fake_crawl_page_with_crawl4ai,
+        ), patch(
+            "app.services.crawl_job_runtime.enrich_candidate_profile_with_llm",
+            new=fake_enrich_with_llm,
+        ):
+            await run_queued_crawl_jobs_once(self.session_factory)
+
+        async with self.session_factory() as session:
+            candidate = await session.scalar(
+                select(CrawlCandidate).where(CrawlCandidate.job_id == job_id)
+            )
+            self.assertIsNotNone(candidate)
+            assert candidate is not None
+            self.assertEqual(candidate.email, "wang5@example.edu")
+
+    async def test_run_queued_crawl_job_does_not_overwrite_existing_email(self) -> None:
+        job_id = await self._create_default_profile_and_job(
+            start_url="https://cai.jxufe.edu.cn/lists/26.html",
+        )
+
+        async def fake_run(
+            ctx: CrawlToolContext,
+            llm_profile: LLMProfile,
+            trace_callback=None,
+        ) -> dict[str, object]:
+            _ = llm_profile
+            if trace_callback is not None:
+                await trace_callback(
+                    {
+                        "type": "updates",
+                        "data": {
+                            "model": {
+                                "messages": [
+                                    "tool_calls=[{'name': 'save_professor_candidates'}]",
+                                ]
+                            }
+                        },
+                    }
+                )
+            await save_candidates(
+                ctx,
+                [
+                    ProfessorCandidatePayload(
+                        name="赵六",
+                        email="existing@example.edu",
+                        title="教授",
+                        profile_url="https://cta.jxufe.edu.cn/home/teacherInfo/detail?uid=4",
+                    )
+                ],
+            )
+            return {}
+
+        async def fake_crawl_page_with_crawl4ai(
+            ctx: CrawlToolContext,
+            url: str,
+        ) -> PageSnapshot:
+            _ = ctx
+            return PageSnapshot(
+                url=url,
+                title="赵六",
+                text="邮箱：replace@other.example.edu\n院系：法学院\n研究方向：法学",
+                html="<html></html>",
+                links=[],
+                fetch_method="http",
+                status="succeeded",
+            )
+
+        async def fake_enrich_with_llm(
+            ctx: CrawlToolContext,
+            llm_profile: LLMProfile,
+            candidate: CrawlCandidate,
+            page_text: str,
+        ) -> CandidateEnrichmentPayload:
+            _ = ctx, llm_profile, candidate, page_text
+            return CandidateEnrichmentPayload(email="replace@other.example.edu")
+
+        with patch(
+            "app.services.crawl_job_runtime.run_faculty_crawler_agent",
+            new=fake_run,
+        ), patch(
+            "app.services.crawl_job_runtime.crawl_page_with_crawl4ai",
+            new=fake_crawl_page_with_crawl4ai,
+        ), patch(
+            "app.services.crawl_job_runtime.enrich_candidate_profile_with_llm",
+            new=fake_enrich_with_llm,
+        ):
+            await run_queued_crawl_jobs_once(self.session_factory)
+
+        async with self.session_factory() as session:
+            candidate = await session.scalar(
+                select(CrawlCandidate).where(CrawlCandidate.job_id == job_id)
+            )
+            self.assertIsNotNone(candidate)
+            assert candidate is not None
+            self.assertEqual(candidate.email, "existing@example.edu")
+
     async def test_run_queued_crawl_job_records_enrichment_failure_events(self) -> None:
         job_id = await self._create_default_profile_and_job(
             start_url="https://cai.jxufe.edu.cn/lists/26.html",

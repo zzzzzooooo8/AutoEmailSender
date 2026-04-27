@@ -18,6 +18,8 @@ from app.services.crawler_tools import (
     PageSnapshot,
     build_candidate_enrichment_prompt,
     ProfessorCandidatePayload,
+    extract_first_email_from_text,
+    normalize_obfuscated_email_tokens,
     crawl_page_with_crawl4ai,
     crawl_page_with_http,
     extract_candidate_profile_enrichment,
@@ -194,19 +196,35 @@ class CrawlerToolTests(unittest.TestCase):
         self.assertIn("张三", prompt)
         self.assertIn("zhang@example.edu", prompt)
         self.assertIn("https://example.edu/faculty/zhang", prompt)
-        self.assertIn("只补全缺失字段：department, research_direction, recent_papers", prompt)
+        self.assertIn("只补全缺失字段：email, department, research_direction, recent_papers", prompt)
 
     def test_candidate_enrichment_payload_defaults(self) -> None:
         payload = CandidateEnrichmentPayload.model_validate({})
+        self.assertIsNone(payload.email)
         self.assertIsNone(payload.department)
         self.assertIsNone(payload.research_direction)
         self.assertEqual(payload.recent_papers, [])
 
-    def test_extract_candidate_profile_enrichment_from_text(self) -> None:
-        updates = extract_candidate_profile_enrichment(
-            "院系：计算机科学系\n研究方向：大语言模型、智能体\n代表论文：Paper A；Paper B"
+    def test_normalize_obfuscated_email_tokens(self) -> None:
+        self.assertEqual(
+            normalize_obfuscated_email_tokens(
+                "name (AT) example DOT edu, another[at]school[dot]cn, third AT example DOT edu.cn"
+            ),
+            "name@example.edu, another@school.cn, third@example.edu.cn",
         )
 
+    def test_extract_first_email_from_text(self) -> None:
+        extracted = extract_first_email_from_text(
+            "联系人：zhang(AT)example(DOT)edu，lisi AT bupt DOT edu DOT cn，请联系"
+        )
+        self.assertEqual(extracted, "zhang@example.edu")
+
+    def test_extract_candidate_profile_enrichment_from_text(self) -> None:
+        updates = extract_candidate_profile_enrichment(
+            "邮箱：zhang(AT)example(DOT)edu\n院系：计算机科学系\n研究方向：大语言模型、智能体\n代表论文：Paper A；Paper B"
+        )
+
+        self.assertEqual(updates["email"], "zhang@example.edu")
         self.assertEqual(updates["department"], "计算机科学系")
         self.assertEqual(updates["research_direction"], "大语言模型、智能体")
         self.assertEqual(updates["recent_papers"], ["Paper A", "Paper B"])

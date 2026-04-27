@@ -100,6 +100,7 @@ class ProfessorCandidatePayload(BaseModel):
 
 
 class CandidateEnrichmentPayload(BaseModel):
+    email: str | None = None
     department: str | None = None
     research_direction: str | None = None
     recent_papers: list[str] = Field(default_factory=list)
@@ -350,7 +351,7 @@ def build_candidate_enrichment_prompt(
 - 资料页：{candidate.profile_url or "未知"}
 
 要求：
-- 只补全缺失字段：department, research_direction, recent_papers
+- 只补全缺失字段：email, department, research_direction, recent_papers
 - 不要改写已有基础字段
 - 没有证据就保持为空
 
@@ -359,8 +360,46 @@ def build_candidate_enrichment_prompt(
 """
 
 
+_EMAIL_PATTERN = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+
+_AT_REPLACEMENTS = (
+    r"\(\s*at\s*\)",
+    r"\[\s*at\s*\]",
+    r"\s+at\s+",
+)
+
+_DOT_REPLACEMENTS = (
+    r"\(\s*dot\s*\)",
+    r"\[\s*dot\s*\]",
+    r"\s+dot\s+",
+)
+
+
+def normalize_obfuscated_email_tokens(text: str) -> str:
+    normalized = text
+    for token in _AT_REPLACEMENTS:
+        normalized = re.sub(token, "@", normalized, flags=re.IGNORECASE)
+    for token in _DOT_REPLACEMENTS:
+        normalized = re.sub(token, ".", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\s*@\s*", "@", normalized)
+    normalized = re.sub(r"\s*\.\s*", ".", normalized)
+    return normalized
+
+
+def extract_first_email_from_text(text: str) -> str | None:
+    direct = _EMAIL_PATTERN.findall(text)
+    if direct:
+        return direct[0]
+
+    normalized = normalize_obfuscated_email_tokens(text)
+    normalized = re.sub(r"\s+", "", normalized)
+    normalized_emails = _EMAIL_PATTERN.findall(normalized)
+    return normalized_emails[0] if normalized_emails else None
+
+
 def extract_candidate_profile_enrichment(text: str) -> dict[str, Any]:
     return {
+        "email": extract_first_email_from_text(text),
         "department": _extract_prefixed_line(text, ("院系：", "部门：", "所在系：")),
         "research_direction": _extract_prefixed_line(
             text,
