@@ -58,6 +58,18 @@ PROFESSOR_TEMPLATE_EXAMPLE_ROW = [
 
 SUPPORTED_IMPORT_EXTENSIONS = {".csv", ".xlsx"}
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+TITLE_SPLIT_PATTERN = re.compile(r"[、，,/／|｜；;\s]+")
+ALLOWED_TITLES = (
+    "教授",
+    "副教授",
+    "助理教授",
+    "讲师",
+    "研究员",
+    "副研究员",
+    "助理研究员",
+    "特聘研究员",
+)
+TITLE_PRIORITY = {title: index for index, title in enumerate(ALLOWED_TITLES)}
 
 
 @dataclass(slots=True)
@@ -70,11 +82,35 @@ def is_valid_professor_email(email: str) -> bool:
     return bool(EMAIL_PATTERN.match(email.strip()))
 
 
+def normalize_professor_title(title: str | None) -> str | None:
+    if title is None:
+        return None
+
+    normalized = str(title).strip()
+    if not normalized:
+        return None
+
+    matched_titles = []
+    seen = set()
+    for segment in TITLE_SPLIT_PATTERN.split(normalized):
+        candidate = segment.strip()
+        if not candidate or candidate in seen:
+            continue
+        if candidate in TITLE_PRIORITY:
+            matched_titles.append(candidate)
+            seen.add(candidate)
+
+    if not matched_titles:
+        return None
+
+    return min(matched_titles, key=lambda item: TITLE_PRIORITY[item])
+
+
 def normalize_professor_payload(payload: ProfessorUpsertPayload) -> dict[str, Any]:
     return {
         "name": payload.name.strip(),
         "email": payload.email.strip().lower(),
-        "title": payload.title,
+        "title": normalize_professor_title(payload.title),
         "university": payload.university,
         "school": payload.school,
         "department": payload.department,
@@ -242,7 +278,7 @@ def _normalize_import_row(row: dict[str, Any]) -> dict[str, Any] | None:
     return {
         "name": name,
         "email": email,
-        "title": raw_values["title"],
+        "title": normalize_professor_title(raw_values["title"]),
         "university": raw_values["university"],
         "school": raw_values["school"],
         "department": raw_values["department"],

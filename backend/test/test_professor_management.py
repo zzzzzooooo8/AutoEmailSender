@@ -98,7 +98,7 @@ class ProfessorManagementServiceTests(unittest.TestCase):
             {
                 "name": "张明远更新",
                 "email": "zhang@example.edu",
-                "title": "讲席教授",
+                "title": None,
                 "university": "示例大学",
                 "school": "人工智能学院",
                 "department": "计算机科学系",
