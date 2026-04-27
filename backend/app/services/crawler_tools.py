@@ -460,6 +460,9 @@ async def crawl_page_with_http(ctx: CrawlToolContext, url: str) -> PageSnapshot:
         return snapshot
 
     snapshot = html_to_snapshot(final_url, response.text, "http")
+    if response.status_code in CRAWL4AI_BROWSER_FALLBACK_STATUS:
+        snapshot.suspicious_empty = True
+        snapshot.error_message = f"HTTP {response.status_code} blocked, browser fallback advised"
     snapshot.links = [
         link for link in snapshot.links if _is_same_host_http_url(ctx.start_url, link)
     ][:MAX_LINKS]
