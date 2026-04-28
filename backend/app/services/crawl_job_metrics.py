@@ -1,17 +1,11 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-
-USAGE_METADATA_PATTERN = re.compile(
-    r"usage_metadata=\{'input_tokens':\s*(?P<input>\d+),\s*'output_tokens':\s*(?P<output>\d+),\s*'total_tokens':\s*(?P<total>\d+)",
-)
-TOKEN_USAGE_PATTERN = re.compile(
-    r"'token_usage':\s*\{'completion_tokens':\s*(?P<output>\d+),\s*'prompt_tokens':\s*(?P<input>\d+),\s*'total_tokens':\s*(?P<total>\d+)",
-)
+from app.models import CrawlJobStatus
+from app.services.crawl_job_runs import extract_token_usage
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,14 +16,18 @@ class CrawlJobMetrics:
     duration_seconds: int = 0
 
 
-def build_crawl_job_metrics(job: Any) -> CrawlJobMetrics:
+def build_crawl_job_metrics(job: Any, *, now: datetime | None = None) -> CrawlJobMetrics:
+    current_run = getattr(job, "current_run", None)
+    if current_run is not None:
+        return _build_current_run_metrics(current_run, now=now)
+
     trace_events = _normalize_trace(getattr(job, "agent_trace", None))
     input_tokens = 0
     output_tokens = 0
     total_tokens = 0
 
     for event in trace_events:
-        usage = _extract_token_usage(event)
+        usage = extract_token_usage(event)
         if usage is None:
             continue
         input_tokens += usage["input_tokens"]
@@ -50,37 +48,20 @@ def build_crawl_job_metrics(job: Any) -> CrawlJobMetrics:
     )
 
 
-def _extract_token_usage(event: dict[str, object]) -> dict[str, int] | None:
-    haystack = _stringify_trace_payload(event)
-    metadata_match = USAGE_METADATA_PATTERN.search(haystack)
-    if metadata_match:
-        return {
-            "input_tokens": int(metadata_match.group("input")),
-            "output_tokens": int(metadata_match.group("output")),
-            "total_tokens": int(metadata_match.group("total")),
-        }
+def _build_current_run_metrics(current_run: Any, *, now: datetime | None) -> CrawlJobMetrics:
+    duration_seconds = int(getattr(current_run, "active_seconds", 0) or 0)
+    active_started_at = _ensure_datetime(getattr(current_run, "active_started_at", None))
+    run_status = getattr(current_run, "status", None)
+    if run_status == CrawlJobStatus.RUNNING.value and active_started_at is not None:
+        resolved_now = _ensure_datetime(now) or datetime.now(UTC)
+        duration_seconds += max(0, int((resolved_now - active_started_at).total_seconds()))
 
-    token_usage_match = TOKEN_USAGE_PATTERN.search(haystack)
-    if token_usage_match:
-        return {
-            "input_tokens": int(token_usage_match.group("input")),
-            "output_tokens": int(token_usage_match.group("output")),
-            "total_tokens": int(token_usage_match.group("total")),
-        }
-
-    return None
-
-
-def _stringify_trace_payload(event: dict[str, object]) -> str:
-    parts: list[str] = []
-    for key in ("message", "summary"):
-        value = event.get(key)
-        if isinstance(value, str):
-            parts.append(value)
-    raw = event.get("raw")
-    if raw is not None:
-        parts.append(str(raw))
-    return "\n".join(parts)
+    return CrawlJobMetrics(
+        input_tokens=int(getattr(current_run, "input_tokens", 0) or 0),
+        output_tokens=int(getattr(current_run, "output_tokens", 0) or 0),
+        total_tokens=int(getattr(current_run, "total_tokens", 0) or 0),
+        duration_seconds=duration_seconds,
+    )
 
 
 def _normalize_trace(value: Any) -> list[dict[str, object]]:
