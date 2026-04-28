@@ -16,16 +16,20 @@ from app.services.crawler_tools import (
     CrawlJobPaused,
     CrawlToolContext,
     CandidateEnrichmentPayload,
+    ProfessorCandidatePayload,
     build_candidate_enrichment_prompt,
+    build_profile_candidate_prompt,
     crawl_page_with_crawl4ai,
     ensure_crawl_job_can_continue,
     extract_candidate_profile_enrichment,
+    save_candidates,
 )
 
 
 NO_LLM_PROFILE_ERROR = "请先配置可用的 LLM Profile"
 WORKER_CANCELLED_ERROR = "抓取任务被后台 worker 取消"
 NO_CANDIDATES_SAVED_ERROR = "抓取结束但未成功保存任何候选导师"
+PROFILE_EXTRACTION_FAILED_ERROR = "未能从详情页识别导师信息"
 INVALID_SAVE_TOOL_CALL_ERROR = (
     "抓取结果未成功保存：Agent 生成了无效的 save_professor_candidates 调用"
 )
@@ -98,13 +102,21 @@ async def run_queued_crawl_jobs_once(
         await _append_agent_trace(session_factory, job_id, event)
 
     try:
-        await run_faculty_crawler_agent(ctx, llm_profile, trace_callback=trace_callback)
-        await _enrich_saved_candidates(
-            session_factory,
-            ctx,
-            llm_profile=llm_profile,
-            trace_callback=trace_callback,
-        )
+        if job.entry_type == "profile":
+            await _run_profile_crawl_job(
+                session_factory,
+                ctx,
+                llm_profile=llm_profile,
+                trace_callback=trace_callback,
+            )
+        else:
+            await run_faculty_crawler_agent(ctx, llm_profile, trace_callback=trace_callback)
+            await _enrich_saved_candidates(
+                session_factory,
+                ctx,
+                llm_profile=llm_profile,
+                trace_callback=trace_callback,
+            )
         await _complete_running_job(session_factory, job_id)
     except CrawlJobPaused:
         await _emit_trace_event(
@@ -193,6 +205,59 @@ async def _complete_running_job(
             )
         job.updated_at = datetime.now(UTC)
         await session.commit()
+
+
+async def _run_profile_crawl_job(
+    session_factory: async_sessionmaker[AsyncSession],
+    ctx: CrawlToolContext,
+    *,
+    llm_profile: LLMProfile,
+    trace_callback: Any | None = None,
+) -> None:
+    async with session_factory() as session:
+        await ensure_crawl_job_can_continue(session, ctx.job_id)
+
+    await _emit_trace_event(
+        trace_callback,
+        {
+            "event_type": "profile_entry",
+            "message": "开始抓取单个导师详情页",
+            "created_at": datetime.now(UTC).isoformat(),
+            "raw": {"url": ctx.start_url},
+        },
+    )
+    snapshot = await crawl_page_with_crawl4ai(ctx, ctx.start_url, intent="profile")
+    if snapshot.status != "succeeded" or not snapshot.text.strip():
+        raise ValueError(snapshot.error_message or "详情页抓取失败")
+
+    async with session_factory() as session:
+        await ensure_crawl_job_can_continue(session, ctx.job_id)
+
+    candidate = await extract_profile_candidate_with_llm(ctx, llm_profile, snapshot.text)
+    if not candidate.name.strip():
+        raise ValueError(PROFILE_EXTRACTION_FAILED_ERROR)
+
+    candidate = candidate.model_copy(
+        update={
+            "university": candidate.university or ctx.university,
+            "school": candidate.school or ctx.school,
+            "profile_url": candidate.profile_url or ctx.start_url,
+            "source_url": candidate.source_url or ctx.start_url,
+        },
+    )
+    saved = await save_candidates(ctx, [candidate])
+    if not saved:
+        raise ValueError(PROFILE_EXTRACTION_FAILED_ERROR)
+
+    await _emit_trace_event(
+        trace_callback,
+        {
+            "event_type": "profile_entry",
+            "message": f"详情页导师候选提取成功：{saved[0].name}",
+            "created_at": datetime.now(UTC).isoformat(),
+            "raw": {"candidate_id": saved[0].id, "url": ctx.start_url},
+        },
+    )
 
 
 async def _enrich_saved_candidates(
@@ -479,6 +544,28 @@ async def enrich_candidate_profile_with_llm(
     if not content:
         raise ValueError("模型补全返回空响应")
     return CandidateEnrichmentPayload.model_validate_json(content)
+
+
+async def extract_profile_candidate_with_llm(
+    ctx: CrawlToolContext,
+    llm_profile: LLMProfile,
+    page_text: str,
+) -> ProfessorCandidatePayload:
+    model = build_faculty_crawler_model(llm_profile)
+    prompt = build_profile_candidate_prompt(
+        university=ctx.university,
+        school=ctx.school,
+        profile_url=ctx.start_url,
+        page_text=page_text,
+    )
+    response = await model.ainvoke(prompt)
+    content = _extract_model_message_content(response)
+    if not content:
+        raise ValueError(PROFILE_EXTRACTION_FAILED_ERROR)
+    candidate = ProfessorCandidatePayload.model_validate_json(content)
+    if not candidate.name.strip():
+        raise ValueError(PROFILE_EXTRACTION_FAILED_ERROR)
+    return candidate
 
 
 def _extract_fallback_enrichment(page_text: str) -> CandidateEnrichmentPayload:

@@ -245,6 +245,149 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(candidate.recent_papers, [])
             self.assertIsNone(candidate.profile_url)
 
+    async def test_profile_entry_type_extracts_single_candidate(self) -> None:
+        job_id = await self._create_default_profile_and_job(
+            start_url="https://example.edu/faculty/zhang",
+            entry_type="profile",
+        )
+        calls: list[tuple[str, str]] = []
+
+        async def fake_crawl_page_with_crawl4ai(
+            ctx: CrawlToolContext,
+            url: str,
+            *,
+            intent: str = "generic",
+        ) -> PageSnapshot:
+            _ = ctx
+            calls.append((url, intent))
+            return PageSnapshot(
+                url="https://example.edu/faculty/zhang",
+                title="张三",
+                text="张三\n教授\n邮箱：zhang@example.edu\n研究方向：机器学习",
+                html="<html></html>",
+                links=[],
+                fetch_method="http",
+                status="succeeded",
+            )
+
+        async def fake_extract_profile_candidate_with_llm(
+            ctx: CrawlToolContext,
+            llm_profile: LLMProfile,
+            page_text: str,
+        ) -> ProfessorCandidatePayload:
+            _ = llm_profile, page_text
+            return ProfessorCandidatePayload(
+                name="张三",
+                email="zhang@example.edu",
+                title="教授",
+                research_direction="机器学习",
+                profile_url=ctx.start_url,
+                source_url=ctx.start_url,
+                confidence=0.9,
+            )
+
+        with patch(
+            "app.services.crawl_job_runtime.crawl_page_with_crawl4ai",
+            new=fake_crawl_page_with_crawl4ai,
+        ), patch(
+            "app.services.crawl_job_runtime.extract_profile_candidate_with_llm",
+            new=fake_extract_profile_candidate_with_llm,
+        ):
+            processed = await run_queued_crawl_jobs_once(self.session_factory)
+
+        self.assertEqual(processed, 1)
+        self.assertEqual(calls, [("https://example.edu/faculty/zhang", "profile")])
+        job = await self._get_job(job_id)
+        self.assertEqual(job.status, CrawlJobStatus.NEEDS_REVIEW.value)
+        async with self.session_factory() as session:
+            candidate = await session.scalar(
+                select(CrawlCandidate).where(CrawlCandidate.job_id == job_id)
+            )
+            self.assertIsNotNone(candidate)
+            assert candidate is not None
+            self.assertEqual(candidate.name, "张三")
+            self.assertEqual(candidate.university, "示例大学")
+            self.assertEqual(candidate.school, "计算机学院")
+            self.assertEqual(candidate.profile_url, "https://example.edu/faculty/zhang")
+
+    async def test_profile_entry_type_fails_when_page_fetch_fails(self) -> None:
+        job_id = await self._create_default_profile_and_job(
+            start_url="https://example.edu/faculty/zhang",
+            entry_type="profile",
+        )
+
+        async def fake_crawl_page_with_crawl4ai(
+            ctx: CrawlToolContext,
+            url: str,
+            *,
+            intent: str = "generic",
+        ) -> PageSnapshot:
+            _ = ctx, url, intent
+            return PageSnapshot(
+                url="https://example.edu/faculty/zhang",
+                title=None,
+                text="",
+                html="",
+                links=[],
+                fetch_method="http",
+                status="failed",
+                error_message="详情页抓取失败",
+            )
+
+        with patch(
+            "app.services.crawl_job_runtime.crawl_page_with_crawl4ai",
+            new=fake_crawl_page_with_crawl4ai,
+        ):
+            await run_queued_crawl_jobs_once(self.session_factory)
+
+        job = await self._get_job(job_id)
+        self.assertEqual(job.status, CrawlJobStatus.FAILED.value)
+        self.assertEqual(job.error_message, "详情页抓取失败")
+
+    async def test_profile_entry_type_fails_when_name_is_missing(self) -> None:
+        job_id = await self._create_default_profile_and_job(
+            start_url="https://example.edu/faculty/unknown",
+            entry_type="profile",
+        )
+
+        async def fake_crawl_page_with_crawl4ai(
+            ctx: CrawlToolContext,
+            url: str,
+            *,
+            intent: str = "generic",
+        ) -> PageSnapshot:
+            _ = ctx, url, intent
+            return PageSnapshot(
+                url="https://example.edu/faculty/unknown",
+                title="Profile",
+                text="研究方向：机器学习",
+                html="<html></html>",
+                links=[],
+                fetch_method="http",
+                status="succeeded",
+            )
+
+        async def fake_extract_profile_candidate_with_llm(
+            ctx: CrawlToolContext,
+            llm_profile: LLMProfile,
+            page_text: str,
+        ) -> ProfessorCandidatePayload:
+            _ = ctx, llm_profile, page_text
+            raise ValueError("未能从详情页识别导师信息")
+
+        with patch(
+            "app.services.crawl_job_runtime.crawl_page_with_crawl4ai",
+            new=fake_crawl_page_with_crawl4ai,
+        ), patch(
+            "app.services.crawl_job_runtime.extract_profile_candidate_with_llm",
+            new=fake_extract_profile_candidate_with_llm,
+        ):
+            await run_queued_crawl_jobs_once(self.session_factory)
+
+        job = await self._get_job(job_id)
+        self.assertEqual(job.status, CrawlJobStatus.FAILED.value)
+        self.assertEqual(job.error_message, "未能从详情页识别导师信息")
+
     async def test_run_queued_crawl_job_fails_when_agent_finishes_without_saved_candidates(self) -> None:
         job_id = await self._create_default_profile_and_job()
 
@@ -815,6 +958,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self,
         *,
         start_url: str = "https://example.edu/faculty",
+        entry_type: str = "list",
     ) -> int:
         async with self.session_factory() as session:
             profile = LLMProfile(
@@ -828,6 +972,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 university="示例大学",
                 school="计算机学院",
                 start_url=start_url,
+                entry_type=entry_type,
                 status=CrawlJobStatus.QUEUED.value,
                 progress_current=0,
                 progress_total=0,
