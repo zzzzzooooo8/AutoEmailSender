@@ -13,7 +13,7 @@ from app.services.outreach_templates import import_outreach_template_file
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "f2a7c9d8e1b3"
+HEAD_REVISION = "a4b6c8d0e2f1"
 LEGACY_RUNTIME_REVISION = "7a1d5e42c9bd"
 
 
