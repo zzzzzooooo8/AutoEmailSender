@@ -25,6 +25,7 @@ describe('crawlJobsApi', () => {
       university: '测试大学',
       school: '计算机学院',
       start_url: 'https://example.edu/faculty',
+      entry_type: 'profile',
       llm_profile_id: 3,
     };
     const createdJob = {
@@ -54,6 +55,7 @@ describe('crawlJobsApi', () => {
         university: '测试大学',
         school: '计算机学院',
         start_url: 'https://example.edu/faculty',
+        entry_type: 'list',
         llm_profile_id: 3,
         status: 'running',
         progress_current: 1,
@@ -79,6 +81,7 @@ describe('crawlJobsApi', () => {
       university: '测试大学',
       school: '计算机学院',
       start_url: 'https://example.edu/faculty',
+      entry_type: 'list',
       llm_profile_id: 3,
       status: 'running',
       progress_current: 1,
@@ -119,6 +122,7 @@ describe('crawlJobsApi', () => {
       university: '测试大学',
       school: '计算机学院',
       start_url: 'https://example.edu/faculty',
+      entry_type: 'list',
       llm_profile_id: 3,
       status: 'canceled',
       progress_current: 1,

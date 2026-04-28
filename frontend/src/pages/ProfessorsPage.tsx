@@ -43,6 +43,7 @@ import {
   updateProfessor,
 } from "@/lib/api/professorsApi";
 import type {
+  CrawlJobEntryTypeDTO,
   ProfessorImportFileResultDTO,
   ProfessorManagementItemDTO,
   ProfessorUpsertPayloadDTO,
@@ -65,6 +66,7 @@ type CrawlerJobFormState = {
   university: string;
   school: string;
   start_url: string;
+  entry_type: CrawlJobEntryTypeDTO;
 };
 
 const PROFESSORS_PER_PAGE = 20;
@@ -95,6 +97,7 @@ const emptyCrawlerJobForm = (): CrawlerJobFormState => ({
   university: "",
   school: "",
   start_url: "",
+  entry_type: "list",
 });
 
 const toProfessorForm = (
@@ -642,12 +645,14 @@ export const ProfessorsPage = () => {
       university: crawlerFormState.university.trim(),
       school: crawlerFormState.school.trim(),
       start_url: crawlerFormState.start_url.trim(),
+      entry_type: crawlerFormState.entry_type,
       llm_profile_id: null,
     };
     const diagnosticData = {
       university: payload.university,
       school: payload.school,
       start_url: payload.start_url,
+      entry_type: payload.entry_type,
     };
     safeRecordUserAction({
       eventName: "professors.crawl_job_create_submitted",
@@ -1377,7 +1382,7 @@ export const ProfessorsPage = () => {
       <ModalShell
         open={crawlerModalOpen}
         title="创建抓取任务"
-        description="填写学校、学院和教师列表页面 URL，系统会创建抓取任务，候选审核将在后续版本补齐。"
+        description="填写学校、学院和页面 URL，系统会创建抓取任务，抓取结果进入候选审核。"
         onClose={closeCrawlerModal}
         maxWidthClassName="max-w-2xl"
       >
@@ -1412,10 +1417,63 @@ export const ProfessorsPage = () => {
               placeholder="示例：计算机学院"
             />
           </label>
+          <fieldset className="grid gap-2">
+            <legend className="text-sm font-medium text-stone-800">
+              入口类型
+            </legend>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {(
+                [
+                  {
+                    value: "list",
+                    label: "列表页",
+                    hint: "学院教师列表或师资队伍页面",
+                  },
+                  {
+                    value: "profile",
+                    label: "详情页",
+                    hint: "单个导师个人主页",
+                  },
+                ] satisfies Array<{
+                  value: CrawlJobEntryTypeDTO;
+                  label: string;
+                  hint: string;
+                }>
+              ).map((option) => (
+                <label
+                  key={option.value}
+                  className="flex cursor-pointer items-start gap-2 rounded-2xl border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-700 transition hover:border-primary/50"
+                >
+                  <input
+                    type="radio"
+                    name="crawler-entry-type"
+                    aria-label={option.label}
+                    value={option.value}
+                    checked={crawlerFormState.entry_type === option.value}
+                    onChange={() =>
+                      setCrawlerFormState((previous) => ({
+                        ...previous,
+                        entry_type: option.value,
+                      }))
+                    }
+                    className="mt-1"
+                  />
+                  <span>
+                    <span className="block font-medium text-stone-900">
+                      {option.label}
+                    </span>
+                    <span className="block text-xs leading-5 text-stone-500">
+                      {option.hint}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
           <label className="block">
-            {renderFieldLabel("教师列表页面 URL", true)}
+            {renderFieldLabel("页面 URL", true)}
             <input
-              aria-label="教师列表页面 URL"
+              aria-label="页面 URL"
               value={crawlerFormState.start_url}
               onChange={(event) =>
                 setCrawlerFormState((previous) => ({
@@ -1424,7 +1482,11 @@ export const ProfessorsPage = () => {
                 }))
               }
               className={inputClassName}
-              placeholder="示例：https://example.edu/faculty"
+              placeholder={
+                crawlerFormState.entry_type === "profile"
+                  ? "示例：https://example.edu/faculty/zhang"
+                  : "示例：https://example.edu/faculty"
+              }
             />
           </label>
         </div>

@@ -307,12 +307,14 @@ export type CrawlJobStatusDTO =
   | 'failed'
   | 'canceled';
 
+export type CrawlJobEntryTypeDTO = 'list' | 'profile';
 export type CrawlCandidateReviewStatusDTO = 'pending' | 'accepted' | 'rejected' | 'merged';
 
 export interface CrawlJobCreatePayloadDTO {
   university: string;
   school: string;
   start_url: string;
+  entry_type: CrawlJobEntryTypeDTO;
   llm_profile_id: number | null;
 }
 
@@ -321,6 +323,7 @@ export interface CrawlJobDTO {
   university: string;
   school: string;
   start_url: string;
+  entry_type: CrawlJobEntryTypeDTO;
   llm_profile_id: number | null;
   status: CrawlJobStatusDTO;
   progress_current: number;

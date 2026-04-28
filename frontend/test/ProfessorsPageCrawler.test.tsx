@@ -61,7 +61,7 @@ describe("ProfessorsPage crawler job entry", () => {
     fireEvent.change(within(dialog).getByLabelText("学院"), {
       target: { value: "计算机学院" },
     });
-    fireEvent.change(within(dialog).getByLabelText("教师列表页面 URL"), {
+    fireEvent.change(within(dialog).getByLabelText("页面 URL"), {
       target: { value: "https://example.edu/faculty" },
     });
 
@@ -72,6 +72,7 @@ describe("ProfessorsPage crawler job entry", () => {
         university: "示例大学",
         school: "计算机学院",
         start_url: "https://example.edu/faculty",
+        entry_type: "list",
         llm_profile_id: null,
       });
     });
@@ -89,6 +90,7 @@ describe("ProfessorsPage crawler job entry", () => {
             university: "示例大学",
             school: "计算机学院",
             start_url: "https://example.edu/faculty",
+            entry_type: "list",
           },
         }),
         expect.objectContaining({
@@ -97,6 +99,40 @@ describe("ProfessorsPage crawler job entry", () => {
         }),
       ]),
     );
+  });
+
+  it("creates a profile crawl job when profile entry type is selected", async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(listProfessorsForManagement).toHaveBeenCalledWith("active");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "智能抓取" }));
+
+    const dialog = screen.getByRole("dialog", { name: "创建抓取任务" });
+    fireEvent.click(within(dialog).getByRole("radio", { name: "详情页" }));
+    fireEvent.change(within(dialog).getByLabelText("学校"), {
+      target: { value: "示例大学" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("学院"), {
+      target: { value: "计算机学院" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("页面 URL"), {
+      target: { value: "https://example.edu/faculty/zhang" },
+    });
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "开始抓取" }));
+
+    await waitFor(() => {
+      expect(createCrawlJob).toHaveBeenCalledWith({
+        university: "示例大学",
+        school: "计算机学院",
+        start_url: "https://example.edu/faculty/zhang",
+        entry_type: "profile",
+        llm_profile_id: null,
+      });
+    });
   });
 
   it("records a failed crawler job creation as a user action", async () => {
@@ -117,7 +153,7 @@ describe("ProfessorsPage crawler job entry", () => {
     fireEvent.change(within(dialog).getByLabelText("学院"), {
       target: { value: "计算机学院" },
     });
-    fireEvent.change(within(dialog).getByLabelText("教师列表页面 URL"), {
+    fireEvent.change(within(dialog).getByLabelText("页面 URL"), {
       target: { value: "https://example.edu/faculty?token=secret#frag" },
     });
 
