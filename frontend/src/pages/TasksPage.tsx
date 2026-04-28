@@ -34,7 +34,9 @@ import {
   listCrawlCandidates,
   listCrawlJobs,
   listCrawlPages,
+  pauseCrawlJob,
   retryCrawlJob,
+  resumeCrawlJob,
 } from "@/lib/api/crawlJobsApi";
 import {
   getReviewableCandidateIds,
@@ -61,6 +63,7 @@ type TasksTab = "batch" | "crawl";
 const CRAWL_JOB_STATUS_LABELS: Record<CrawlJobStatusDTO, string> = {
   queued: "排队中",
   running: "运行中",
+  paused: "已暂停",
   needs_review: "待审核",
   completed: "已完成",
   failed: "失败",
@@ -70,6 +73,7 @@ const CRAWL_JOB_STATUS_LABELS: Record<CrawlJobStatusDTO, string> = {
 const CRAWL_JOB_STATUS_TONES: Record<CrawlJobStatusDTO, string> = {
   queued: "border-sky-200 bg-sky-50 text-sky-700",
   running: "border-primary/20 bg-primary/10 text-primary",
+  paused: "border-orange-200 bg-orange-50 text-orange-700",
   needs_review: "border-amber-200 bg-amber-50 text-amber-700",
   completed: "border-emerald-200 bg-emerald-50 text-emerald-700",
   failed: "border-red-200 bg-red-50 text-red-700",
@@ -293,6 +297,12 @@ export const TasksPage = () => {
   >([]);
   const [crawlJobApproveLoading, setCrawlJobApproveLoading] = useState(false);
   const [retryingCrawlJobId, setRetryingCrawlJobId] = useState<number | null>(
+    null,
+  );
+  const [pausingCrawlJobId, setPausingCrawlJobId] = useState<number | null>(
+    null,
+  );
+  const [resumingCrawlJobId, setResumingCrawlJobId] = useState<number | null>(
     null,
   );
   const [selectedCandidateDetail, setSelectedCandidateDetail] =
@@ -742,11 +752,89 @@ export const TasksPage = () => {
     }
   };
 
+  const handlePauseCrawlJob = async (jobId: number) => {
+    const confirmed = await confirm({
+      title: "确认暂停这个抓取任务？",
+      description: "暂停后会保留已抓到的页面和候选导师，之后可以继续。",
+      confirmLabel: "确认暂停",
+      cancelLabel: "先不暂停",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    const diagnosticData = { jobId };
+    safeRecordUserAction({
+      eventName: "tasks.crawl_job_pause_submitted",
+      data: diagnosticData,
+    });
+    setPausingCrawlJobId(jobId);
+    try {
+      await pauseCrawlJob(jobId);
+      safeRecordUserAction({
+        eventName: "tasks.crawl_job_pause_succeeded",
+        data: diagnosticData,
+      });
+      notifySuccess("抓取任务已暂停", "已保留当前抓取结果，之后可以继续");
+      await loadCrawlJobs();
+      if (selectedCrawlJobId === jobId) {
+        await loadCrawlJobDetails(jobId, { showLoading: false });
+      }
+    } catch (actionError) {
+      safeRecordUserAction({
+        eventName: "tasks.crawl_job_pause_failed",
+        data: diagnosticData,
+        level: "error",
+      });
+      const message =
+        actionError instanceof Error ? actionError.message : "抓取任务暂停失败";
+      notifyError("抓取任务操作失败", message);
+    } finally {
+      setPausingCrawlJobId((currentJobId) =>
+        currentJobId === jobId ? null : currentJobId,
+      );
+    }
+  };
+
+  const handleResumeCrawlJob = async (jobId: number) => {
+    const diagnosticData = { jobId };
+    safeRecordUserAction({
+      eventName: "tasks.crawl_job_resume_submitted",
+      data: diagnosticData,
+    });
+    setResumingCrawlJobId(jobId);
+    try {
+      await resumeCrawlJob(jobId);
+      safeRecordUserAction({
+        eventName: "tasks.crawl_job_resume_succeeded",
+        data: diagnosticData,
+      });
+      notifySuccess("抓取任务已继续", "任务已重新进入队列，稍后开始执行");
+      await loadCrawlJobs();
+      if (selectedCrawlJobId === jobId) {
+        await loadCrawlJobDetails(jobId, { showLoading: false });
+      }
+    } catch (actionError) {
+      safeRecordUserAction({
+        eventName: "tasks.crawl_job_resume_failed",
+        data: diagnosticData,
+        level: "error",
+      });
+      const message =
+        actionError instanceof Error ? actionError.message : "抓取任务继续失败";
+      notifyError("抓取任务操作失败", message);
+    } finally {
+      setResumingCrawlJobId((currentJobId) =>
+        currentJobId === jobId ? null : currentJobId,
+      );
+    }
+  };
+
   const handleCancelCrawlJob = async (jobId: number) => {
     const confirmed = await confirm({
       title: "确认取消这个抓取任务？",
-      description: "取消后当前抓取任务会停止继续抓取页面和候选导师。",
-      confirmLabel: "确认取消",
+      description: "取消后本次抓取不会继续。如需重新抓取，请使用重试。",
+      confirmLabel: "取消抓取",
       cancelLabel: "先保留",
       tone: "danger",
     });
@@ -1223,14 +1311,46 @@ export const TasksPage = () => {
                     <FileSearch className="h-4 w-4" />
                   </button>
                   {job.status === "queued" || job.status === "running" ? (
-                    <button
-                      type="button"
-                      onClick={() => void handleCancelCrawlJob(job.id)}
-                      className="ui-btn-danger"
-                    >
-                      <Square className="h-4 w-4" />
-                      取消抓取
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void handlePauseCrawlJob(job.id)}
+                        disabled={pausingCrawlJobId === job.id}
+                        className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <Pause className="h-4 w-4" />
+                        {pausingCrawlJobId === job.id ? "暂停中..." : "暂停抓取"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleCancelCrawlJob(job.id)}
+                        className="ui-btn-danger"
+                      >
+                        <Square className="h-4 w-4" />
+                        取消抓取
+                      </button>
+                    </>
+                  ) : null}
+                  {job.status === "paused" ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void handleResumeCrawlJob(job.id)}
+                        disabled={resumingCrawlJobId === job.id}
+                        className="ui-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <Play className="h-4 w-4" />
+                        {resumingCrawlJobId === job.id ? "继续中..." : "继续抓取"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleCancelCrawlJob(job.id)}
+                        className="ui-btn-danger"
+                      >
+                        <Square className="h-4 w-4" />
+                        取消抓取
+                      </button>
+                    </>
                   ) : null}
                   {(job.status === "failed" || job.status === "canceled") ? (
                     <button

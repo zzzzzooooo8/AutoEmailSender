@@ -51,6 +51,16 @@ export const cancelCrawlJob = (jobId: number) =>
     method: 'POST',
   });
 
+export const pauseCrawlJob = (jobId: number) =>
+  apiFetch<CrawlJobDTO>(`/api/crawl-jobs/${jobId}/pause`, {
+    method: 'POST',
+  });
+
+export const resumeCrawlJob = (jobId: number) =>
+  apiFetch<CrawlJobDTO>(`/api/crawl-jobs/${jobId}/resume`, {
+    method: 'POST',
+  });
+
 export const retryCrawlJob = (jobId: number, payload: CrawlJobRetryPayloadDTO) =>
   apiFetch<CrawlJobDTO>(`/api/crawl-jobs/${jobId}/retry`, {
     method: 'POST',

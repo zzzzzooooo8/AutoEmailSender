@@ -301,6 +301,7 @@ export interface ProfessorActionResultDTO {
 export type CrawlJobStatusDTO =
   | 'queued'
   | 'running'
+  | 'paused'
   | 'needs_review'
   | 'completed'
   | 'failed'
