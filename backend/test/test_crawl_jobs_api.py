@@ -100,6 +100,26 @@ class CrawlJobsApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201, msg=response.text)
         self.assertEqual(response.json()["start_url"], "https://cai.jxufe.edu.cn/lists/26.html")
 
+    def test_create_crawl_job_creates_initial_run(self) -> None:
+        response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "llm_profile_id": None,
+            },
+        )
+
+        self.assertEqual(response.status_code, 201, msg=response.text)
+        job_id = response.json()["id"]
+        runs = self._list_job_runs(job_id)
+
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(runs[0]["attempt_number"], 1)
+        self.assertEqual(runs[0]["status"], "queued")
+        self.assertEqual(self._get_job_current_run_id(job_id), runs[0]["id"])
+
     def test_crawl_job_review_flow(self) -> None:
         create_response = self.client.post(
             "/api/crawl-jobs",
@@ -192,11 +212,17 @@ class CrawlJobsApiTests(unittest.TestCase):
         self.assertEqual(create_response.status_code, 201, msg=create_response.text)
         job_id = create_response.json()["id"]
         self._seed_page_and_candidates(job_id)
+        initial_runs = self._list_job_runs(job_id)
+        self.assertEqual(len(initial_runs), 1)
 
         pause_response = self.client.post(f"/api/crawl-jobs/{job_id}/pause")
 
         self.assertEqual(pause_response.status_code, 200, msg=pause_response.text)
         self.assertEqual(pause_response.json()["status"], "paused")
+        paused_runs = self._list_job_runs(job_id)
+        self.assertEqual(len(paused_runs), 1)
+        self.assertEqual(paused_runs[0]["id"], initial_runs[0]["id"])
+        self.assertEqual(paused_runs[0]["status"], "paused")
 
         detail_response = self.client.get(f"/api/crawl-jobs/{job_id}")
         self.assertEqual(detail_response.status_code, 200)
@@ -207,6 +233,10 @@ class CrawlJobsApiTests(unittest.TestCase):
 
         self.assertEqual(resume_response.status_code, 200, msg=resume_response.text)
         self.assertEqual(resume_response.json()["status"], "queued")
+        resumed_runs = self._list_job_runs(job_id)
+        self.assertEqual(len(resumed_runs), 1)
+        self.assertEqual(resumed_runs[0]["id"], initial_runs[0]["id"])
+        self.assertEqual(resumed_runs[0]["status"], "queued")
 
         resumed_detail_response = self.client.get(f"/api/crawl-jobs/{job_id}")
         self.assertEqual(resumed_detail_response.json()["page_count"], 1)
@@ -267,6 +297,38 @@ class CrawlJobsApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, msg=response.text)
         self.assertEqual(response.json()["status"], "canceled")
+        runs = self._list_job_runs(job_id)
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(runs[0]["status"], "canceled")
+        self.assertIsNotNone(runs[0]["finished_at"])
+
+    def test_retry_crawl_job_creates_new_run(self) -> None:
+        create_response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "llm_profile_id": None,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        job_id = create_response.json()["id"]
+        initial_run_id = self._list_job_runs(job_id)[0]["id"]
+        self._set_job_status(job_id, "failed")
+
+        response = self.client.post(
+            f"/api/crawl-jobs/{job_id}/retry",
+            json={"clear_existing_data": False},
+        )
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        self.assertEqual(response.json()["status"], "queued")
+        runs = self._list_job_runs(job_id)
+        self.assertEqual([run["attempt_number"] for run in runs], [1, 2])
+        self.assertEqual(runs[0]["id"], initial_run_id)
+        self.assertEqual(runs[1]["status"], "queued")
+        self.assertEqual(self._get_job_current_run_id(job_id), runs[1]["id"])
 
     def test_crawl_job_events_include_status_trace_page_and_candidate_messages(self) -> None:
         create_response = self.client.post(
@@ -480,6 +542,46 @@ class CrawlJobsApiTests(unittest.TestCase):
                 await session.commit()
 
         asyncio.run(_set_trace())
+
+    def _list_job_runs(self, job_id: int) -> list[dict[str, object]]:
+        async def _list_runs() -> list[dict[str, object]]:
+            from app.core.database import get_session_factory
+            from app.models import CrawlJobRun
+            from sqlalchemy import select
+
+            async with get_session_factory()() as session:
+                runs = list(
+                    (
+                        await session.execute(
+                            select(CrawlJobRun)
+                            .where(CrawlJobRun.job_id == job_id)
+                            .order_by(CrawlJobRun.attempt_number.asc()),
+                        )
+                    ).scalars(),
+                )
+                return [
+                    {
+                        "id": run.id,
+                        "attempt_number": run.attempt_number,
+                        "status": run.status,
+                        "finished_at": run.finished_at,
+                    }
+                    for run in runs
+                ]
+
+        return asyncio.run(_list_runs())
+
+    def _get_job_current_run_id(self, job_id: int) -> int | None:
+        async def _get_current_run_id() -> int | None:
+            from app.core.database import get_session_factory
+            from app.models import CrawlJob
+
+            async with get_session_factory()() as session:
+                job = await session.get(CrawlJob, job_id)
+                self.assertIsNotNone(job)
+                return job.current_run_id
+
+        return asyncio.run(_get_current_run_id())
 
     def _run_alembic_upgrade(self) -> None:
         env = os.environ.copy()
