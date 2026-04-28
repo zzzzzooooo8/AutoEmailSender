@@ -1,5 +1,12 @@
 import { apiFetch } from '@/lib/api/client';
-import type { TestComposeDraftPayloadDTO, TestComposeThreadDTO } from '@/types';
+import type {
+  TestComposeDraftPayloadDTO,
+  TestComposeStatusDTO,
+  TestComposeThreadDTO,
+} from '@/types';
+
+export const getTestComposeStatus = (identityId: number) =>
+  apiFetch<TestComposeStatusDTO>(`/api/test-compose/${identityId}/status`);
 
 export const getTestComposeThread = (identityId: number, llmProfileId: number) =>
   apiFetch<TestComposeThreadDTO>(`/api/test-compose/${identityId}/${llmProfileId}`);

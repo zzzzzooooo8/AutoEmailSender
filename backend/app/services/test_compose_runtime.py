@@ -22,6 +22,7 @@ from app.schemas.test_compose import (
     TestComposeLLMRead,
     TestComposeMessageRead,
     TestComposeMessageSendRequest,
+    TestComposeStatusRead,
     TestComposeThreadRead,
 )
 from app.services import llm_runtime, mail_runtime
@@ -50,6 +51,23 @@ async def build_test_compose_thread(
     compose_session = await _get_or_create_test_compose_session(session, identity_id, llm_profile_id, identity)
     history = await _list_test_compose_messages(session, compose_session.id)
     return _serialize_test_compose_thread(identity, llm_profile, compose_session, history)
+
+
+async def get_test_compose_status(
+    session: AsyncSession,
+    *,
+    identity_id: int,
+) -> TestComposeStatusRead:
+    await _get_identity(session, identity_id)
+    sent_message_id = await session.scalar(
+        select(TestComposeMessage.id)
+        .where(
+            TestComposeMessage.identity_id == identity_id,
+            TestComposeMessage.status == "sent",
+        )
+        .limit(1),
+    )
+    return TestComposeStatusRead(completed=sent_message_id is not None)
 
 
 async def generate_test_compose_draft(

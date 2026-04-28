@@ -7,6 +7,7 @@ import type { IdentityDTO, LLMProfileDTO } from "@/types";
 
 const mockedUseSelectionContext = vi.hoisted(() => vi.fn());
 const mockedGetTestComposeThread = vi.hoisted(() => vi.fn());
+const mockedGetTestComposeStatus = vi.hoisted(() => vi.fn());
 
 vi.mock("@/context/SelectionContext", () => ({
   useSelectionContext: mockedUseSelectionContext,
@@ -92,6 +93,7 @@ vi.mock("@/lib/api/llmProfiles", () => ({
 
 vi.mock("@/lib/api/testComposeApi", () => ({
   getTestComposeThread: mockedGetTestComposeThread,
+  getTestComposeStatus: mockedGetTestComposeStatus,
 }));
 
 const selectedIdentity: IdentityDTO = {
@@ -187,6 +189,9 @@ describe("ProfilePage onboarding", () => {
       },
       history: [],
     });
+    mockedGetTestComposeStatus.mockResolvedValue({
+      completed: false,
+    });
     mockedUseSelectionContext.mockReturnValue({
       identities: [selectedIdentity],
       llmProfiles: [selectedLlmProfile],
@@ -231,6 +236,9 @@ describe("ProfilePage onboarding", () => {
   });
 
   it("marks test compose as completed when the current thread has sent history", async () => {
+    mockedGetTestComposeStatus.mockResolvedValueOnce({
+      completed: true,
+    });
     mockedGetTestComposeThread.mockResolvedValueOnce({
       identity: {
         id: selectedIdentity.id,
@@ -275,6 +283,40 @@ describe("ProfilePage onboarding", () => {
       );
     });
     expect(screen.getByText("已发送测试邮件")).toBeInTheDocument();
+  });
+
+  it("keeps test compose completed for the identity after switching to another llm profile", async () => {
+    const backupLlmProfile: LLMProfileDTO = {
+      ...selectedLlmProfile,
+      id: 2,
+      name: "备用模型",
+      model_name: "gpt-backup",
+      is_default: false,
+    };
+    mockedUseSelectionContext.mockReturnValue({
+      identities: [selectedIdentity],
+      llmProfiles: [selectedLlmProfile, backupLlmProfile],
+      selectedIdentityId: selectedIdentity.id,
+      selectedLlmProfileId: backupLlmProfile.id,
+      selectedIdentity,
+      selectedLlmProfile: backupLlmProfile,
+      setSelectedIdentityId: vi.fn(),
+      setSelectedLlmProfileId: vi.fn(),
+      refreshSelections: vi.fn(),
+      loading: false,
+    });
+    mockedGetTestComposeStatus.mockResolvedValueOnce({
+      completed: true,
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /4\. 测试写信/ }),
+      ).toHaveTextContent("已完成");
+    });
+    expect(mockedGetTestComposeStatus).toHaveBeenCalledWith(selectedIdentity.id);
   });
 
   it("keeps setup sections collapsed by default and opens them from recommendations", async () => {

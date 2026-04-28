@@ -605,6 +605,10 @@ export interface TestComposeThreadDTO {
   }>;
 }
 
+export interface TestComposeStatusDTO {
+  completed: boolean;
+}
+
 export interface TestComposeDraftPayloadDTO {
   subject: string | null;
   body_text: string;

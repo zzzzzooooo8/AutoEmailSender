@@ -49,6 +49,10 @@ class TestComposeThreadRead(BaseModel):
     history: list[TestComposeMessageRead]
 
 
+class TestComposeStatusRead(BaseModel):
+    completed: bool
+
+
 class TestComposeDraftUpdateRequest(BaseModel):
     subject: str | None = None
     body_text: str

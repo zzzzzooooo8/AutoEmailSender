@@ -3107,6 +3107,52 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(send_payload["history"][0]["rfc_message_id"], "<self-test@example.com>")
         mocked_send.assert_awaited_once()
 
+    def test_test_compose_status_is_completed_by_identity_across_llm_profiles(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        first_llm_id = self._create_llm()
+        second_llm_response = self.client.post(
+            "/api/llm-profiles",
+            json={
+                "name": "备用模型",
+                "provider": "openai",
+                "api_base_url": "https://api-backup.example.com/v1",
+                "api_key": "sk-test-backup",
+                "model_name": "gpt-backup",
+                "matcher_prompt_template": "matcher",
+                "writer_prompt_template": "writer",
+                "temperature": 0.2,
+                "max_tokens": 2048,
+                "is_default": False,
+            },
+        )
+        self.assertEqual(second_llm_response.status_code, 201, msg=second_llm_response.text)
+
+        with patch(
+            "app.services.test_compose_runtime.mail_runtime.send_email_to_recipient",
+            AsyncMock(
+                return_value=self._build_send_result(
+                    message_id="<identity-status@example.com>",
+                    provider_payload={},
+                ),
+            ),
+        ):
+            send_response = self.client.post(
+                f"/api/test-compose/{identity_id}/{first_llm_id}/send",
+                json={
+                    "subject": "测试主题",
+                    "body_text": "测试正文",
+                    "body_html": "<p>测试正文</p>",
+                    "selected_material_ids": [],
+                },
+            )
+
+        self.assertEqual(send_response.status_code, 200, msg=send_response.text)
+
+        status_response = self.client.get(f"/api/test-compose/{identity_id}/status")
+
+        self.assertEqual(status_response.status_code, 200, msg=status_response.text)
+        self.assertTrue(status_response.json()["completed"])
+
     def test_test_compose_template_generation_preserves_placeholders_in_draft(self) -> None:
         response = self.client.post(
             "/api/identities",

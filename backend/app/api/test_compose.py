@@ -7,17 +7,33 @@ from app.core.database import get_async_session
 from app.schemas.test_compose import (
     TestComposeDraftUpdateRequest,
     TestComposeMessageSendRequest,
+    TestComposeStatusRead,
     TestComposeThreadRead,
 )
 from app.services.test_compose_runtime import (
     build_test_compose_thread,
     generate_test_compose_draft,
+    get_test_compose_status,
     save_test_compose_draft,
     send_test_compose_message,
 )
 
 
 router = APIRouter(prefix="/api/test-compose", tags=["test-compose"])
+
+
+@router.get("/{identity_id}/status", response_model=TestComposeStatusRead)
+async def get_test_compose_identity_status(
+    identity_id: int,
+    session: AsyncSession = Depends(get_async_session),
+) -> TestComposeStatusRead:
+    return await _run_test_compose_action(
+        session,
+        lambda: get_test_compose_status(
+            session,
+            identity_id=identity_id,
+        ),
+    )
 
 
 @router.get("/{identity_id}/{llm_profile_id}", response_model=TestComposeThreadRead)

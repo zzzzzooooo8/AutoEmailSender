@@ -55,7 +55,7 @@ import {
   testLLMProfile,
   updateLLMProfile,
 } from "@/lib/api/llmProfiles";
-import { getTestComposeThread } from "@/lib/api/testComposeApi";
+import { getTestComposeStatus } from "@/lib/api/testComposeApi";
 import {
   MATERIAL_TYPE_LABELS,
   type IdentityDTO,
@@ -1871,7 +1871,7 @@ export const ProfilePage = () => {
   ]);
 
   useEffect(() => {
-    if (!selectedIdentityId || !selectedLlmProfileId) {
+    if (!selectedIdentityId) {
       setTestComposeSetupStatus("unchecked");
       return;
     }
@@ -1881,18 +1881,11 @@ export const ProfilePage = () => {
     const loadTestComposeStatus = async () => {
       setTestComposeSetupStatus("loading");
       try {
-        const thread = await getTestComposeThread(
-          selectedIdentityId,
-          selectedLlmProfileId,
-        );
+        const status = await getTestComposeStatus(selectedIdentityId);
         if (ignore) {
           return;
         }
-        setTestComposeSetupStatus(
-          thread.history.some((message) => message.status === "sent")
-            ? "completed"
-            : "pending",
-        );
+        setTestComposeSetupStatus(status.completed ? "completed" : "pending");
       } catch {
         if (!ignore) {
           setTestComposeSetupStatus("pending");
@@ -1905,7 +1898,7 @@ export const ProfilePage = () => {
     return () => {
       ignore = true;
     };
-  }, [selectedIdentityId, selectedLlmProfileId]);
+  }, [selectedIdentityId]);
 
   useEffect(() => {
     if (!editingIdentity) {
