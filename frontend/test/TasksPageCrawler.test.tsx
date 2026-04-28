@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TasksPage } from "@/pages/TasksPage";
@@ -6,6 +6,7 @@ import { listBatchTaskItems, listBatchTasks } from "@/lib/api/batchTasksApi";
 import { clearDiagnosticEvents, getDiagnosticEvents } from "@/lib/diagnostics";
 import {
   cancelCrawlJob,
+  getCrawlJob,
   getCrawlJobEvents,
   listCrawlCandidates,
   listCrawlJobs,
@@ -43,6 +44,7 @@ vi.mock("@/lib/api/batchTasksApi", () => ({
 vi.mock("@/lib/api/crawlJobsApi", () => ({
   listCrawlJobs: vi.fn(),
   cancelCrawlJob: vi.fn(),
+  getCrawlJob: vi.fn(),
   listCrawlPages: vi.fn(),
   listCrawlCandidates: vi.fn(),
   getCrawlJobEvents: vi.fn(),
@@ -62,6 +64,10 @@ const runningJob = {
   updated_at: "2026-04-26T10:00:00Z",
   page_count: 12,
   candidate_count: 34,
+  input_tokens: 1000,
+  output_tokens: 400,
+  total_tokens: 1400,
+  duration_seconds: 90,
   latest_event_message: "正在分析教师列表",
 } as const;
 
@@ -92,6 +98,7 @@ describe("TasksPage crawler jobs tab", () => {
     vi.mocked(listBatchTaskItems).mockResolvedValue([]);
     vi.mocked(listCrawlJobs).mockResolvedValue([runningJob]);
     vi.mocked(cancelCrawlJob).mockResolvedValue(runningJob);
+    vi.mocked(getCrawlJob).mockResolvedValue(runningJob);
     vi.mocked(listCrawlPages).mockResolvedValue([
       {
         id: 11,
@@ -193,7 +200,7 @@ describe("TasksPage crawler jobs tab", () => {
       ]),
     );
     expect(screen.getByText("调用 crawl_page 抓取入口页面")).toBeInTheDocument();
-    expect(screen.getByText("04/26 16:34")).toBeInTheDocument();
+    expect(screen.getByText("04/26 16:34:00")).toBeInTheDocument();
     expect(screen.getByText("Faculty")).toBeInTheDocument();
     expect(screen.getByText("张教授")).toBeInTheDocument();
 
@@ -202,6 +209,52 @@ describe("TasksPage crawler jobs tab", () => {
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "抓取任务详情" })).not.toBeInTheDocument();
     });
+  });
+
+  it("keeps crawl log and crawled page pagination aligned in the detail dialog", async () => {
+    vi.mocked(getCrawlJobEvents).mockResolvedValue(
+      Array.from({ length: 6 }, (_, index) => ({
+        id: `evt-${index + 1}`,
+        job_id: 7,
+        event_type: "crawl_page",
+        message: `执行日志 ${index + 1}`,
+        created_at: "2026-04-26T08:34:00",
+        raw: null,
+      })),
+    );
+    vi.mocked(listCrawlPages).mockResolvedValue(
+      Array.from({ length: 6 }, (_, index) => ({
+        id: index + 11,
+        job_id: 7,
+        url: `https://example.edu/faculty/${index + 1}`,
+        parent_url: null,
+        fetch_method: "http",
+        page_type: "faculty_list",
+        status: "fetched",
+        title: `Faculty ${index + 1}`,
+        text_excerpt: null,
+        error_message: null,
+        created_at: "2026-04-26T10:01:00Z",
+      })),
+    );
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "教师抓取" }));
+    fireEvent.click(await screen.findByRole("button", { name: "查看详情" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "抓取任务详情" });
+    const logSection = within(dialog)
+      .getByRole("heading", { name: "执行日志" })
+      .closest("section");
+    const pageSection = within(dialog)
+      .getByRole("heading", { name: "已抓页面" })
+      .closest("section");
+
+    expect(logSection).toHaveClass("flex", "h-full", "flex-col");
+    expect(pageSection).toHaveClass("flex", "h-full", "flex-col");
+    expect(logSection?.querySelector("[data-monitor-section-list]")).toHaveClass("flex-1");
+    expect(pageSection?.querySelector("[data-monitor-section-list]")).toHaveClass("flex-1");
   });
 
   it("paginates crawl job cards", async () => {

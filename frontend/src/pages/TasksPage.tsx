@@ -1759,13 +1759,13 @@ export const TasksPage = () => {
                 </div>
               ) : null}
 
-              <div className="grid gap-6 xl:grid-cols-2">
-                <section>
+              <div className="grid items-stretch gap-6 xl:grid-cols-2">
+                <section className="flex h-full flex-col">
                   <h3 className="flex items-center gap-2 text-sm font-semibold text-stone-900">
                     <Activity className="h-4 w-4 text-primary" />
                     执行日志
                   </h3>
-                  <div className="mt-3 space-y-3">
+                  <div className="mt-3 flex-1 space-y-3" data-monitor-section-list>
                     {crawlJobEvents.length > 0 ? (
                       visibleCrawlJobEvents.map((event) => (
                         <div key={event.id} className="flex gap-3">
@@ -1794,12 +1794,12 @@ export const TasksPage = () => {
                   />
                 </section>
 
-                <section>
+                <section className="flex h-full flex-col">
                   <h3 className="flex items-center gap-2 text-sm font-semibold text-stone-900">
                     <FileSearch className="h-4 w-4 text-sky-600" />
                     已抓页面
                   </h3>
-                  <div className="mt-3 space-y-2">
+                  <div className="mt-3 flex-1 space-y-2" data-monitor-section-list>
                     {crawlJobPages.length > 0 ? (
                       visibleCrawlJobPages.map((page) => (
                         <div
