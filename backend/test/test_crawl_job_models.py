@@ -4,12 +4,17 @@ import unittest
 
 from app.models.crawl_job import (
     CrawlCandidateReviewStatus,
+    CrawlJobEntryType,
     CrawlJobStatus,
     CrawlPageStatus,
 )
 
 
 class CrawlJobModelTests(unittest.TestCase):
+    def test_entry_type_constants_are_stable(self) -> None:
+        self.assertEqual(CrawlJobEntryType.LIST.value, "list")
+        self.assertEqual(CrawlJobEntryType.PROFILE.value, "profile")
+
     def test_status_constants_are_stable(self) -> None:
         self.assertEqual(CrawlJobStatus.QUEUED.value, "queued")
         self.assertEqual(CrawlJobStatus.RUNNING.value, "running")

@@ -24,6 +24,11 @@ class CrawlJobStatus(str, Enum):
     CANCELED = "canceled"
 
 
+class CrawlJobEntryType(str, Enum):
+    LIST = "list"
+    PROFILE = "profile"
+
+
 class CrawlPageStatus(str, Enum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
@@ -43,6 +48,11 @@ class CrawlJob(Base):
     university: Mapped[str] = mapped_column(String(255), nullable=False)
     school: Mapped[str] = mapped_column(String(255), nullable=False)
     start_url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    entry_type: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        server_default=text("'list'"),
+    )
     llm_profile_id: Mapped[int | None] = mapped_column(
         ForeignKey("llm_profiles.id", ondelete="SET NULL"),
         nullable=True,

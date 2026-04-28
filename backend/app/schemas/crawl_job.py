@@ -20,6 +20,7 @@ CrawlJobStatusDTO = Literal[
     "failed",
     "canceled",
 ]
+CrawlJobEntryTypeDTO = Literal["list", "profile"]
 CrawlCandidateReviewStatusDTO = Literal["pending", "accepted", "rejected", "merged"]
 
 
@@ -27,6 +28,7 @@ class CrawlJobCreatePayload(BaseModel):
     university: str
     school: str
     start_url: str
+    entry_type: CrawlJobEntryTypeDTO = "list"
     llm_profile_id: int | None = None
 
     @field_validator("university", "school", "start_url", mode="before")
@@ -62,6 +64,7 @@ class CrawlJobRead(BaseModel):
     university: str
     school: str
     start_url: str
+    entry_type: CrawlJobEntryTypeDTO = "list"
     llm_profile_id: int | None
     status: CrawlJobStatusDTO
     progress_current: int

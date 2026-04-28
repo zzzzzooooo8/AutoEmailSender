@@ -82,6 +82,35 @@ class CrawlJobsApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
 
+    def test_create_crawl_job_defaults_to_list_entry_type(self) -> None:
+        response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "llm_profile_id": None,
+            },
+        )
+
+        self.assertEqual(response.status_code, 201, msg=response.text)
+        self.assertEqual(response.json()["entry_type"], "list")
+
+    def test_create_crawl_job_accepts_profile_entry_type(self) -> None:
+        response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty/zhang",
+                "entry_type": "profile",
+                "llm_profile_id": None,
+            },
+        )
+
+        self.assertEqual(response.status_code, 201, msg=response.text)
+        self.assertEqual(response.json()["entry_type"], "profile")
+
     def test_create_crawl_job_allows_domain_without_dns_resolution(self) -> None:
         with patch(
             "app.services.crawler_tools.socket.getaddrinfo",
@@ -113,6 +142,7 @@ class CrawlJobsApiTests(unittest.TestCase):
         self.assertEqual(create_response.status_code, 201, msg=create_response.text)
         job = create_response.json()
         self.assertEqual(job["status"], "queued")
+        self.assertEqual(job["entry_type"], "list")
 
         self._seed_page_and_candidates(job["id"])
         self._set_job_status(job["id"], "needs_review")
@@ -125,6 +155,7 @@ class CrawlJobsApiTests(unittest.TestCase):
         self.assertEqual(list_job["page_count"], 1)
         self.assertEqual(list_job["candidate_count"], 3)
         self.assertEqual(list_job["latest_event_message"], "Agent 已完成入口页面分析")
+        self.assertEqual(list_job["entry_type"], "list")
 
         detail_response = self.client.get(f"/api/crawl-jobs/{job['id']}")
         self.assertEqual(detail_response.status_code, 200)
@@ -133,6 +164,7 @@ class CrawlJobsApiTests(unittest.TestCase):
         self.assertEqual(detail_job["page_count"], 1)
         self.assertEqual(detail_job["candidate_count"], 3)
         self.assertEqual(detail_job["latest_event_message"], "Agent 已完成入口页面分析")
+        self.assertEqual(detail_job["entry_type"], "list")
 
         pages_response = self.client.get(f"/api/crawl-jobs/{job['id']}/pages")
         self.assertEqual(pages_response.status_code, 200)

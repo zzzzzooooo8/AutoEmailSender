@@ -46,6 +46,7 @@ async def create_crawl_job(
         university=payload.university,
         school=payload.school,
         start_url=payload.start_url,
+        entry_type=payload.entry_type,
         llm_profile_id=payload.llm_profile_id,
         status=CrawlJobStatus.QUEUED.value,
         progress_current=0,
@@ -63,6 +64,7 @@ async def create_crawl_job(
             "university": job.university,
             "school": job.school,
             "start_url": job.start_url,
+            "entry_type": job.entry_type,
             "llm_profile_id": job.llm_profile_id,
         },
     )
