@@ -4,8 +4,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select, delete
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.database import get_async_session
 from app.models import (
@@ -30,6 +31,13 @@ from app.schemas.crawl_job import (
 )
 from app.services.crawl_job_events import build_crawl_job_events, normalize_agent_trace_event
 from app.services.crawl_job_metrics import build_crawl_job_metrics
+from app.services.crawl_job_runs import (
+    create_initial_crawl_job_run,
+    create_retry_crawl_job_run,
+    mark_crawl_job_run_finished,
+    mark_crawl_job_run_paused,
+    mark_crawl_job_run_queued,
+)
 from app.services.operation_logs import record_operation_log
 from app.services.professor_management import is_valid_professor_email
 
@@ -54,6 +62,7 @@ async def create_crawl_job(
     )
     session.add(job)
     await session.flush()
+    await create_initial_crawl_job_run(session, job)
     await record_operation_log(
         session,
         category="crawler",
@@ -81,6 +90,7 @@ async def list_crawl_jobs(
         (
             await session.execute(
                 select(CrawlJob)
+                .options(selectinload(CrawlJob.current_run))
                 .order_by(CrawlJob.created_at.desc(), CrawlJob.id.desc())
                 .limit(50),
             )
@@ -301,8 +311,15 @@ async def cancel_crawl_job(
     }:
         return job
 
+    now = datetime.now(UTC)
     job.status = CrawlJobStatus.CANCELED.value
-    job.updated_at = datetime.now(UTC)
+    job.updated_at = now
+    await mark_crawl_job_run_finished(
+        session,
+        job,
+        status=CrawlJobStatus.CANCELED.value,
+        now=now,
+    )
     await record_operation_log(
         session,
         category="crawler",
@@ -327,8 +344,10 @@ async def pause_crawl_job(
     if job.status not in {CrawlJobStatus.QUEUED.value, CrawlJobStatus.RUNNING.value}:
         raise HTTPException(status_code=409, detail="仅允许暂停排队中或运行中的抓取任务")
 
+    now = datetime.now(UTC)
     job.status = CrawlJobStatus.PAUSED.value
-    job.updated_at = datetime.now(UTC)
+    job.updated_at = now
+    await mark_crawl_job_run_paused(session, job, now=now)
     await record_operation_log(
         session,
         category="crawler",
@@ -351,9 +370,11 @@ async def resume_crawl_job(
     if job.status != CrawlJobStatus.PAUSED.value:
         raise HTTPException(status_code=409, detail="仅允许继续已暂停的抓取任务")
 
+    now = datetime.now(UTC)
     job.status = CrawlJobStatus.QUEUED.value
     job.error_message = None
-    job.updated_at = datetime.now(UTC)
+    job.updated_at = now
+    await mark_crawl_job_run_queued(session, job, now=now)
     await record_operation_log(
         session,
         category="crawler",
@@ -389,11 +410,13 @@ async def retry_crawl_job(
         )
         job.agent_trace = []
 
+    now = datetime.now(UTC)
     job.status = CrawlJobStatus.QUEUED.value
     job.progress_current = 0
     job.progress_total = 0
     job.error_message = None
-    job.updated_at = datetime.now(UTC)
+    job.updated_at = now
+    await create_retry_crawl_job_run(session, job, now=now)
     await record_operation_log(
         session,
         category="crawler",
@@ -411,7 +434,9 @@ async def retry_crawl_job(
 
 
 async def _get_crawl_job_or_404(session: AsyncSession, job_id: int) -> CrawlJob:
-    job = await session.get(CrawlJob, job_id)
+    job = await session.scalar(
+        select(CrawlJob).options(selectinload(CrawlJob.current_run)).where(CrawlJob.id == job_id),
+    )
     if job is None:
         raise HTTPException(status_code=404, detail="未找到抓取任务")
     return job

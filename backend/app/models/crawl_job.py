@@ -67,6 +67,10 @@ class CrawlJob(Base):
     progress_total: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     agent_trace: Mapped[list[dict[str, object]] | None] = mapped_column(JSON, nullable=True)
+    current_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("crawl_job_runs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -80,6 +84,15 @@ class CrawlJob(Base):
     )
 
     llm_profile: Mapped["LLMProfile | None"] = relationship()
+    current_run: Mapped["CrawlJobRun | None"] = relationship(
+        foreign_keys=[current_run_id],
+        post_update=True,
+    )
+    runs: Mapped[list["CrawlJobRun"]] = relationship(
+        back_populates="job",
+        cascade="all, delete-orphan",
+        foreign_keys="CrawlJobRun.job_id",
+    )
     pages: Mapped[list["CrawlPage"]] = relationship(
         back_populates="job",
         cascade="all, delete-orphan",
@@ -87,6 +100,40 @@ class CrawlJob(Base):
     candidates: Mapped[list["CrawlCandidate"]] = relationship(
         back_populates="job",
         cascade="all, delete-orphan",
+    )
+
+
+class CrawlJobRun(Base):
+    __tablename__ = "crawl_job_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("crawl_jobs.id", ondelete="CASCADE"), index=True)
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    active_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    active_seconds: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    job: Mapped["CrawlJob"] = relationship(
+        back_populates="runs",
+        foreign_keys=[job_id],
     )
 
 

@@ -11,6 +11,12 @@ from app.agents.faculty_crawler_agent import build_faculty_crawler_model, run_fa
 from app.models import CrawlCandidate, CrawlJob, CrawlJobStatus, CrawlPage, LLMProfile
 from app.services.crawler_debug import append_crawler_debug_event
 from app.services.crawl_job_events import normalize_agent_trace_event
+from app.services.crawl_job_runs import (
+    accumulate_crawl_job_run_tokens,
+    mark_crawl_job_run_finished,
+    mark_crawl_job_run_paused,
+    mark_crawl_job_run_running,
+)
 from app.services.crawler_tools import (
     CrawlJobCanceled,
     CrawlJobPaused,
@@ -78,11 +84,20 @@ async def run_queued_crawl_jobs_once(
             await session.rollback()
             return 0
 
+        await mark_crawl_job_run_running(session, job, now=now)
         llm_profile = await _resolve_llm_profile(session, job)
         if llm_profile is None:
+            failed_at = datetime.now(UTC)
             job.status = CrawlJobStatus.FAILED.value
             job.error_message = NO_LLM_PROFILE_ERROR
-            job.updated_at = datetime.now(UTC)
+            job.updated_at = failed_at
+            await mark_crawl_job_run_finished(
+                session,
+                job,
+                status=CrawlJobStatus.FAILED.value,
+                error_message=NO_LLM_PROFILE_ERROR,
+                now=failed_at,
+            )
             await session.commit()
             return 1
 
@@ -127,6 +142,7 @@ async def run_queued_crawl_jobs_once(
                 "created_at": datetime.now(UTC).isoformat(),
             },
         )
+        await _mark_job_paused(session_factory, job_id)
     except CrawlJobCanceled:
         await _emit_trace_event(
             trace_callback,
@@ -136,6 +152,7 @@ async def run_queued_crawl_jobs_once(
                 "created_at": datetime.now(UTC).isoformat(),
             },
         )
+        await _mark_job_canceled(session_factory, job_id)
     except asyncio.CancelledError:
         await _mark_job_failed(session_factory, job_id, WORKER_CANCELLED_ERROR)
         raise
@@ -178,6 +195,7 @@ async def _append_agent_trace(
         trace.append(normalized_event)
         job.agent_trace = trace[-MAX_AGENT_TRACE_EVENTS:]
         job.updated_at = datetime.now(UTC)
+        await accumulate_crawl_job_run_tokens(session, job_id, normalized_event)
         await session.commit()
 
 
@@ -203,7 +221,15 @@ async def _complete_running_job(
                 job_id,
                 job.agent_trace,
             )
-        job.updated_at = datetime.now(UTC)
+        now = datetime.now(UTC)
+        job.updated_at = now
+        await mark_crawl_job_run_finished(
+            session,
+            job,
+            status=job.status,
+            error_message=job.error_message,
+            now=now,
+        )
         await session.commit()
 
 
@@ -410,7 +436,52 @@ async def _mark_job_failed(
 
         job.status = CrawlJobStatus.FAILED.value
         job.error_message = error_message
-        job.updated_at = datetime.now(UTC)
+        now = datetime.now(UTC)
+        job.updated_at = now
+        await mark_crawl_job_run_finished(
+            session,
+            job,
+            status=CrawlJobStatus.FAILED.value,
+            error_message=error_message,
+            now=now,
+        )
+        await session.commit()
+
+
+async def _mark_job_paused(
+    session_factory: async_sessionmaker[AsyncSession],
+    job_id: int,
+) -> None:
+    async with session_factory() as session:
+        job = await session.get(CrawlJob, job_id)
+        if job is None:
+            return
+
+        now = datetime.now(UTC)
+        job.status = CrawlJobStatus.PAUSED.value
+        job.updated_at = now
+        await mark_crawl_job_run_paused(session, job, now=now)
+        await session.commit()
+
+
+async def _mark_job_canceled(
+    session_factory: async_sessionmaker[AsyncSession],
+    job_id: int,
+) -> None:
+    async with session_factory() as session:
+        job = await session.get(CrawlJob, job_id)
+        if job is None:
+            return
+
+        now = datetime.now(UTC)
+        job.status = CrawlJobStatus.CANCELED.value
+        job.updated_at = now
+        await mark_crawl_job_run_finished(
+            session,
+            job,
+            status=CrawlJobStatus.CANCELED.value,
+            now=now,
+        )
         await session.commit()
 
 

@@ -10,8 +10,9 @@ from unittest.mock import patch
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.models import Base, CrawlCandidate, CrawlJob, CrawlJobStatus, CrawlPage, LLMProfile
+from app.models import Base, CrawlCandidate, CrawlJob, CrawlJobRun, CrawlJobStatus, CrawlPage, LLMProfile
 from app.services.crawl_job_runtime import run_queued_crawl_jobs_once
+from app.services.crawl_job_runs import create_initial_crawl_job_run
 from app.services.crawler_tools import (
     CandidateEnrichmentPayload,
     CrawlToolContext,
@@ -89,6 +90,65 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(job.status, CrawlJobStatus.NEEDS_REVIEW.value)
         self.assertIsNone(job.error_message)
         self.assertEqual(await self._count_candidates(job_id), 1)
+        run = await self._get_current_run(job_id)
+        self.assertEqual(run.status, CrawlJobStatus.NEEDS_REVIEW.value)
+        self.assertIsNotNone(run.finished_at)
+        self.assertIsNone(run.active_started_at)
+
+    async def test_run_queued_crawl_job_accumulates_tokens_on_current_run(self) -> None:
+        job_id = await self._create_default_profile_and_job()
+
+        async def fake_run(
+            ctx: CrawlToolContext,
+            llm_profile: LLMProfile,
+            trace_callback=None,
+        ) -> dict[str, object]:
+            _ = llm_profile
+            if trace_callback is not None:
+                await trace_callback(
+                    {
+                        "type": "updates",
+                        "data": {
+                            "model": {
+                                "messages": [
+                                    "usage_metadata={'input_tokens': 100, 'output_tokens': 20, 'total_tokens': 120}",
+                                ]
+                            }
+                        },
+                    }
+                )
+                await trace_callback(
+                    {
+                        "type": "updates",
+                        "data": {
+                            "model": {
+                                "messages": [
+                                    "response_metadata={'token_usage': {'completion_tokens': 12, 'prompt_tokens': 34, 'total_tokens': 46}}",
+                                ]
+                            }
+                        },
+                    }
+                )
+            await save_candidates(
+                ctx,
+                [
+                    ProfessorCandidatePayload(
+                        name="张三",
+                        email="zhang@example.edu",
+                        title="教授",
+                    )
+                ],
+            )
+            return {}
+
+        with patch("app.services.crawl_job_runtime.run_faculty_crawler_agent", new=fake_run):
+            processed = await run_queued_crawl_jobs_once(self.session_factory)
+
+        self.assertEqual(processed, 1)
+        run = await self._get_current_run(job_id)
+        self.assertEqual(run.input_tokens, 134)
+        self.assertEqual(run.output_tokens, 32)
+        self.assertEqual(run.total_tokens, 166)
 
     async def test_worker_does_not_claim_paused_crawl_job(self) -> None:
         job_id = await self._create_default_profile_and_job()
@@ -129,6 +189,9 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
         job = await self._get_job(job_id)
         self.assertEqual(job.status, CrawlJobStatus.PAUSED.value)
         self.assertIsNone(job.error_message)
+        run = await self._get_current_run(job_id)
+        self.assertEqual(run.status, CrawlJobStatus.PAUSED.value)
+        self.assertIsNone(run.active_started_at)
 
     async def test_enrichment_stops_when_job_is_paused(self) -> None:
         job_id = await self._create_default_profile_and_job(
@@ -424,6 +487,10 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(job.error_message)
         self.assertIn("save_professor_candidates", job.error_message)
         self.assertEqual(await self._count_candidates(job_id), 0)
+        run = await self._get_current_run(job_id)
+        self.assertEqual(run.status, CrawlJobStatus.FAILED.value)
+        self.assertIsNotNone(run.error_message)
+        self.assertIsNotNone(run.finished_at)
 
     async def test_run_queued_crawl_job_surfaces_latest_page_failure_when_no_candidates_saved(self) -> None:
         job_id = await self._create_default_profile_and_job()
@@ -979,9 +1046,21 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             )
             session.add(profile)
             session.add(job)
+            await session.flush()
+            await create_initial_crawl_job_run(session, job)
             await session.commit()
             await session.refresh(job)
             return job.id
+
+    async def _get_current_run(self, job_id: int) -> CrawlJobRun:
+        async with self.session_factory() as session:
+            job = await session.get(CrawlJob, job_id)
+            if job is None or job.current_run_id is None:
+                raise AssertionError(f"crawl job {job_id} current run not found")
+            run = await session.get(CrawlJobRun, job.current_run_id)
+            if run is None:
+                raise AssertionError(f"crawl job run {job.current_run_id} not found")
+            return run
 
     async def _get_job(self, job_id: int) -> CrawlJob:
         async with self.session_factory() as session:
