@@ -223,7 +223,11 @@ async def _enrich_saved_candidates(
             },
         )
 
-        snapshot = await crawl_page_with_crawl4ai(ctx, candidate.profile_url or "")
+        snapshot = await crawl_page_with_crawl4ai(
+            ctx,
+            candidate.profile_url or "",
+            intent="profile",
+        )
         if snapshot.status != "succeeded" or not snapshot.text.strip():
             failed += 1
             await _emit_trace_event(

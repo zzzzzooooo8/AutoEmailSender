@@ -313,9 +313,11 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
         async def fake_crawl_page_with_crawl4ai(
             ctx: CrawlToolContext,
             url: str,
+            *,
+            intent: str = "generic",
         ) -> PageSnapshot:
             _ = ctx
-            sequence.append(f"enrich:{url}")
+            sequence.append(f"enrich:{url}:{intent}")
             return PageSnapshot(
                 url=url,
                 title="张三",
@@ -354,7 +356,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(processed, 1)
         self.assertEqual(
             sequence,
-            ["discover", "enrich:https://cta.jxufe.edu.cn/home/teacherInfo/detail?uid=1"],
+            ["discover", "enrich:https://cta.jxufe.edu.cn/home/teacherInfo/detail?uid=1:profile"],
         )
         job = await self._get_job(job_id)
         self.assertEqual(job.status, CrawlJobStatus.NEEDS_REVIEW.value)
@@ -421,8 +423,10 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
         async def fake_crawl_page_with_crawl4ai(
             ctx: CrawlToolContext,
             url: str,
+            *,
+            intent: str = "generic",
         ) -> PageSnapshot:
-            _ = ctx
+            _ = ctx, intent
             return PageSnapshot(
                 url=url,
                 title="王五",
@@ -502,8 +506,10 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
         async def fake_crawl_page_with_crawl4ai(
             ctx: CrawlToolContext,
             url: str,
+            *,
+            intent: str = "generic",
         ) -> PageSnapshot:
-            _ = ctx
+            _ = ctx, intent
             return PageSnapshot(
                 url=url,
                 title="赵六",
@@ -583,8 +589,10 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
         async def fake_crawl_page_with_crawl4ai(
             ctx: CrawlToolContext,
             url: str,
+            *,
+            intent: str = "generic",
         ) -> PageSnapshot:
-            _ = ctx, url
+            _ = ctx, url, intent
             return PageSnapshot(
                 url="https://cta.jxufe.edu.cn/home/teacherInfo/detail?uid=1",
                 title="张三",
@@ -656,8 +664,10 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
         async def fake_crawl_page_with_crawl4ai(
             ctx: CrawlToolContext,
             url: str,
+            *,
+            intent: str = "generic",
         ) -> PageSnapshot:
-            _ = ctx
+            _ = ctx, intent
             return PageSnapshot(
                 url=url,
                 title="王五",
