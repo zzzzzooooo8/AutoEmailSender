@@ -129,6 +129,14 @@ class CrawlToolContext:
         return bool(host and host in self.http_blocked_hosts)
 
 
+class CrawlJobPaused(RuntimeError):
+    """Raised internally when a crawl job is paused at a safe checkpoint."""
+
+
+class CrawlJobCanceled(RuntimeError):
+    """Raised internally when a crawl job is canceled at a safe checkpoint."""
+
+
 @dataclass(frozen=True)
 class _SafeCrawlUrl:
     hostname: str
@@ -816,7 +824,7 @@ async def save_candidates(
     ]
     saved: list[CrawlCandidate] = []
     async with ctx.session_factory() as session:
-        if await _is_crawl_job_canceled(session, ctx.job_id):
+        if await _is_crawl_job_stopped(session, ctx.job_id):
             return []
 
         existing_emails = await _load_existing_candidate_emails(session, ctx.job_id)
@@ -832,7 +840,7 @@ async def save_candidates(
             if email:
                 seen_emails.add(email.lower())
 
-        if await _is_crawl_job_canceled(session, ctx.job_id):
+        if await _is_crawl_job_stopped(session, ctx.job_id):
             await session.rollback()
             return []
 
@@ -855,11 +863,11 @@ async def record_page_snapshot(ctx: CrawlToolContext, snapshot: PageSnapshot) ->
         error_message=snapshot.error_message,
     )
     async with ctx.session_factory() as session:
-        if await _is_crawl_job_canceled(session, ctx.job_id):
+        if await _is_crawl_job_stopped(session, ctx.job_id):
             return None
 
         session.add(row)
-        if await _is_crawl_job_canceled(session, ctx.job_id):
+        if await _is_crawl_job_stopped(session, ctx.job_id):
             await session.rollback()
             return None
 
@@ -964,8 +972,17 @@ async def _load_existing_candidate_emails(session: AsyncSession, job_id: int) ->
     return {email.lower() for email in result if email}
 
 
-async def _is_crawl_job_canceled(session: AsyncSession, job_id: int) -> bool:
-    return await _get_job_status(session, job_id) == CrawlJobStatus.CANCELED.value
+async def ensure_crawl_job_can_continue(session: AsyncSession, job_id: int) -> None:
+    status = await _get_job_status(session, job_id)
+    if status == CrawlJobStatus.PAUSED.value:
+        raise CrawlJobPaused()
+    if status == CrawlJobStatus.CANCELED.value:
+        raise CrawlJobCanceled()
+
+
+async def _is_crawl_job_stopped(session: AsyncSession, job_id: int) -> bool:
+    status = await _get_job_status(session, job_id)
+    return status in {CrawlJobStatus.PAUSED.value, CrawlJobStatus.CANCELED.value}
 
 
 async def _get_job_status(session: AsyncSession, job_id: int) -> str | None:

@@ -348,6 +348,29 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved, [])
         self.assertEqual(session_factory.added, [])
 
+    async def test_save_candidates_skips_paused_job(self) -> None:
+        session_factory = _FakeSessionFactory(job_status="paused")
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://cs.example.edu/faculty",
+            university="示例大学",
+            school="计算机学院",
+            session_factory=session_factory,  # type: ignore[arg-type]
+        )
+
+        saved = await save_candidates(
+            ctx,
+            [
+                ProfessorCandidatePayload(
+                    name="张三",
+                    email="zhang@example.edu",
+                ),
+            ],
+        )
+
+        self.assertEqual(saved, [])
+        self.assertEqual(session_factory.added, [])
+
     async def test_save_candidates_rolls_back_when_job_is_canceled_before_commit(self) -> None:
         session_factory = _FakeSessionFactory(job_statuses=["running", "canceled"])
         ctx = CrawlToolContext(
@@ -374,6 +397,30 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_record_page_snapshot_skips_canceled_job(self) -> None:
         session_factory = _FakeSessionFactory(job_status="canceled")
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://cs.example.edu/faculty",
+            university="示例大学",
+            school="计算机学院",
+            session_factory=session_factory,  # type: ignore[arg-type]
+        )
+
+        row = await record_page_snapshot(
+            ctx,
+            PageSnapshot(
+                url="https://cs.example.edu/faculty",
+                title="Faculty",
+                text="Faculty page",
+                fetch_method="http",
+                status="succeeded",
+            ),
+        )
+
+        self.assertIsNone(row)
+        self.assertEqual(session_factory.added, [])
+
+    async def test_record_page_snapshot_skips_paused_job(self) -> None:
+        session_factory = _FakeSessionFactory(job_status="paused")
         ctx = CrawlToolContext(
             job_id=1,
             start_url="https://cs.example.edu/faculty",

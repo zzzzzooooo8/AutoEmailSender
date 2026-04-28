@@ -12,10 +12,13 @@ from app.models import CrawlCandidate, CrawlJob, CrawlJobStatus, CrawlPage, LLMP
 from app.services.crawler_debug import append_crawler_debug_event
 from app.services.crawl_job_events import normalize_agent_trace_event
 from app.services.crawler_tools import (
+    CrawlJobCanceled,
+    CrawlJobPaused,
     CrawlToolContext,
     CandidateEnrichmentPayload,
     build_candidate_enrichment_prompt,
     crawl_page_with_crawl4ai,
+    ensure_crawl_job_can_continue,
     extract_candidate_profile_enrichment,
 )
 
@@ -96,12 +99,6 @@ async def run_queued_crawl_jobs_once(
 
     try:
         await run_faculty_crawler_agent(ctx, llm_profile, trace_callback=trace_callback)
-    except asyncio.CancelledError:
-        await _mark_job_failed(session_factory, job_id, WORKER_CANCELLED_ERROR)
-        raise
-    except Exception as exc:
-        await _mark_job_failed(session_factory, job_id, str(exc))
-    else:
         await _enrich_saved_candidates(
             session_factory,
             ctx,
@@ -109,6 +106,29 @@ async def run_queued_crawl_jobs_once(
             trace_callback=trace_callback,
         )
         await _complete_running_job(session_factory, job_id)
+    except CrawlJobPaused:
+        await _emit_trace_event(
+            trace_callback,
+            {
+                "event_type": "job_control",
+                "message": "任务已暂停，已保留当前抓取结果",
+                "created_at": datetime.now(UTC).isoformat(),
+            },
+        )
+    except CrawlJobCanceled:
+        await _emit_trace_event(
+            trace_callback,
+            {
+                "event_type": "job_control",
+                "message": "任务已取消",
+                "created_at": datetime.now(UTC).isoformat(),
+            },
+        )
+    except asyncio.CancelledError:
+        await _mark_job_failed(session_factory, job_id, WORKER_CANCELLED_ERROR)
+        raise
+    except Exception as exc:
+        await _mark_job_failed(session_factory, job_id, str(exc))
 
     return 1
 
@@ -210,6 +230,9 @@ async def _enrich_saved_candidates(
         )
 
     for candidate in pending_candidates:
+        async with session_factory() as session:
+            await ensure_crawl_job_can_continue(session, ctx.job_id)
+
         await _emit_trace_event(
             trace_callback,
             {
@@ -387,6 +410,7 @@ async def _apply_candidate_enrichment(
         if not changed:
             return False
 
+        await ensure_crawl_job_can_continue(session, candidate.job_id)
         candidate.updated_at = datetime.now(UTC)
         await session.commit()
         return True

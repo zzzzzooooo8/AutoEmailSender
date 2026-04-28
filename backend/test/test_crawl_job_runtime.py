@@ -90,6 +90,107 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(job.error_message)
         self.assertEqual(await self._count_candidates(job_id), 1)
 
+    async def test_worker_does_not_claim_paused_crawl_job(self) -> None:
+        job_id = await self._create_default_profile_and_job()
+        async with self.session_factory() as session:
+            job = await session.get(CrawlJob, job_id)
+            assert job is not None
+            job.status = CrawlJobStatus.PAUSED.value
+            await session.commit()
+
+        processed = await run_queued_crawl_jobs_once(self.session_factory)
+
+        self.assertEqual(processed, 0)
+        job = await self._get_job(job_id)
+        self.assertEqual(job.status, CrawlJobStatus.PAUSED.value)
+
+    async def test_running_job_paused_by_tool_stays_paused(self) -> None:
+        job_id = await self._create_default_profile_and_job()
+
+        async def fake_run(
+            ctx: CrawlToolContext,
+            llm_profile: LLMProfile,
+            trace_callback=None,
+        ) -> dict[str, object]:
+            _ = llm_profile, trace_callback
+            async with ctx.session_factory() as session:
+                job = await session.get(CrawlJob, ctx.job_id)
+                assert job is not None
+                job.status = CrawlJobStatus.PAUSED.value
+                await session.commit()
+            from app.services.crawler_tools import CrawlJobPaused
+
+            raise CrawlJobPaused()
+
+        with patch("app.services.crawl_job_runtime.run_faculty_crawler_agent", new=fake_run):
+            processed = await run_queued_crawl_jobs_once(self.session_factory)
+
+        self.assertEqual(processed, 1)
+        job = await self._get_job(job_id)
+        self.assertEqual(job.status, CrawlJobStatus.PAUSED.value)
+        self.assertIsNone(job.error_message)
+
+    async def test_enrichment_stops_when_job_is_paused(self) -> None:
+        job_id = await self._create_default_profile_and_job(
+            start_url="https://example.edu/faculty",
+        )
+        enrichment_calls: list[str] = []
+
+        async def fake_run(
+            ctx: CrawlToolContext,
+            llm_profile: LLMProfile,
+            trace_callback=None,
+        ) -> dict[str, object]:
+            _ = llm_profile, trace_callback
+            await save_candidates(
+                ctx,
+                [
+                    ProfessorCandidatePayload(
+                        name="张三",
+                        email="zhang@example.edu",
+                        profile_url="https://example.edu/zhang",
+                    )
+                ],
+            )
+            async with ctx.session_factory() as session:
+                job = await session.get(CrawlJob, ctx.job_id)
+                assert job is not None
+                job.status = CrawlJobStatus.PAUSED.value
+                await session.commit()
+            return {}
+
+        async def fake_crawl_page_with_crawl4ai(
+            ctx: CrawlToolContext,
+            url: str,
+            *,
+            intent: str = "generic",
+        ) -> PageSnapshot:
+            _ = ctx, intent
+            enrichment_calls.append(url)
+            return PageSnapshot(
+                url=url,
+                title="张三",
+                text="院系：计算机学院",
+                html="<html></html>",
+                links=[],
+                fetch_method="http",
+                status="succeeded",
+            )
+
+        with patch(
+            "app.services.crawl_job_runtime.run_faculty_crawler_agent",
+            new=fake_run,
+        ), patch(
+            "app.services.crawl_job_runtime.crawl_page_with_crawl4ai",
+            new=fake_crawl_page_with_crawl4ai,
+        ):
+            processed = await run_queued_crawl_jobs_once(self.session_factory)
+
+        self.assertEqual(processed, 1)
+        self.assertEqual(enrichment_calls, [])
+        job = await self._get_job(job_id)
+        self.assertEqual(job.status, CrawlJobStatus.PAUSED.value)
+
     async def test_discovery_stage_saves_candidates_without_detail_fields(self) -> None:
         job_id = await self._create_default_profile_and_job(
             start_url="https://example.edu/faculty/list",
