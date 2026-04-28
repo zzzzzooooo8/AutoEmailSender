@@ -405,6 +405,10 @@ export interface CrawlJobApproveResultDTO {
   message: string;
 }
 
+export interface CrawlJobRetryPayloadDTO {
+  clear_existing_data: boolean;
+}
+
 export interface CreateBatchTaskRequestDTO {
   identity_id: number;
   llm_profile_id: number;

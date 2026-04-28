@@ -6,6 +6,7 @@ import type {
   CrawlJobCreatePayloadDTO,
   CrawlJobDTO,
   CrawlJobEventDTO,
+  CrawlJobRetryPayloadDTO,
   CrawlJobSummaryDTO,
   CrawlPageDTO,
 } from '@/types';
@@ -48,4 +49,10 @@ export const approveCrawlCandidates = (jobId: number, candidateIds: number[]) =>
 export const cancelCrawlJob = (jobId: number) =>
   apiFetch<CrawlJobDTO>(`/api/crawl-jobs/${jobId}/cancel`, {
     method: 'POST',
+  });
+
+export const retryCrawlJob = (jobId: number, payload: CrawlJobRetryPayloadDTO) =>
+  apiFetch<CrawlJobDTO>(`/api/crawl-jobs/${jobId}/retry`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
   });

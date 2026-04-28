@@ -34,6 +34,7 @@ import {
   listCrawlCandidates,
   listCrawlJobs,
   listCrawlPages,
+  retryCrawlJob,
 } from "@/lib/api/crawlJobsApi";
 import {
   getReviewableCandidateIds,
@@ -291,6 +292,9 @@ export const TasksPage = () => {
     number[]
   >([]);
   const [crawlJobApproveLoading, setCrawlJobApproveLoading] = useState(false);
+  const [retryingCrawlJobId, setRetryingCrawlJobId] = useState<number | null>(
+    null,
+  );
   const [selectedCandidateDetail, setSelectedCandidateDetail] =
     useState<CrawlCandidateDTO | null>(null);
   const lastLoadErrorRef = useRef<string | null>(null);
@@ -774,6 +778,54 @@ export const TasksPage = () => {
     }
   };
 
+  const handleRetryCrawlJob = async (jobId: number) => {
+    const confirmed = await confirm({
+      title: "确认重启抓取任务？",
+      description:
+        "重启后会清空该任务历史抓取数据（页面与候选导师），并重新加入队列执行。",
+      confirmLabel: "确认重启",
+      cancelLabel: "暂不处理",
+      tone: "primary",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    const diagnosticData = { jobId };
+    safeRecordUserAction({
+      eventName: "tasks.crawl_job_retry_submitted",
+      data: diagnosticData,
+    });
+    setRetryingCrawlJobId(jobId);
+    try {
+      await retryCrawlJob(jobId, { clear_existing_data: true });
+      safeRecordUserAction({
+        eventName: "tasks.crawl_job_retry_succeeded",
+        data: diagnosticData,
+      });
+      notifySuccess("抓取任务重启成功", "任务已进入队列，稍后开始执行");
+      await loadCrawlJobs();
+      if (selectedCrawlJobId === jobId) {
+        await loadCrawlJobDetails(jobId, { showLoading: false });
+      }
+    } catch (actionError) {
+      safeRecordUserAction({
+        eventName: "tasks.crawl_job_retry_failed",
+        data: diagnosticData,
+        level: "error",
+      });
+      const message =
+        actionError instanceof Error
+          ? actionError.message
+          : "抓取任务重启失败";
+      notifyError("抓取任务操作失败", message);
+    } finally {
+      setRetryingCrawlJobId((currentJobId) =>
+        currentJobId === jobId ? null : currentJobId,
+      );
+    }
+  };
+
   const handleToggleCrawlCandidateSelection = (candidateId: number) => {
     if (!reviewableCrawlCandidateIds.includes(candidateId)) {
       return;
@@ -1179,6 +1231,17 @@ export const TasksPage = () => {
                     >
                       <Square className="h-4 w-4" />
                       取消抓取
+                    </button>
+                  ) : null}
+                  {(job.status === "failed" || job.status === "canceled") ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleRetryCrawlJob(job.id)}
+                      disabled={retryingCrawlJobId === job.id}
+                      className="ui-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <Play className="h-4 w-4" />
+                      {retryingCrawlJobId === job.id ? "重启中..." : "重启抓取"}
                     </button>
                   ) : null}
                 </div>

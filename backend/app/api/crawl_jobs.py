@@ -1,9 +1,10 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
@@ -25,6 +26,7 @@ from app.schemas.crawl_job import (
     CrawlJobRead,
     CrawlJobSummaryRead,
     CrawlPageRead,
+    CrawlJobRetryPayload,
 )
 from app.services.crawl_job_events import build_crawl_job_events, normalize_agent_trace_event
 from app.services.crawl_job_metrics import build_crawl_job_metrics
@@ -308,6 +310,49 @@ async def cancel_crawl_job(
     return job
 
 
+@router.post("/{job_id}/retry", response_model=CrawlJobRead)
+async def retry_crawl_job(
+    job_id: int,
+    payload: CrawlJobRetryPayload,
+    session: AsyncSession = Depends(get_async_session),
+) -> CrawlJob:
+    job = await _get_crawl_job_or_404(session, job_id)
+    if job.status not in {CrawlJobStatus.FAILED.value, CrawlJobStatus.CANCELED.value}:
+        raise HTTPException(
+            status_code=409,
+            detail="仅允许重试状态为\"失败\"或\"已取消\"的抓取任务",
+        )
+
+    if payload.clear_existing_data:
+        await session.execute(
+            delete(CrawlCandidate).where(CrawlCandidate.job_id == job.id),
+        )
+        await session.execute(
+            delete(CrawlPage).where(CrawlPage.job_id == job.id),
+        )
+        job.agent_trace = []
+
+    job.status = CrawlJobStatus.QUEUED.value
+    job.progress_current = 0
+    job.progress_total = 0
+    job.error_message = None
+    job.updated_at = datetime.now(UTC)
+    await record_operation_log(
+        session,
+        category="crawler",
+        event_name="crawl_job.retried",
+        entity_type="crawl_job",
+        entity_id=str(job.id),
+        metadata={
+            "status": job.status,
+            "clear_existing_data": payload.clear_existing_data,
+        },
+    )
+    await session.commit()
+    await session.refresh(job)
+    return job
+
+
 async def _get_crawl_job_or_404(session: AsyncSession, job_id: int) -> CrawlJob:
     job = await session.get(CrawlJob, job_id)
     if job is None:
@@ -375,3 +420,4 @@ def _latest_event_message(agent_trace: object) -> str | None:
     if isinstance(message, str) and message.strip():
         return message.strip()
     return None
+

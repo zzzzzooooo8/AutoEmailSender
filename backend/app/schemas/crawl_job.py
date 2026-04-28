@@ -63,6 +63,10 @@ class CrawlJobRead(BaseModel):
     updated_at: datetime
 
 
+class CrawlJobRetryPayload(BaseModel):
+    clear_existing_data: bool = True
+
+
 class CrawlJobSummaryRead(CrawlJobRead):
     page_count: int = 0
     candidate_count: int = 0
@@ -191,3 +195,4 @@ class CrawlJobApproveResult(BaseModel):
     updated_count: int
     skipped_count: int
     message: str
+
