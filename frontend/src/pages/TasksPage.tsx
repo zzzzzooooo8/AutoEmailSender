@@ -785,7 +785,6 @@ export const TasksPage = () => {
         "重启后会清空该任务历史抓取数据（页面与候选导师），并重新加入队列执行。",
       confirmLabel: "确认重启",
       cancelLabel: "暂不处理",
-      tone: "primary",
     });
     if (!confirmed) {
       return;
