@@ -34,6 +34,7 @@ CRAWL4AI_BROWSER_WAIT_SELECTOR = "css:body"
 UNSAFE_CRAWL_URL_MESSAGE = "URL 不允许指向本机、内网或不可解析地址"
 MULTI_LABEL_PUBLIC_SUFFIXES = ("ac.cn", "com.cn", "edu.cn", "gov.cn", "net.cn", "org.cn")
 CrawlPageIntent = Literal["generic", "directory", "profile"]
+_DEFAULT_BROWSER_WAIT_FOR = object()
 
 
 class PageSnapshot(BaseModel):
@@ -644,14 +645,19 @@ def _browser_wait_selector_for_intent(intent: CrawlPageIntent) -> str:
 def _browser_run_config_for_intent(
     intent: CrawlPageIntent,
     *,
-    wait_for: str | None = None,
+    wait_for: str | None | object = _DEFAULT_BROWSER_WAIT_FOR,
 ) -> "CrawlerRunConfig":
     from crawl4ai import CrawlerRunConfig
 
+    selected_wait_for = (
+        _browser_wait_selector_for_intent(intent)
+        if wait_for is _DEFAULT_BROWSER_WAIT_FOR
+        else wait_for
+    )
     return CrawlerRunConfig(
         process_in_browser=True,
         wait_until="networkidle",
-        wait_for=wait_for if wait_for is not None else _browser_wait_selector_for_intent(intent),
+        wait_for=selected_wait_for,
         wait_for_timeout=CRAWL4AI_BROWSER_WAIT_TIMEOUT_MS,
         delay_before_return_html=CRAWL4AI_BROWSER_DELAY_SECONDS,
         page_timeout=JS_RENDER_TIMEOUT_MS,
@@ -682,14 +688,16 @@ async def _crawl_page_with_crawl4ai_browser(
             _run_browser_fetch_with_proactor_loop,
             absolute_url,
             goal,
+            intent,
         )
 
-    return await _crawl_page_with_crawl4ai_browser_direct(absolute_url, goal)
+    return await _crawl_page_with_crawl4ai_browser_direct(absolute_url, goal, intent)
 
 
 async def _crawl_page_with_crawl4ai_browser_direct(
     absolute_url: str,
     goal: str,
+    intent: CrawlPageIntent = "generic",
 ) -> PageSnapshot:
     _ = goal
     try:
@@ -701,21 +709,46 @@ async def _crawl_page_with_crawl4ai_browser_direct(
             error_message=_format_exception_for_snapshot(exc, "Failed to load Crawl4AI"),
         )
 
-    config = _browser_run_config_for_goal(goal)
+    configs = (
+        _browser_run_config_for_intent(intent),
+        _browser_run_config_for_intent(intent, wait_for=None),
+    )
+    last_failure: PageSnapshot | None = None
+    for index, config in enumerate(configs):
+        try:
+            async with AsyncWebCrawler(verbose=False) as crawler:
+                crawl_result = await crawler.arun(absolute_url, config=config)
+        except Exception as exc:
+            failure = _failed_snapshot(
+                url=absolute_url,
+                fetch_method="browser",
+                error_message=_format_exception_for_snapshot(
+                    exc,
+                    "Crawl4AI browser fetch failed",
+                ),
+            )
+        else:
+            failure = _snapshot_from_crawl4ai_result(crawl_result, absolute_url)
+            if failure.status == "succeeded":
+                return failure
 
-    try:
-        async with AsyncWebCrawler(verbose=False) as crawler:
-            crawl_result = await crawler.arun(absolute_url, config=config)
-    except Exception as exc:
-        return _failed_snapshot(
-            url=absolute_url,
-            fetch_method="browser",
-            error_message=_format_exception_for_snapshot(
-                exc,
-                "Crawl4AI browser fetch failed",
-            ),
-        )
+        last_failure = failure
+        if index == 0 and _is_wait_condition_failure(failure.error_message):
+            continue
+        return failure
 
+    return last_failure or _failed_snapshot(
+        url=absolute_url,
+        fetch_method="browser",
+        error_message="Crawl4AI browser returned no result",
+    )
+
+
+def _is_wait_condition_failure(message: str | None) -> bool:
+    return "wait condition failed" in (message or "").lower()
+
+
+def _snapshot_from_crawl4ai_result(crawl_result: Any, absolute_url: str) -> PageSnapshot:
     if not crawl_result:
         return _failed_snapshot(
             url=absolute_url,
@@ -745,11 +778,12 @@ async def _crawl_page_with_crawl4ai_browser_direct(
 def _run_browser_fetch_with_proactor_loop(
     absolute_url: str,
     goal: str,
+    intent: CrawlPageIntent = "generic",
 ) -> PageSnapshot:
     from app.core.windows_event_loop import ensure_windows_proactor_event_loop_policy
 
     ensure_windows_proactor_event_loop_policy()
-    return asyncio.run(_crawl_page_with_crawl4ai_browser_direct(absolute_url, goal))
+    return asyncio.run(_crawl_page_with_crawl4ai_browser_direct(absolute_url, goal, intent))
 
 
 def _should_offload_browser_fetch_to_thread() -> bool:

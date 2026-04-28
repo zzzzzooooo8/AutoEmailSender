@@ -299,9 +299,10 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
             status="succeeded",
         )
 
-        async def fake_direct(absolute_url: str, goal: str) -> PageSnapshot:
+        async def fake_direct(absolute_url: str, goal: str, intent: str = "generic") -> PageSnapshot:
             self.assertEqual(absolute_url, "https://example.edu/faculty")
             self.assertEqual(goal, "提取导师信息")
+            self.assertEqual(intent, "generic")
             return expected
 
         with (
@@ -1071,6 +1072,60 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIs(snapshot, browser_snapshot)
         self.assertEqual(browser_path.call_count, 1)
+
+    async def test_crawl4ai_browser_fetch_retries_without_wait_selector_after_wait_failure(self) -> None:
+        calls: list[object] = []
+
+        class _WaitFailureCrawler:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                pass
+
+            async def __aenter__(self) -> "_WaitFailureCrawler":
+                return self
+
+            async def __aexit__(self, *args: object) -> None:
+                return None
+
+            async def arun(self, url: str, *, config: object) -> list[object]:
+                calls.append(getattr(config, "wait_for", None))
+                if len(calls) == 1:
+                    return [
+                        types.SimpleNamespace(
+                            success=False,
+                            url=url,
+                            error_message=(
+                                "Wait condition failed: Timeout after 15000ms "
+                                "waiting for selector 'body'"
+                            ),
+                            html="",
+                            redirected_url="",
+                        )
+                    ]
+                return [
+                    types.SimpleNamespace(
+                        success=True,
+                        url=url,
+                        error_message="",
+                        html="<html><body>周锋 电子邮箱：zfeng@bupt.edu.cn</body></html>",
+                        redirected_url=url,
+                    )
+                ]
+
+        crawl4ai_module = types.SimpleNamespace(
+            AsyncWebCrawler=_WaitFailureCrawler,
+            CrawlerRunConfig=crawler_tools._browser_run_config_for_intent("profile").__class__,
+        )
+
+        with patch.dict("sys.modules", {"crawl4ai": crawl4ai_module}):
+            snapshot = await crawler_tools._crawl_page_with_crawl4ai_browser_direct(
+                "https://teacher.example.edu/zhoufeng",
+                "",
+                "profile",
+            )
+
+        self.assertEqual(snapshot.status, "succeeded")
+        self.assertEqual(calls, ["css:body", None])
+        self.assertIn("zfeng@bupt.edu.cn", snapshot.text)
 
 class _FakeSessionFactory:
     def __init__(self, *, job_status: str = "running", job_statuses: list[str] | None = None) -> None:
