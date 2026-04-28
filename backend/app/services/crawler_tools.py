@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import ipaddress
 import platform
 import re
@@ -33,6 +33,7 @@ CRAWL4AI_BROWSER_DELAY_SECONDS = 1.5
 CRAWL4AI_BROWSER_WAIT_SELECTOR = "css:table"
 UNSAFE_CRAWL_URL_MESSAGE = "URL 不允许指向本机、内网或不可解析地址"
 MULTI_LABEL_PUBLIC_SUFFIXES = ("ac.cn", "com.cn", "edu.cn", "gov.cn", "net.cn", "org.cn")
+CrawlPageIntent = Literal["generic", "directory", "profile"]
 
 
 class PageSnapshot(BaseModel):
@@ -115,6 +116,16 @@ class CrawlToolContext:
     university: str
     school: str
     session_factory: async_sessionmaker[AsyncSession]
+    http_blocked_hosts: set[str] = field(default_factory=set)
+
+    def mark_http_blocked(self, url: str) -> None:
+        host = (urlparse(url).hostname or "").lower()
+        if host:
+            self.http_blocked_hosts.add(host)
+
+    def is_http_blocked(self, url: str) -> bool:
+        host = (urlparse(url).hostname or "").lower()
+        return bool(host and host in self.http_blocked_hosts)
 
 
 @dataclass(frozen=True)
@@ -518,18 +529,35 @@ async def crawl_page_with_http(ctx: CrawlToolContext, url: str) -> PageSnapshot:
     return snapshot
 
 
-async def crawl_page_with_crawl4ai(ctx: CrawlToolContext, url: str) -> PageSnapshot:
+async def crawl_page_with_crawl4ai(
+    ctx: CrawlToolContext,
+    url: str,
+    *,
+    intent: CrawlPageIntent = "generic",
+) -> PageSnapshot:
+    absolute_url = urljoin(ctx.start_url, url)
+    if ctx.is_http_blocked(absolute_url):
+        return await browser_investigate(ctx, absolute_url, goal="", intent=intent)
+
     http_snapshot = await crawl_page_with_http(ctx, url)
     if _should_use_crawl4ai_fallback(http_snapshot):
+        if _is_http_blocked_snapshot(http_snapshot):
+            ctx.mark_http_blocked(http_snapshot.url or absolute_url)
         return await browser_investigate(
             ctx,
             url,
             goal="",
+            intent=intent,
         )
     return http_snapshot
 
 
-async def browser_investigate(ctx: CrawlToolContext, url: str, goal: str) -> PageSnapshot:
+async def browser_investigate(
+    ctx: CrawlToolContext,
+    url: str,
+    goal: str,
+    intent: CrawlPageIntent = "generic",
+) -> PageSnapshot:
     absolute_url = urljoin(ctx.start_url, url)
     if _has_unsafe_public_crawl_url(ctx.start_url, absolute_url):
         snapshot = _failed_snapshot(
@@ -549,7 +577,7 @@ async def browser_investigate(ctx: CrawlToolContext, url: str, goal: str) -> Pag
         await record_page_snapshot(ctx, snapshot)
         return snapshot
 
-    snapshot = await _crawl_page_with_crawl4ai_browser(ctx, absolute_url, goal)
+    snapshot = await _crawl_page_with_crawl4ai_browser(ctx, absolute_url, goal, intent)
     await record_page_snapshot(ctx, snapshot)
     return snapshot
 
@@ -601,6 +629,13 @@ def _should_use_crawl4ai_fallback(snapshot: PageSnapshot) -> bool:
     )
 
 
+def _is_http_blocked_snapshot(snapshot: PageSnapshot) -> bool:
+    if snapshot.fetch_method != "http":
+        return False
+    error_message = (snapshot.error_message or "").lower()
+    return any(str(status) in error_message for status in CRAWL4AI_BROWSER_FALLBACK_STATUS)
+
+
 def _browser_run_config_for_goal(goal: str) -> "CrawlerRunConfig":
     from crawl4ai import CrawlerRunConfig
 
@@ -625,8 +660,9 @@ async def _crawl_page_with_crawl4ai_browser(
     ctx: CrawlToolContext,
     absolute_url: str,
     goal: str,
+    intent: CrawlPageIntent = "generic",
 ) -> PageSnapshot:
-    _ = ctx
+    _ = ctx, intent
     if _should_offload_browser_fetch_to_thread():
         return await asyncio.to_thread(
             _run_browser_fetch_with_proactor_loop,
