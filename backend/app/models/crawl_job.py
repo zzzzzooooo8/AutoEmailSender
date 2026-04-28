@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 class CrawlJobStatus(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
+    PAUSED = "paused"
     NEEDS_REVIEW = "needs_review"
     COMPLETED = "completed"
     FAILED = "failed"

@@ -292,7 +292,11 @@ async def cancel_crawl_job(
     session: AsyncSession = Depends(get_async_session),
 ) -> CrawlJob:
     job = await _get_crawl_job_or_404(session, job_id)
-    if job.status in {CrawlJobStatus.COMPLETED.value, CrawlJobStatus.FAILED.value}:
+    if job.status in {
+        CrawlJobStatus.COMPLETED.value,
+        CrawlJobStatus.FAILED.value,
+        CrawlJobStatus.CANCELED.value,
+    }:
         return job
 
     job.status = CrawlJobStatus.CANCELED.value
@@ -301,6 +305,57 @@ async def cancel_crawl_job(
         session,
         category="crawler",
         event_name="crawl_job.canceled",
+        entity_type="crawl_job",
+        entity_id=str(job.id),
+        metadata={"status": job.status},
+    )
+    await session.commit()
+    await session.refresh(job)
+    return job
+
+
+@router.post("/{job_id}/pause", response_model=CrawlJobRead)
+async def pause_crawl_job(
+    job_id: int,
+    session: AsyncSession = Depends(get_async_session),
+) -> CrawlJob:
+    job = await _get_crawl_job_or_404(session, job_id)
+    if job.status == CrawlJobStatus.PAUSED.value:
+        return job
+    if job.status not in {CrawlJobStatus.QUEUED.value, CrawlJobStatus.RUNNING.value}:
+        raise HTTPException(status_code=409, detail="仅允许暂停排队中或运行中的抓取任务")
+
+    job.status = CrawlJobStatus.PAUSED.value
+    job.updated_at = datetime.now(UTC)
+    await record_operation_log(
+        session,
+        category="crawler",
+        event_name="crawl_job.paused",
+        entity_type="crawl_job",
+        entity_id=str(job.id),
+        metadata={"status": job.status},
+    )
+    await session.commit()
+    await session.refresh(job)
+    return job
+
+
+@router.post("/{job_id}/resume", response_model=CrawlJobRead)
+async def resume_crawl_job(
+    job_id: int,
+    session: AsyncSession = Depends(get_async_session),
+) -> CrawlJob:
+    job = await _get_crawl_job_or_404(session, job_id)
+    if job.status != CrawlJobStatus.PAUSED.value:
+        raise HTTPException(status_code=409, detail="仅允许继续已暂停的抓取任务")
+
+    job.status = CrawlJobStatus.QUEUED.value
+    job.error_message = None
+    job.updated_at = datetime.now(UTC)
+    await record_operation_log(
+        session,
+        category="crawler",
+        event_name="crawl_job.resumed",
         entity_type="crawl_job",
         entity_id=str(job.id),
         metadata={"status": job.status},

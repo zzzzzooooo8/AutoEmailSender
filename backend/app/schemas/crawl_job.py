@@ -11,7 +11,15 @@ from app.services.crawler_tools import (
 )
 
 
-CrawlJobStatusDTO = Literal["queued", "running", "needs_review", "completed", "failed", "canceled"]
+CrawlJobStatusDTO = Literal[
+    "queued",
+    "running",
+    "paused",
+    "needs_review",
+    "completed",
+    "failed",
+    "canceled",
+]
 CrawlCandidateReviewStatusDTO = Literal["pending", "accepted", "rejected", "merged"]
 
 

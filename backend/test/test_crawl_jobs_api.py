@@ -179,6 +179,95 @@ class CrawlJobsApiTests(unittest.TestCase):
         self.assertEqual(cancel_completed_response.status_code, 200)
         self.assertEqual(cancel_completed_response.json()["status"], "completed")
 
+    def test_pause_resume_crawl_job_flow_preserves_saved_data(self) -> None:
+        create_response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "llm_profile_id": None,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        job_id = create_response.json()["id"]
+        self._seed_page_and_candidates(job_id)
+
+        pause_response = self.client.post(f"/api/crawl-jobs/{job_id}/pause")
+
+        self.assertEqual(pause_response.status_code, 200, msg=pause_response.text)
+        self.assertEqual(pause_response.json()["status"], "paused")
+
+        detail_response = self.client.get(f"/api/crawl-jobs/{job_id}")
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(detail_response.json()["page_count"], 1)
+        self.assertEqual(detail_response.json()["candidate_count"], 3)
+
+        resume_response = self.client.post(f"/api/crawl-jobs/{job_id}/resume")
+
+        self.assertEqual(resume_response.status_code, 200, msg=resume_response.text)
+        self.assertEqual(resume_response.json()["status"], "queued")
+
+        resumed_detail_response = self.client.get(f"/api/crawl-jobs/{job_id}")
+        self.assertEqual(resumed_detail_response.json()["page_count"], 1)
+        self.assertEqual(resumed_detail_response.json()["candidate_count"], 3)
+
+    def test_pause_rejects_terminal_or_review_jobs(self) -> None:
+        for job_status in ("needs_review", "completed", "failed", "canceled"):
+            with self.subTest(status=job_status):
+                create_response = self.client.post(
+                    "/api/crawl-jobs",
+                    json={
+                        "university": "示例大学",
+                        "school": "计算机学院",
+                        "start_url": "https://example.edu/faculty",
+                        "llm_profile_id": None,
+                    },
+                )
+                self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+                job_id = create_response.json()["id"]
+                self._set_job_status(job_id, job_status)
+
+                response = self.client.post(f"/api/crawl-jobs/{job_id}/pause")
+
+                self.assertEqual(response.status_code, 409, msg=response.text)
+
+    def test_resume_rejects_non_paused_job(self) -> None:
+        create_response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "llm_profile_id": None,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        job_id = create_response.json()["id"]
+
+        response = self.client.post(f"/api/crawl-jobs/{job_id}/resume")
+
+        self.assertEqual(response.status_code, 409)
+
+    def test_paused_crawl_job_can_be_canceled(self) -> None:
+        create_response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "llm_profile_id": None,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        job_id = create_response.json()["id"]
+        self.client.post(f"/api/crawl-jobs/{job_id}/pause")
+
+        response = self.client.post(f"/api/crawl-jobs/{job_id}/cancel")
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        self.assertEqual(response.json()["status"], "canceled")
+
     def test_crawl_job_events_include_status_trace_page_and_candidate_messages(self) -> None:
         create_response = self.client.post(
             "/api/crawl-jobs",

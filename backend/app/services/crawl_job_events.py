@@ -9,6 +9,7 @@ from typing import Any
 STATUS_MESSAGES = {
     "queued": "任务已排队",
     "running": "任务正在运行",
+    "paused": "任务已暂停",
     "needs_review": "任务进入待审核",
     "completed": "任务已完成",
     "failed": "任务失败",
