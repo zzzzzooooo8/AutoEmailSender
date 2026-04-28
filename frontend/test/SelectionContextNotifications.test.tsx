@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NotificationProvider } from "@/context/NotificationContext";
 import {
@@ -28,10 +28,26 @@ const SelectionHarness = () => {
   );
 };
 
+const SelectionSwitchHarness = () => {
+  const { selectedLlmProfile, setSelectedLlmProfileId } = useSelectionContext();
+
+  return (
+    <div>
+      <span data-testid="selected-llm">
+        {selectedLlmProfile?.name ?? "no llm"}
+      </span>
+      <button type="button" onClick={() => setSelectedLlmProfileId(2)}>
+        切换到备用模型
+      </button>
+    </div>
+  );
+};
+
 describe("SelectionContext notifications", () => {
   beforeEach(() => {
     listIdentities.mockReset();
     listLLMProfiles.mockReset();
+    window.localStorage.clear();
   });
 
   it("shows a global notification card when the initial refresh fails", async () => {
@@ -117,6 +133,62 @@ describe("SelectionContext notifications", () => {
     await waitFor(() => {
       expect(screen.getByText("测试身份")).toBeInTheDocument();
       expect(screen.getByText("测试模型")).toBeInTheDocument();
+    });
+  });
+
+  it("keeps a manually selected llm profile instead of bouncing back to the stored id", async () => {
+    window.localStorage.setItem("selected_llm_profile_id", "1");
+    listIdentities.mockResolvedValue([]);
+    listLLMProfiles.mockResolvedValue([
+      {
+        id: 1,
+        name: "主模型",
+        provider: "openai",
+        api_base_url: null,
+        api_key: "test-key-1",
+        model_name: "gpt-main",
+        matcher_prompt_template: null,
+        writer_prompt_template: null,
+        temperature: null,
+        max_tokens: null,
+        is_default: true,
+        created_at: "2026-04-22T00:00:00Z",
+        updated_at: "2026-04-22T00:00:00Z",
+      },
+      {
+        id: 2,
+        name: "备用模型",
+        provider: "openai",
+        api_base_url: null,
+        api_key: "test-key-2",
+        model_name: "gpt-backup",
+        matcher_prompt_template: null,
+        writer_prompt_template: null,
+        temperature: null,
+        max_tokens: null,
+        is_default: false,
+        created_at: "2026-04-22T00:00:00Z",
+        updated_at: "2026-04-22T00:00:00Z",
+      },
+    ]);
+
+    render(
+      <NotificationProvider>
+        <SelectionProvider>
+          <SelectionSwitchHarness />
+        </SelectionProvider>
+      </NotificationProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("selected-llm")).toHaveTextContent("主模型");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "切换到备用模型" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("selected-llm")).toHaveTextContent("备用模型");
+      expect(window.localStorage.getItem("selected_llm_profile_id")).toBe("2");
     });
   });
 });

@@ -81,6 +81,12 @@ export const SelectionProvider = ({ children }: PropsWithChildren) => {
     if (loading) {
       return;
     }
+    if (
+      selectedIdentityId !== null &&
+      identities.some((item) => item.id === selectedIdentityId)
+    ) {
+      return;
+    }
     const stored = parseStoredId(IDENTITY_STORAGE_KEY);
     const fallbackId =
       identities.find((item) => item.id === stored)?.id ??
@@ -94,6 +100,12 @@ export const SelectionProvider = ({ children }: PropsWithChildren) => {
 
   useEffect(() => {
     if (loading) {
+      return;
+    }
+    if (
+      selectedLlmProfileId !== null &&
+      llmProfiles.some((item) => item.id === selectedLlmProfileId)
+    ) {
       return;
     }
     const stored = parseStoredId(LLM_STORAGE_KEY);
