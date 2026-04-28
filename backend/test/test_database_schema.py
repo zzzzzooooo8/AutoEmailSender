@@ -13,7 +13,7 @@ from app.services.outreach_templates import import_outreach_template_file
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "6d7e8f9a0b12"
+HEAD_REVISION = "f2a7c9d8e1b3"
 LEGACY_RUNTIME_REVISION = "7a1d5e42c9bd"
 
 
@@ -129,8 +129,21 @@ class DatabaseSchemaTests(unittest.TestCase):
         table_names = {row[0] for row in rows}
 
         self.assertIn("crawl_jobs", table_names)
+        self.assertIn("crawl_job_runs", table_names)
         self.assertIn("crawl_pages", table_names)
         self.assertIn("crawl_candidates", table_names)
+
+        self.assertIn("current_run_id", self._get_columns("crawl_jobs"))
+        self.assertTrue(
+            {
+                "job_id",
+                "attempt_number",
+                "active_seconds",
+                "input_tokens",
+                "output_tokens",
+                "total_tokens",
+            }.issubset(self._get_columns("crawl_job_runs")),
+        )
 
     def test_html_template_import_derives_text_from_sanitized_html(self) -> None:
         imported = import_outreach_template_file(
