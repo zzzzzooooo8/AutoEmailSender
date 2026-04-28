@@ -5,7 +5,7 @@ import types
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -28,6 +28,7 @@ from app.services.crawler_tools import (
     normalize_candidate_payload,
     record_page_snapshot,
     save_candidates,
+    _crawl_page_with_crawl4ai_browser,
     _resolve_safe_public_crawl_url,
 )
 from app.services import crawler_tools
@@ -231,6 +232,86 @@ class CrawlerToolTests(unittest.TestCase):
 
 
 class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_crawl4ai_browser_fetch_offloads_to_thread_on_windows_selector_loop(self) -> None:
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://example.edu/faculty",
+            university="示例大学",
+            school="计算机学院",
+            session_factory=_FakeSessionFactory(),  # type: ignore[arg-type]
+        )
+        expected = PageSnapshot(
+            url="https://example.edu/faculty",
+            title="faculty",
+            text="ok",
+            html="<html></html>",
+            links=[],
+            fetch_method="browser",
+            status="succeeded",
+        )
+
+        with (
+            patch(
+                "app.services.crawler_tools._should_offload_browser_fetch_to_thread",
+                return_value=True,
+            ),
+            patch(
+                "app.services.crawler_tools.asyncio.to_thread",
+                new=AsyncMock(return_value=expected),
+            ) as to_thread,
+        ):
+            actual = await _crawl_page_with_crawl4ai_browser(
+                ctx,
+                "https://example.edu/faculty",
+                "提取导师信息",
+            )
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(to_thread.await_count, 1)
+
+    async def test_crawl4ai_browser_fetch_runs_inline_without_thread_on_supported_loop(self) -> None:
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://example.edu/faculty",
+            university="示例大学",
+            school="计算机学院",
+            session_factory=_FakeSessionFactory(),  # type: ignore[arg-type]
+        )
+        expected = PageSnapshot(
+            url="https://example.edu/faculty",
+            title="faculty",
+            text="ok",
+            html="<html></html>",
+            links=[],
+            fetch_method="browser",
+            status="succeeded",
+        )
+
+        async def fake_direct(absolute_url: str, goal: str) -> PageSnapshot:
+            self.assertEqual(absolute_url, "https://example.edu/faculty")
+            self.assertEqual(goal, "提取导师信息")
+            return expected
+
+        with (
+            patch(
+                "app.services.crawler_tools._should_offload_browser_fetch_to_thread",
+                return_value=False,
+            ),
+            patch(
+                "app.services.crawler_tools._crawl_page_with_crawl4ai_browser_direct",
+                new=fake_direct,
+            ),
+            patch("app.services.crawler_tools.asyncio.to_thread", new=AsyncMock()) as to_thread,
+        ):
+            actual = await _crawl_page_with_crawl4ai_browser(
+                ctx,
+                "https://example.edu/faculty",
+                "提取导师信息",
+            )
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(to_thread.await_count, 0)
+
     async def test_save_candidates_skips_canceled_job(self) -> None:
         session_factory = _FakeSessionFactory(job_status="canceled")
         ctx = CrawlToolContext(

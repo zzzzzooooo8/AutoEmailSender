@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
 import ipaddress
+import platform
 import re
 import socket
 from typing import Any, Literal
@@ -441,6 +443,16 @@ async def crawl_page_with_http(ctx: CrawlToolContext, url: str) -> PageSnapshot:
                     headers={"User-Agent": "AutoEmailSenderCrawler/0.1"},
                 )
             if not getattr(response, "is_redirect", False):
+                if response.status_code in CRAWL4AI_BROWSER_FALLBACK_STATUS:
+                    snapshot = html_to_snapshot(str(response.url), response.text, "http")
+                    snapshot.status = "failed"
+                    snapshot.error_message = (
+                        f"HTTP {response.status_code} blocked, browser fallback advised"
+                    )
+                    snapshot.suspicious_empty = True
+                    await record_page_snapshot(ctx, snapshot)
+                    return snapshot
+
                 response.raise_for_status()
                 break
 
@@ -475,7 +487,7 @@ async def crawl_page_with_http(ctx: CrawlToolContext, url: str) -> PageSnapshot:
         snapshot = _failed_snapshot(
             url=absolute_url,
             fetch_method="http",
-            error_message=str(exc),
+            error_message=_format_exception_for_snapshot(exc, "HTTP request failed"),
         )
         await record_page_snapshot(ctx, snapshot)
         return snapshot
@@ -499,9 +511,6 @@ async def crawl_page_with_http(ctx: CrawlToolContext, url: str) -> PageSnapshot:
         return snapshot
 
     snapshot = html_to_snapshot(final_url, response.text, "http")
-    if response.status_code in CRAWL4AI_BROWSER_FALLBACK_STATUS:
-        snapshot.suspicious_empty = True
-        snapshot.error_message = f"HTTP {response.status_code} blocked, browser fallback advised"
     snapshot.links = [
         link for link in snapshot.links if _is_same_host_http_url(ctx.start_url, link)
     ][:MAX_LINKS]
@@ -617,6 +626,21 @@ async def _crawl_page_with_crawl4ai_browser(
     absolute_url: str,
     goal: str,
 ) -> PageSnapshot:
+    _ = ctx
+    if _should_offload_browser_fetch_to_thread():
+        return await asyncio.to_thread(
+            _run_browser_fetch_with_proactor_loop,
+            absolute_url,
+            goal,
+        )
+
+    return await _crawl_page_with_crawl4ai_browser_direct(absolute_url, goal)
+
+
+async def _crawl_page_with_crawl4ai_browser_direct(
+    absolute_url: str,
+    goal: str,
+) -> PageSnapshot:
     _ = goal
     try:
         from crawl4ai import AsyncWebCrawler
@@ -624,7 +648,7 @@ async def _crawl_page_with_crawl4ai_browser(
         return _failed_snapshot(
             url=absolute_url,
             fetch_method="browser",
-            error_message=f"Failed to load Crawl4AI: {exc}",
+            error_message=_format_exception_for_snapshot(exc, "Failed to load Crawl4AI"),
         )
 
     config = _browser_run_config_for_goal(goal)
@@ -636,7 +660,10 @@ async def _crawl_page_with_crawl4ai_browser(
         return _failed_snapshot(
             url=absolute_url,
             fetch_method="browser",
-            error_message=f"Crawl4AI browser fetch failed: {exc}",
+            error_message=_format_exception_for_snapshot(
+                exc,
+                "Crawl4AI browser fetch failed",
+            ),
         )
 
     if not crawl_result:
@@ -651,7 +678,10 @@ async def _crawl_page_with_crawl4ai_browser(
         return _failed_snapshot(
             url=str(getattr(crawl_item, "url", absolute_url) or absolute_url),
             fetch_method="browser",
-            error_message=str(getattr(crawl_item, "error_message", "") or ""),
+            error_message=_format_message_with_fallback(
+                str(getattr(crawl_item, "error_message", "") or ""),
+                "browser tool reported unsuccessful result",
+            ),
         )
 
     content = str(getattr(crawl_item, "html", "") or "")
@@ -660,6 +690,32 @@ async def _crawl_page_with_crawl4ai_browser(
     if not snapshot.text.strip():
         snapshot.suspicious_empty = True
     return snapshot
+
+
+def _run_browser_fetch_with_proactor_loop(
+    absolute_url: str,
+    goal: str,
+) -> PageSnapshot:
+    from app.core.windows_event_loop import ensure_windows_proactor_event_loop_policy
+
+    ensure_windows_proactor_event_loop_policy()
+    return asyncio.run(_crawl_page_with_crawl4ai_browser_direct(absolute_url, goal))
+
+
+def _should_offload_browser_fetch_to_thread() -> bool:
+    if platform.system() != "Windows":
+        return False
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+
+    proactor_type = getattr(asyncio, "ProactorEventLoop", None)
+    if proactor_type is not None and isinstance(loop, proactor_type):
+        return False
+
+    return True
 
 
 async def save_candidates(
@@ -757,6 +813,18 @@ def html_to_snapshot(url: str, html: str, fetch_method: str) -> PageSnapshot:
         status="succeeded",
         suspicious_empty=not text.strip(),
     )
+
+
+def _format_exception_for_snapshot(exc: BaseException, context: str) -> str:
+    message = str(exc).strip()
+    if message:
+        return f"{context}: {type(exc).__name__}: {message}"
+    return f"{context}: {type(exc).__name__}"
+
+
+def _format_message_with_fallback(message: str, fallback: str) -> str:
+    message = message.strip()
+    return message or fallback
 
 
 def _clean_required(value: object) -> str:

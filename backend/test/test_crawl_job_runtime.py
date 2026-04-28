@@ -10,7 +10,7 @@ from unittest.mock import patch
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.models import Base, CrawlCandidate, CrawlJob, CrawlJobStatus, LLMProfile
+from app.models import Base, CrawlCandidate, CrawlJob, CrawlJobStatus, CrawlPage, LLMProfile
 from app.services.crawl_job_runtime import run_queued_crawl_jobs_once
 from app.services.crawler_tools import (
     CandidateEnrichmentPayload,
@@ -179,6 +179,44 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(job.status, CrawlJobStatus.FAILED.value)
         self.assertIsNotNone(job.error_message)
         self.assertIn("save_professor_candidates", job.error_message)
+        self.assertEqual(await self._count_candidates(job_id), 0)
+
+    async def test_run_queued_crawl_job_surfaces_latest_page_failure_when_no_candidates_saved(self) -> None:
+        job_id = await self._create_default_profile_and_job()
+
+        async def fake_run(
+            ctx: CrawlToolContext,
+            llm_profile: LLMProfile,
+            trace_callback=None,
+        ) -> dict[str, object]:
+            _ = llm_profile, trace_callback
+            async with ctx.session_factory() as session:
+                session.add(
+                    CrawlPage(
+                        job_id=ctx.job_id,
+                        url=ctx.start_url,
+                        fetch_method="browser",
+                        page_type="list",
+                        status="failed",
+                        error_message="Crawl4AI browser fetch failed: NotImplementedError",
+                    )
+                )
+                await session.commit()
+            return {}
+
+        with patch(
+            "app.services.crawl_job_runtime.run_faculty_crawler_agent",
+            new=fake_run,
+        ):
+            processed = await run_queued_crawl_jobs_once(self.session_factory)
+
+        self.assertEqual(processed, 1)
+        job = await self._get_job(job_id)
+        self.assertEqual(job.status, CrawlJobStatus.FAILED.value)
+        self.assertEqual(
+            job.error_message,
+            "Crawl4AI browser fetch failed: NotImplementedError",
+        )
         self.assertEqual(await self._count_candidates(job_id), 0)
 
     async def test_run_queued_crawl_job_writes_full_debug_trace_when_enabled(self) -> None:

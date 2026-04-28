@@ -22,8 +22,12 @@ from app.core.config import get_settings
 from app.core.database import dispose_engine, get_session_factory
 from app.core.migrations import ensure_database_schema
 from app.core.request_context import RequestContextMiddleware
+from app.core.windows_event_loop import ensure_windows_proactor_event_loop_policy
 from app.services.operation_logs import cleanup_old_operation_logs
 from app.services.runtime_manager import RuntimeManager
+
+
+ensure_windows_proactor_event_loop_policy()
 
 
 @asynccontextmanager

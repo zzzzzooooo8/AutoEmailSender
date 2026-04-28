@@ -8,7 +8,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.faculty_crawler_agent import build_faculty_crawler_model, run_faculty_crawler_agent
-from app.models import CrawlCandidate, CrawlJob, CrawlJobStatus, LLMProfile
+from app.models import CrawlCandidate, CrawlJob, CrawlJobStatus, CrawlPage, LLMProfile
 from app.services.crawler_debug import append_crawler_debug_event
 from app.services.crawl_job_events import normalize_agent_trace_event
 from app.services.crawler_tools import (
@@ -166,7 +166,11 @@ async def _complete_running_job(
             job.error_message = None
         else:
             job.status = CrawlJobStatus.FAILED.value
-            job.error_message = _derive_candidate_save_failure(job.agent_trace)
+            job.error_message = await _derive_job_failure_message(
+                session,
+                job_id,
+                job.agent_trace,
+            )
         job.updated_at = datetime.now(UTC)
         await session.commit()
 
@@ -316,6 +320,31 @@ async def _mark_job_failed(
         job.error_message = error_message
         job.updated_at = datetime.now(UTC)
         await session.commit()
+
+
+async def _derive_job_failure_message(
+    session: AsyncSession,
+    job_id: int,
+    agent_trace: Any,
+) -> str:
+    trace_error = _derive_candidate_save_failure(agent_trace)
+    if trace_error != NO_CANDIDATES_SAVED_ERROR:
+        return trace_error
+
+    page_error = await session.scalar(
+        select(CrawlPage.error_message)
+        .where(
+            CrawlPage.job_id == job_id,
+            CrawlPage.status == "failed",
+            CrawlPage.error_message.is_not(None),
+        )
+        .order_by(CrawlPage.id.desc())
+        .limit(1),
+    )
+    if isinstance(page_error, str) and page_error.strip():
+        return page_error.strip()
+
+    return NO_CANDIDATES_SAVED_ERROR
 
 
 async def _apply_candidate_enrichment(
