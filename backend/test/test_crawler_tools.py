@@ -35,6 +35,18 @@ from app.services import crawler_tools
 
 
 class CrawlerToolTests(unittest.TestCase):
+    def test_browser_run_config_for_profile_waits_for_body(self) -> None:
+        config = crawler_tools._browser_run_config_for_intent("profile")
+
+        self.assertEqual(config.wait_for, "css:body")
+
+    def test_browser_run_config_for_generic_and_directory_waits_for_body(self) -> None:
+        generic_config = crawler_tools._browser_run_config_for_intent("generic")
+        directory_config = crawler_tools._browser_run_config_for_intent("directory")
+
+        self.assertEqual(generic_config.wait_for, "css:body")
+        self.assertEqual(directory_config.wait_for, "css:body")
+
     def test_is_allowed_crawl_url_allows_same_host(self) -> None:
         with patch(
             "app.services.crawler_tools.socket.getaddrinfo",

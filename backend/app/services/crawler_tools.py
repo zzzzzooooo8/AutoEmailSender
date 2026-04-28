@@ -30,7 +30,7 @@ CRAWL4AI_BROWSER_FALLBACK_STATUS = {403, 412, 429}
 JS_RENDER_TIMEOUT_MS = 30000
 CRAWL4AI_BROWSER_WAIT_TIMEOUT_MS = 15000
 CRAWL4AI_BROWSER_DELAY_SECONDS = 1.5
-CRAWL4AI_BROWSER_WAIT_SELECTOR = "css:table"
+CRAWL4AI_BROWSER_WAIT_SELECTOR = "css:body"
 UNSAFE_CRAWL_URL_MESSAGE = "URL 不允许指向本机、内网或不可解析地址"
 MULTI_LABEL_PUBLIC_SUFFIXES = ("ac.cn", "com.cn", "edu.cn", "gov.cn", "net.cn", "org.cn")
 CrawlPageIntent = Literal["generic", "directory", "profile"]
@@ -636,13 +636,22 @@ def _is_http_blocked_snapshot(snapshot: PageSnapshot) -> bool:
     return any(str(status) in error_message for status in CRAWL4AI_BROWSER_FALLBACK_STATUS)
 
 
-def _browser_run_config_for_goal(goal: str) -> "CrawlerRunConfig":
+def _browser_wait_selector_for_intent(intent: CrawlPageIntent) -> str:
+    _ = intent
+    return CRAWL4AI_BROWSER_WAIT_SELECTOR
+
+
+def _browser_run_config_for_intent(
+    intent: CrawlPageIntent,
+    *,
+    wait_for: str | None = None,
+) -> "CrawlerRunConfig":
     from crawl4ai import CrawlerRunConfig
 
     return CrawlerRunConfig(
         process_in_browser=True,
         wait_until="networkidle",
-        wait_for=CRAWL4AI_BROWSER_WAIT_SELECTOR,
+        wait_for=wait_for if wait_for is not None else _browser_wait_selector_for_intent(intent),
         wait_for_timeout=CRAWL4AI_BROWSER_WAIT_TIMEOUT_MS,
         delay_before_return_html=CRAWL4AI_BROWSER_DELAY_SECONDS,
         page_timeout=JS_RENDER_TIMEOUT_MS,
@@ -654,6 +663,11 @@ def _browser_run_config_for_goal(goal: str) -> "CrawlerRunConfig":
         ),
         verbose=False,
     )
+
+
+def _browser_run_config_for_goal(goal: str) -> "CrawlerRunConfig":
+    _ = goal
+    return _browser_run_config_for_intent("generic")
 
 
 async def _crawl_page_with_crawl4ai_browser(
