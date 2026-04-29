@@ -6,6 +6,7 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models import (
@@ -197,6 +198,30 @@ class TokenUsageRecordsServiceTests(unittest.TestCase):
         self.assertEqual(result.summary.output_tokens, 90)
         self.assertEqual(result.summary.cached_tokens, 80)
         self.assertEqual(result.summary.total_tokens, 690)
+
+    def test_api_returns_token_usage_records(self) -> None:
+        self._run_async(self._seed_records())
+
+        from app.core.database import get_async_session
+        from main import create_app
+
+        async def override_session():
+            async with self.session_factory() as session:
+                yield session
+
+        app = create_app()
+        app.dependency_overrides[get_async_session] = override_session
+        client = TestClient(app)
+        try:
+            response = client.get("/api/token-usage/records?limit=2")
+        finally:
+            client.close()
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        payload = response.json()
+        self.assertEqual(len(payload["records"]), 2)
+        self.assertEqual(payload["records"][0]["feature_type"], "match_analysis")
+        self.assertEqual(payload["summary"]["record_count"], 2)
 
 
 if __name__ == "__main__":
