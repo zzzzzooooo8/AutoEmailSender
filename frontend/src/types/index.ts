@@ -582,6 +582,19 @@ export interface WorkspaceThreadDTO {
   messages: WorkspaceMessageDTO[];
 }
 
+export interface TokenUsageDTO {
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  total_tokens: number | null;
+  cached_tokens: number | null;
+}
+
+export interface MatchCalculationResultDTO {
+  thread: WorkspaceThreadDTO;
+  usage: TokenUsageDTO;
+  run_id: number | null;
+}
+
 export interface TestComposeThreadDTO {
   identity: WorkspaceIdentityDTO;
   llm_profile: WorkspaceLLMDTO;

@@ -3,6 +3,7 @@ import type {
   EmailTaskApprovalPayloadDTO,
   EmailTaskOutreachConfigPayloadDTO,
   EmailTaskSchedulePayloadDTO,
+  MatchCalculationResultDTO,
   WorkspaceThreadDTO,
 } from '@/types';
 
@@ -12,7 +13,7 @@ export const regenerateDraft = (taskId: number) =>
   });
 
 export const calculateMatch = (taskId: number) =>
-  apiFetch<WorkspaceThreadDTO>(`/api/email-tasks/${taskId}/calculate-match`, {
+  apiFetch<MatchCalculationResultDTO>(`/api/email-tasks/${taskId}/calculate-match`, {
     method: 'POST',
   });
 
