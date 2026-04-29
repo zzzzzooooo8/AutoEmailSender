@@ -6,6 +6,11 @@ import { DashboardProfessorRow } from '@/components/molecules/DashboardProfessor
 import { OnboardingChecklistCard } from '@/components/molecules/OnboardingChecklistCard';
 import { useNotification } from '@/context/NotificationContext';
 import { useSelectionContext } from '@/context/SelectionContext';
+import {
+  PROFESSOR_DASHBOARD_SORT_OPTIONS,
+  sortDashboardProfessors,
+  type ProfessorDashboardSortKey,
+} from '@/features/home-dashboard/client/sortDashboardProfessors';
 import { getOnboardingState } from '@/features/onboarding/client/getOnboardingState';
 import {
   filterProfessorsByDashboardStatus,
@@ -36,6 +41,7 @@ export const HomePage = () => {
   const [keyword, setKeyword] = useState('');
   const [university, setUniversity] = useState('all');
   const [status, setStatus] = useState<ProfessorDashboardStatusFilter>('all');
+  const [sortKey, setSortKey] = useState<ProfessorDashboardSortKey>('latest');
   const [loading, setLoading] = useState(false);
   const [hasLoadedProfessors, setHasLoadedProfessors] = useState(false);
   const [bulkScoring, setBulkScoring] = useState(false);
@@ -130,6 +136,7 @@ export const HomePage = () => {
     const universityMatched = university === 'all' || item.university === university;
     return keywordMatched && universityMatched;
   });
+  const visibleProfessors = sortDashboardProfessors(filteredProfessors, sortKey);
 
   const universityOptions = Array.from(
     new Set(professors.map((item) => item.university).filter(Boolean)),
@@ -366,7 +373,7 @@ export const HomePage = () => {
             </div>
           </div>
 
-          <div className="mt-6 grid gap-3 md:grid-cols-3">
+          <div className="mt-6 grid gap-3 md:grid-cols-4">
             <label className="rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-600 shadow-sm">
               <div className="mb-2 font-medium text-stone-800">关键词</div>
               <div className="flex items-center gap-2">
@@ -409,6 +416,20 @@ export const HomePage = () => {
                 </option>
               ))}
             </NativeSelectField>
+
+            <NativeSelectField
+              label="排序"
+              value={sortKey}
+              onChange={(event) => setSortKey(event.target.value as ProfessorDashboardSortKey)}
+              wrapperClassName="rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-600 shadow-sm"
+              shellClassName="border-0 bg-transparent px-0 py-0 shadow-none"
+            >
+              {PROFESSOR_DASHBOARD_SORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </NativeSelectField>
           </div>
 
           <div className="mt-4 space-y-2">
@@ -427,12 +448,12 @@ export const HomePage = () => {
         <section className="mt-6 rounded-3xl border border-stone-200 bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-stone-100 px-6 py-4">
             <div className="text-sm text-stone-600">
-              共 {filteredProfessors.length} 位导师，已选择 {selectedIds.size} 位
+              共 {visibleProfessors.length} 位导师，已选择 {selectedIds.size} 位
             </div>
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={() => setSelectedIds(new Set(filteredProfessors.map((item) => item.id)))}
+                onClick={() => setSelectedIds(new Set(visibleProfessors.map((item) => item.id)))}
                 className="ui-btn-secondary px-3 py-1.5 text-sm"
               >
                 全选当前结果
@@ -452,7 +473,7 @@ export const HomePage = () => {
               <Loader2 className="h-4 w-4 animate-spin" />
               正在加载导师列表...
             </div>
-          ) : filteredProfessors.length === 0 ? (
+          ) : visibleProfessors.length === 0 ? (
             <div className="px-6 py-14 text-center text-sm text-stone-500">
               <div>暂无可用导师。可在导师管理页导入或新增。</div>
               <Link to="/professors" data-interactive="button" className="ui-btn-primary mt-5">
@@ -461,7 +482,7 @@ export const HomePage = () => {
             </div>
           ) : (
             <div className="divide-y divide-stone-100">
-              {filteredProfessors.map((professor) => (
+              {visibleProfessors.map((professor) => (
                 <DashboardProfessorRow
                   key={professor.id}
                   professor={professor}
