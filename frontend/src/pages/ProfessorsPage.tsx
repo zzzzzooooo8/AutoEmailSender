@@ -338,8 +338,9 @@ export const ProfessorsPage = () => {
   const [importResult, setImportResult] =
     useState<ProfessorImportFileResultDTO | null>(null);
   const [crawlerModalOpen, setCrawlerModalOpen] = useState(false);
-  const [crawlerFormState, setCrawlerFormState] =
-    useState<CrawlerJobFormState>(emptyCrawlerJobForm());
+  const [crawlerFormState, setCrawlerFormState] = useState<CrawlerJobFormState>(
+    emptyCrawlerJobForm(),
+  );
   const [creatingCrawlJob, setCreatingCrawlJob] = useState(false);
   const loadProfessors = useCallback(
     async (filter: ArchiveFilter = archiveFilter) => {
@@ -762,7 +763,7 @@ export const ProfessorsPage = () => {
 
           <div className="grid gap-3">
             <div data-testid="professor-search-row" className="min-w-0">
-              <label className="flex min-h-[3.35rem] w-full min-w-0 items-center gap-3 rounded-3xl border border-stone-200 bg-white px-4 py-3 shadow-sm">
+              <label className="flex min-h-12 w-full min-w-0 items-center gap-3 rounded-3xl border border-stone-200 bg-white px-4 py-3 shadow-sm">
                 <Search className="h-4 w-4 shrink-0 text-stone-400" />
                 <input
                   value={keyword}
@@ -783,7 +784,7 @@ export const ProfessorsPage = () => {
                     data-testid="professor-title-filter-label"
                     className={filterFieldLabelClassName}
                   >
-                      职称 / 导师资格
+                    职称 / 导师资格
                   </div>
                   <NativeSelectField
                     ariaLabel="职称筛选"
@@ -791,7 +792,9 @@ export const ProfessorsPage = () => {
                     onChange={(event) => setTitleFilter(event.target.value)}
                     shellClassName="min-h-[3.1rem] rounded-3xl bg-white shadow-sm"
                   >
-                      <option value={ALL_PROFESSOR_FILTER_VALUE}>全部职称 / 导师资格</option>
+                    <option value={ALL_PROFESSOR_FILTER_VALUE}>
+                      全部职称 / 导师资格
+                    </option>
                     {titleOptions.map((title) => (
                       <option key={title} value={title}>
                         {title}

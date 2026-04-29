@@ -74,11 +74,17 @@ export const ManagementProfessorRow = ({
           ) : null}
         </div>
 
-        <FieldCell label="职称" valueClassName="text-sm text-stone-600 lg:text-center">
+        <FieldCell
+          label="职称"
+          valueClassName="text-sm text-stone-600 lg:text-center"
+        >
           {normalizeProfessorTitleDisplay(professor.title) || "未填写职称"}
         </FieldCell>
 
-        <FieldCell label="邮箱" valueClassName="break-all text-sm text-stone-700 lg:text-center">
+        <FieldCell
+          label="邮箱"
+          valueClassName="break-all text-sm text-stone-700 lg:text-center"
+        >
           {professor.email || "未填写邮箱"}
         </FieldCell>
 
@@ -96,8 +102,13 @@ export const ManagementProfessorRow = ({
           {professor.research_direction || "未填写研究方向"}
         </FieldCell>
 
-        <FieldCell label="更新时间" valueClassName="text-sm text-stone-500 lg:text-center">
-          <div className="lg:text-center">{formatApiDateTime(professor.updated_at)}</div>
+        <FieldCell
+          label="更新时间"
+          valueClassName="text-sm text-stone-500 lg:text-center"
+        >
+          <div className="lg:text-center">
+            {formatApiDateTime(professor.updated_at)}
+          </div>
           {professor.archived_at ? (
             <div className="mt-2 text-xs text-amber-700">
               删除于 {formatApiDateTime(professor.archived_at)}
@@ -130,7 +141,7 @@ export const ManagementProfessorRow = ({
               className="ui-btn-danger justify-center whitespace-nowrap px-3 py-2"
             >
               <Archive className="h-4 w-4" />
-              回收站
+              删除
             </button>
           )}
         </div>

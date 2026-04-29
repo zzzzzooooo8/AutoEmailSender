@@ -21,7 +21,7 @@ export const SelectionToggleButton = ({
     disabled={disabled}
     onClick={onToggle}
     className={clsx(
-      "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border text-sm transition",
+      "flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border text-sm transition",
       "focus:outline-none focus:ring-2 focus:ring-primary/30 focus:ring-offset-2",
       selected
         ? "border-primary bg-primary text-white shadow-sm shadow-primary/20"
@@ -29,6 +29,8 @@ export const SelectionToggleButton = ({
       disabled ? "cursor-not-allowed opacity-45" : "cursor-pointer",
     )}
   >
-    <Check className={clsx("h-3.5 w-3.5", selected ? "opacity-100" : "opacity-0")} />
+    <Check
+      className={clsx("h-3.5 w-3.5", selected ? "opacity-100" : "opacity-0")}
+    />
   </button>
 );

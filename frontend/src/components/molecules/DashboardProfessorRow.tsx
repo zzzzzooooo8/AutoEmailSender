@@ -39,7 +39,7 @@ export const DashboardProfessorRow = ({
       selected ? "bg-primary/5" : "bg-white hover:bg-[#fcfbf8]",
     )}
   >
-    <div className="flex min-w-0 items-center gap-4">
+    <div className="flex min-w-0 items-center gap-8">
       <SelectionToggleButton
         label={`选择 ${professor.name}`}
         selected={selected}
