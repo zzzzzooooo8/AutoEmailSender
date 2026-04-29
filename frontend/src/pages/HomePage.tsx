@@ -3,9 +3,17 @@ import { Link, useNavigate } from 'react-router-dom';
 import { FolderOpen, Loader2, MailPlus, RefreshCcw, Search, Sparkles } from 'lucide-react';
 import { NativeSelectField } from '@/components/atoms/NativeSelectField';
 import { DashboardProfessorRow } from '@/components/molecules/DashboardProfessorRow';
+import { MultiSelectFilter } from '@/components/molecules/MultiSelectFilter';
 import { OnboardingChecklistCard } from '@/components/molecules/OnboardingChecklistCard';
 import { useNotification } from '@/context/NotificationContext';
 import { useSelectionContext } from '@/context/SelectionContext';
+import {
+  buildDashboardFilterOptions,
+  createDefaultDashboardFilters,
+  filterDashboardProfessors,
+  getActiveDashboardFilterCount,
+  type DashboardFilterState,
+} from '@/features/home-dashboard/client/filterDashboardProfessors';
 import {
   PROFESSOR_DASHBOARD_SORT_OPTIONS,
   sortDashboardProfessors,
@@ -13,10 +21,8 @@ import {
 } from '@/features/home-dashboard/client/sortDashboardProfessors';
 import { getOnboardingState } from '@/features/onboarding/client/getOnboardingState';
 import {
-  filterProfessorsByDashboardStatus,
   getProfessorDashboardStatusLabel,
   PROFESSOR_DASHBOARD_STATUS_OPTIONS,
-  type ProfessorDashboardStatusFilter,
 } from '@/features/professor-status/dashboardStatus';
 import {
   formatTokenUsageDescription,
@@ -28,7 +34,7 @@ import { calculateMatch } from '@/lib/api/emailTasksApi';
 import { useConfirmDialog } from '@/lib/useConfirmDialog';
 import { listProfessors } from '@/lib/api/professorsApi';
 import { ensureWorkspaceTask } from '@/lib/api/workspacesApi';
-import type { ProfessorDashboardItemDTO } from '@/types';
+import type { ProfessorDashboardItemDTO, ProfessorDashboardStatus } from '@/types';
 
 const SESSION_KEY = 'selected_professor_ids';
 
@@ -44,9 +50,8 @@ export const HomePage = () => {
     useSelectionContext();
   const [professors, setProfessors] = useState<ProfessorDashboardItemDTO[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [keyword, setKeyword] = useState('');
-  const [university, setUniversity] = useState('all');
-  const [status, setStatus] = useState<ProfessorDashboardStatusFilter>('all');
+  const [filters, setFilters] = useState<DashboardFilterState>(createDefaultDashboardFilters);
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const [sortKey, setSortKey] = useState<ProfessorDashboardSortKey>('latest');
   const [loading, setLoading] = useState(false);
   const [hasLoadedProfessors, setHasLoadedProfessors] = useState(false);
@@ -132,21 +137,71 @@ export const HomePage = () => {
     void loadProfessors();
   }, [loadProfessors]);
 
-  const filteredProfessors = filterProfessorsByDashboardStatus(professors, status).filter((item) => {
-    const query = keyword.trim().toLowerCase();
-    const keywordMatched =
-      !query ||
-      [item.name, item.university, item.school, item.research_direction]
-        .filter(Boolean)
-        .some((value) => value?.toLowerCase().includes(query));
-    const universityMatched = university === 'all' || item.university === university;
-    return keywordMatched && universityMatched;
-  });
-  const visibleProfessors = sortDashboardProfessors(filteredProfessors, sortKey);
+  const filterOptions = buildDashboardFilterOptions(professors);
+  const activeAdvancedFilterCount = getActiveDashboardFilterCount(filters);
+  const selectedStatusLabels = filters.statuses.map((item) => getProfessorDashboardStatusLabel(item));
 
-  const universityOptions = Array.from(
-    new Set(professors.map((item) => item.university).filter(Boolean)),
-  ) as string[];
+  const updateFilters = (nextFilters: Partial<DashboardFilterState>) => {
+    setFilters((previous) => ({ ...previous, ...nextFilters }));
+  };
+
+  const toggleStringFilterValue = (
+    key: 'universities' | 'schools' | 'departments' | 'titles',
+    value: string,
+  ) => {
+    setFilters((previous) => {
+      const currentValues = previous[key];
+      const nextValues = currentValues.includes(value)
+        ? currentValues.filter((item) => item !== value)
+        : [...currentValues, value];
+
+      return { ...previous, [key]: nextValues };
+    });
+  };
+
+  const toggleStatusFilterValue = (value: ProfessorDashboardStatus) => {
+    setFilters((previous) => {
+      const nextValues = previous.statuses.includes(value)
+        ? previous.statuses.filter((item) => item !== value)
+        : [...previous.statuses, value];
+
+      return { ...previous, statuses: nextValues };
+    });
+  };
+
+  const handleMinMatchScoreChange = (value: string) => {
+    if (value === '') {
+      updateFilters({ minMatchScore: '' });
+      return;
+    }
+
+    const score = Number(value);
+    if (!Number.isFinite(score)) {
+      return;
+    }
+
+    updateFilters({ minMatchScore: String(Math.min(100, Math.max(0, score))) });
+  };
+
+  const clearAdvancedFilters = () => {
+    setFilters((previous) => ({
+      ...previous,
+      universities: [],
+      schools: [],
+      departments: [],
+      titles: [],
+      statuses: [],
+      minMatchScore: '',
+    }));
+  };
+
+  const resetAllFilters = () => {
+    setFilters(createDefaultDashboardFilters());
+    setSortKey('latest');
+  };
+
+  const filteredProfessors = filterDashboardProfessors(professors, filters);
+  const visibleProfessors = sortDashboardProfessors(filteredProfessors, sortKey);
 
   const toggleSelection = (professorId: number) => {
     setSelectedIds((previous) => {
@@ -383,49 +438,19 @@ export const HomePage = () => {
             </div>
           </div>
 
-          <div className="mt-6 grid gap-3 md:grid-cols-4">
+          <div className="mt-6 grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(12rem,1fr)_auto_auto] lg:items-end">
             <label className="rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-600 shadow-sm">
               <div className="mb-2 font-medium text-stone-800">关键词</div>
               <div className="flex items-center gap-2">
                 <Search className="h-4 w-4 text-stone-400" />
                 <input
-                  value={keyword}
-                  onChange={(event) => setKeyword(event.target.value)}
-                  placeholder="导师、学校、研究方向"
+                  value={filters.keyword}
+                  onChange={(event) => updateFilters({ keyword: event.target.value })}
+                  placeholder="导师、学校、学院、系所、职称、研究方向"
                   className="w-full bg-transparent outline-none"
                 />
               </div>
             </label>
-
-            <NativeSelectField
-              label="学校"
-              value={university}
-              onChange={(event) => setUniversity(event.target.value)}
-              wrapperClassName="rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-600 shadow-sm"
-              shellClassName="border-0 bg-transparent px-0 py-0 shadow-none"
-            >
-              <option value="all">全部学校</option>
-              {universityOptions.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </NativeSelectField>
-
-            <NativeSelectField
-              label="状态"
-              value={status}
-              onChange={(event) => setStatus(event.target.value as typeof status)}
-              wrapperClassName="rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-600 shadow-sm"
-              shellClassName="border-0 bg-transparent px-0 py-0 shadow-none"
-            >
-              <option value="all">全部状态</option>
-              {PROFESSOR_DASHBOARD_STATUS_OPTIONS.map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </NativeSelectField>
 
             <NativeSelectField
               label="排序"
@@ -440,7 +465,96 @@ export const HomePage = () => {
                 </option>
               ))}
             </NativeSelectField>
+
+            <button
+              type="button"
+              onClick={() => setAdvancedFiltersOpen((previous) => !previous)}
+              className="ui-btn-secondary h-[4.25rem] justify-center"
+            >
+              高级筛选{activeAdvancedFilterCount > 0 ? ` ${activeAdvancedFilterCount}` : ''}
+            </button>
+
+            <button
+              type="button"
+              onClick={resetAllFilters}
+              className="ui-btn-secondary h-[4.25rem] justify-center"
+            >
+              重置
+            </button>
           </div>
+
+          {advancedFiltersOpen ? (
+            <div className="mt-3 rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="text-sm font-semibold text-stone-800">高级筛选</div>
+                <button type="button" onClick={clearAdvancedFilters} className="ui-btn-secondary px-3 py-1.5 text-sm">
+                  清空高级筛选
+                </button>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <MultiSelectFilter
+                  label="学校"
+                  allLabel="全部学校"
+                  selectedValues={filters.universities}
+                  options={filterOptions.universities}
+                  onToggle={(value) => toggleStringFilterValue('universities', value)}
+                  onClear={() => updateFilters({ universities: [] })}
+                />
+                <MultiSelectFilter
+                  label="学院"
+                  allLabel="全部学院"
+                  selectedValues={filters.schools}
+                  options={filterOptions.schools}
+                  onToggle={(value) => toggleStringFilterValue('schools', value)}
+                  onClear={() => updateFilters({ schools: [] })}
+                />
+                <MultiSelectFilter
+                  label="系所"
+                  allLabel="全部系所"
+                  selectedValues={filters.departments}
+                  options={filterOptions.departments}
+                  onToggle={(value) => toggleStringFilterValue('departments', value)}
+                  onClear={() => updateFilters({ departments: [] })}
+                />
+                <MultiSelectFilter
+                  label="职称"
+                  allLabel="全部职称"
+                  selectedValues={filters.titles}
+                  options={filterOptions.titles}
+                  onToggle={(value) => toggleStringFilterValue('titles', value)}
+                  onClear={() => updateFilters({ titles: [] })}
+                />
+                <MultiSelectFilter
+                  label="状态"
+                  allLabel="全部状态"
+                  selectedValues={selectedStatusLabels}
+                  options={PROFESSOR_DASHBOARD_STATUS_OPTIONS.map(([, label]) => label)}
+                  onToggle={(label) => {
+                    const option = PROFESSOR_DASHBOARD_STATUS_OPTIONS.find(
+                      ([, optionLabel]) => optionLabel === label,
+                    );
+                    if (option) {
+                      toggleStatusFilterValue(option[0]);
+                    }
+                  }}
+                  onClear={() => updateFilters({ statuses: [] })}
+                />
+                <label className="block">
+                  <div className="mb-2 text-sm font-medium text-stone-800">最低匹配度</div>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={filters.minMatchScore}
+                    onChange={(event) => handleMinMatchScoreChange(event.target.value)}
+                    placeholder="例如 80"
+                    className="ui-select-shell w-full"
+                  />
+                </label>
+              </div>
+            </div>
+          ) : null}
 
           <div className="mt-4 space-y-2">
             {!hasPrimaryMaterial ? (
