@@ -203,11 +203,24 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result.prompt_hash), 64)
         self.assertEqual(len(result.stable_prefix_hash), 64)
 
-    def test_match_only_prompt_requires_visible_research_evidence(self) -> None:
+    def test_match_only_prompt_includes_explicit_score_rubric(self) -> None:
         from app.services.llm_runtime import SYSTEM_MATCH_ONLY_PROMPT
 
-        self.assertIn("研究方向或近期论文", SYSTEM_MATCH_ONLY_PROMPT)
-        self.assertIn("证据不足", SYSTEM_MATCH_ONLY_PROMPT)
+        expected_fragments = [
+            "研究主题匹配度：0-50",
+            "能力与方法匹配度：0-30",
+            "个性化理由充分度：0-20",
+            "没有近期论文，但研究方向具体：不限制最高分",
+            "没有近期论文，且研究方向很宽泛：match_score 最高 75",
+            "没有研究方向，但有近期论文：match_score 最高 85",
+            "研究方向和近期论文都缺失：match_score 最高 30",
+            "学生默认材料缺少可见研究、项目或技能证据：match_score 最高 60",
+            "触发上限规则时，risk_points 必须说明原因",
+        ]
+
+        for fragment in expected_fragments:
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, SYSTEM_MATCH_ONLY_PROMPT)
 
     def test_build_draft_prompt_requires_template_first_and_limits_changes(self) -> None:
         from app.models import IdentityMaterial, IdentityProfile, Professor
