@@ -1427,6 +1427,56 @@ class ApiEndpointTests(unittest.TestCase):
             any(message["direction"] == "draft" for message in refreshed.json()["messages"]),
         )
 
+    def test_template_draft_does_not_require_professor_research_direction(self) -> None:
+        identity_response = self.client.post(
+            "/api/identities",
+            json=self._build_identity_payload(
+                with_imap=False,
+                outreach_generation_mode="template",
+                outreach_template_subject="申请与{{name}}老师交流",
+                outreach_template_body_text="{{name}}老师您好，我是{{sender_name}}。",
+            ),
+        )
+        self.assertEqual(identity_response.status_code, 201, msg=identity_response.text)
+        identity_id = identity_response.json()["id"]
+        llm_id = self._create_llm()
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "模板模式导师",
+                "email": "template-no-research@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": None,
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        workspace = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(workspace.status_code, 200, msg=workspace.text)
+        task_id = workspace.json()["current_task"]["id"]
+
+        with patch(
+            "app.services.task_runtime.llm_runtime.generate_draft_content",
+            AsyncMock(side_effect=AssertionError("模板模式不应调用 LLM 草稿生成")),
+        ) as mocked_generate:
+            response = self.client.post(f"/api/email-tasks/{task_id}/generate-draft")
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        self.assertEqual(response.json()["current_task"]["status"], "review_required")
+        self.assertEqual(response.json()["messages"][-1]["direction"], "draft")
+        mocked_generate.assert_not_awaited()
+
     def test_calculate_match_keeps_low_score_task_in_matched_state(self) -> None:
         identity_id = self._create_identity(with_imap=False)
         llm_id = self._create_llm()
