@@ -28,6 +28,7 @@ import { useSelectionContext } from "@/context/SelectionContext";
 import { NativeSelectField } from "@/components/atoms/NativeSelectField";
 import { EmailTemplateEditor } from "@/components/molecules/EmailTemplateEditor";
 import { SubjectTemplateInput } from "@/components/molecules/SubjectTemplateInput";
+import { TokenUsageCenterCard } from "@/components/molecules/TokenUsageCenterCard";
 import { DiagnosticLogPanel } from "@/components/organisms/DiagnosticLogPanel";
 import { formatApiDateTime } from "@/lib/dateTime";
 import { textToEmailHtml } from "@/lib/richEmail";
@@ -3084,6 +3085,8 @@ export const ProfilePage = () => {
           </ProfileSetupSection>
 
           <DiagnosticLogPanel />
+
+          <TokenUsageCenterCard />
         </div>
       )}
       <OutreachTemplateModal

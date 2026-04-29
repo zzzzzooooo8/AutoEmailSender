@@ -647,6 +647,37 @@ export interface EmailTaskSchedulePayloadDTO extends EmailTaskApprovalPayloadDTO
   scheduled_at: string;
 }
 
+export type TokenUsageRecordFeatureTypeDTO = 'crawl' | 'match_analysis' | 'draft_generation';
+export type TokenUsageRecordStatusDTO = 'success' | 'failed' | 'running' | 'unknown';
+
+export interface TokenUsageRecordDTO {
+  id: string;
+  feature_type: TokenUsageRecordFeatureTypeDTO;
+  feature_label: string;
+  title: string;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cached_tokens: number | null;
+  total_tokens: number | null;
+  model_name: string | null;
+  identity_name: string | null;
+  created_at: string;
+  status: TokenUsageRecordStatusDTO;
+}
+
+export interface TokenUsageSummaryDTO {
+  input_tokens: number;
+  output_tokens: number;
+  cached_tokens: number;
+  total_tokens: number;
+  record_count: number;
+}
+
+export interface TokenUsageRecordListDTO {
+  records: TokenUsageRecordDTO[];
+  summary: TokenUsageSummaryDTO;
+}
+
 export const PROFESSOR_STATUS_LABELS = {
   discovered: '待处理',
   matched: '待生成',
