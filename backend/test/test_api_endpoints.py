@@ -1367,6 +1367,66 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(payload["messages"][-1]["direction"], "sent")
         mocked_send.assert_awaited_once()
 
+    def test_generate_draft_requires_professor_research_direction(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        self._upload_material(
+            identity_id,
+            filename="resume.txt",
+            content=b"My background covers agent systems.",
+            material_type="resume",
+        )
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "李老师",
+                "email": "li-missing-research@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": None,
+                "recent_papers": ["Agent paper"],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        workspace = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(workspace.status_code, 200, msg=workspace.text)
+        task_id = workspace.json()["current_task"]["id"]
+
+        with patch(
+            "app.services.task_runtime.llm_runtime.generate_draft_content",
+            AsyncMock(
+                return_value=self._build_draft_generation_result(
+                    subject="不应生成的草稿",
+                    body_text="这封草稿不应在缺少研究方向时生成。",
+                    body_html="<p>这封草稿不应在缺少研究方向时生成。</p>",
+                ),
+            ),
+        ) as mocked_generate:
+            response = self.client.post(f"/api/email-tasks/{task_id}/generate-draft")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("请先补充导师研究方向", response.json()["detail"])
+        mocked_generate.assert_not_awaited()
+
+        refreshed = self.client.get(
+            f"/api/workspaces/{professor_id}",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(refreshed.status_code, 200, msg=refreshed.text)
+        self.assertFalse(
+            any(message["direction"] == "draft" for message in refreshed.json()["messages"]),
+        )
+
     def test_calculate_match_keeps_low_score_task_in_matched_state(self) -> None:
         identity_id = self._create_identity(with_imap=False)
         llm_id = self._create_llm()

@@ -57,6 +57,10 @@ def _has_professor_match_evidence(professor: Professor) -> bool:
     )
 
 
+def _has_professor_research_direction(professor: Professor) -> bool:
+    return bool((professor.research_direction or "").strip())
+
+
 async def process_pending_drafts_once(
     session_factory: async_sessionmaker[AsyncSession],
     limit: int = 5,
@@ -275,6 +279,8 @@ async def generate_task_draft(
                     if force:
                         raise ValueError("请先选择用于匹配的默认材料")
                     return task.professor_id, task.identity_id, task.llm_profile_id
+                if not _has_professor_research_direction(task.professor):
+                    raise ValueError("请先补充导师研究方向，再使用 AI 生成草稿")
                 ensure_material_extracted_text(task.primary_material)
                 template_subject = _normalize_nullable_text(outreach_config.subject_template) or (
                     _normalize_nullable_text(batch_task.email_subject) if batch_task else None
