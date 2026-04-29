@@ -147,6 +147,36 @@ const formatScheduleSummary = (value: string) => {
   });
 };
 
+const formatTokenCount = (value: number | null | undefined) =>
+  typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString('zh-CN') : '未知';
+
+const buildDraftTokenSummary = (
+  task: WorkspaceTaskSummaryDTO,
+  mode: OutreachGenerationMode,
+) => {
+  if (mode === 'template') {
+    return '模板模式不消耗 token';
+  }
+
+  if (
+    task.last_draft_prompt_tokens != null ||
+    task.last_draft_completion_tokens != null ||
+    task.last_draft_total_tokens != null
+  ) {
+    return `上次消耗：输入 ${formatTokenCount(task.last_draft_prompt_tokens)} / 输出 ${formatTokenCount(task.last_draft_completion_tokens)} / 总计 ${formatTokenCount(task.last_draft_total_tokens)}`;
+  }
+
+  if (
+    task.estimated_prompt_tokens != null ||
+    task.estimated_completion_tokens_upper_bound != null ||
+    task.estimated_total_tokens_upper_bound != null
+  ) {
+    return `预计上限：输入 ${formatTokenCount(task.estimated_prompt_tokens)} / 输出最多 ${formatTokenCount(task.estimated_completion_tokens_upper_bound)} / 总计最多 ${formatTokenCount(task.estimated_total_tokens_upper_bound)}`;
+  }
+
+  return '暂无 token 记录';
+};
+
 export const WorkspaceComposerDock = ({
   thread,
   currentTask,
@@ -188,10 +218,12 @@ export const WorkspaceComposerDock = ({
     .map((materialId) => attachmentNameMap.get(materialId))
     .filter((item): item is string => Boolean(item));
 
+  const hasProfessorResearchDirection = Boolean(thread.professor.research_direction?.trim());
   const hasTemplateConfigured = Boolean(
     currentTask.outreach_template_body_text?.trim() || currentTask.outreach_template_body_html?.trim(),
   );
   const scheduledSummary = formatScheduleSummary(scheduledAt);
+  const draftTokenSummary = buildDraftTokenSummary(currentTask, currentTaskMode);
   const limitationHint =
     currentTaskMode === 'template'
       ? hasTemplateConfigured
@@ -199,9 +231,11 @@ export const WorkspaceComposerDock = ({
         : '请先在身份页补充模板。'
       : !hasTemplateConfigured
         ? '请先在身份页补充套磁信模板。'
-        : currentTask.primary_material_id
-          ? null
-          : '请选择用于匹配的材料。';
+        : !currentTask.primary_material_id
+          ? '请选择用于匹配的材料。'
+          : !hasProfessorResearchDirection
+            ? '请先补充导师研究方向，再使用 AI 生成草稿。'
+            : null;
 
   return (
     <div className="relative z-20 overflow-visible border-t border-stone-200/80 bg-[linear-gradient(180deg,rgba(255,252,246,0.94),rgba(255,248,240,0.98))] px-4 py-4 backdrop-blur-xl sm:px-6">
@@ -325,6 +359,9 @@ export const WorkspaceComposerDock = ({
                       <RefreshCcw className="h-4 w-4" />
                       生成草稿
                     </button>
+                    </div>
+                    <div className="rounded-2xl border border-stone-100 bg-stone-50/70 px-3 py-2 text-xs leading-5 text-stone-500">
+                      {draftTokenSummary}
                     </div>
                   </div>
                 </ComposerSection>

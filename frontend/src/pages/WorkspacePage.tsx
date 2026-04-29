@@ -95,6 +95,9 @@ const hasProfessorMatchEvidence = (professor: WorkspaceProfessorDTO | null | und
   Boolean(professor?.research_direction?.trim()) ||
   Boolean(professor?.recent_papers?.some((paper) => paper.trim()));
 
+const hasProfessorResearchDirection = (professor: WorkspaceProfessorDTO | null | undefined) =>
+  Boolean(professor?.research_direction?.trim());
+
 const getStatusLabel = (
   currentTask: WorkspaceTaskSummaryDTO | null,
   messages: WorkspaceMessageDTO[] = [],
@@ -543,7 +546,9 @@ export const WorkspacePage = () => {
     !blocksDirectDraftActions &&
     (currentTaskMode === 'template'
       ? hasTemplateConfigured
-      : hasTemplateConfigured && Boolean(currentTask?.primary_material_id));
+      : hasTemplateConfigured &&
+        Boolean(currentTask?.primary_material_id) &&
+        hasProfessorResearchDirection(thread?.professor));
   const canSubmitDraft = Boolean(currentTaskId) && !blocksDirectDraftActions;
   const realMessageCount = useMemo(
     () => thread?.messages.filter((message) => message.direction !== 'draft').length ?? 0,
