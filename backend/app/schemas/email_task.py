@@ -4,6 +4,8 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from app.schemas.workspace import WorkspaceThreadRead
+
 
 class EmailTaskApprovalRequest(BaseModel):
     subject: str | None = None
@@ -25,3 +27,16 @@ class EmailTaskOutreachConfigRequest(BaseModel):
     outreach_template_subject: str | None = None
     outreach_template_body_text: str | None = None
     outreach_template_body_html: str | None = None
+
+
+class TokenUsageRead(BaseModel):
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    cached_tokens: int | None = None
+
+
+class MatchCalculationResultRead(BaseModel):
+    thread: WorkspaceThreadRead
+    usage: TokenUsageRead
+    run_id: int | None = None

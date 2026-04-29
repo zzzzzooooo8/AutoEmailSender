@@ -10,6 +10,8 @@ from app.schemas.email_task import (
     EmailTaskOutreachConfigRequest,
     EmailTaskPrimaryMaterialRequest,
     EmailTaskScheduleRequest,
+    MatchCalculationResultRead,
+    TokenUsageRead,
 )
 from app.schemas.workspace import WorkspaceThreadRead
 from app.services.task_runtime import (
@@ -39,14 +41,33 @@ async def regenerate_draft(
     )
 
 
-@router.post("/{task_id}/calculate-match", response_model=WorkspaceThreadRead)
+@router.post("/{task_id}/calculate-match", response_model=MatchCalculationResultRead)
 async def calculate_match(
     task_id: int,
     session: AsyncSession = Depends(get_async_session),
-) -> WorkspaceThreadRead:
-    return await _run_workspace_action(
+) -> MatchCalculationResultRead:
+    try:
+        result = await calculate_task_match_once(get_session_factory(), task_id)
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 404 if "不存在" in detail else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+
+    thread = await build_workspace_thread(
         session,
-        lambda: calculate_task_match_once(get_session_factory(), task_id),
+        professor_id=result.professor_id,
+        identity_id=result.identity_id,
+        llm_profile_id=result.llm_profile_id,
+    )
+    return MatchCalculationResultRead(
+        thread=thread,
+        usage=TokenUsageRead(
+            prompt_tokens=result.usage.prompt_tokens,
+            completion_tokens=result.usage.completion_tokens,
+            total_tokens=result.usage.total_tokens,
+            cached_tokens=result.usage.cached_tokens,
+        ),
+        run_id=result.run_id,
     )
 
 

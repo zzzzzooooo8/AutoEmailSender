@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, tzinfo
 
 from sqlalchemy import func, or_, select
@@ -19,6 +20,7 @@ from app.models import (
     EmailTaskStatus,
     IdentityMaterial,
     IdentityProfile,
+    MatchAnalysisRun,
     Professor,
 )
 from app.schemas.email_task import EmailTaskApprovalRequest, EmailTaskScheduleRequest
@@ -59,6 +61,23 @@ def _has_professor_match_evidence(professor: Professor) -> bool:
 
 def _has_professor_research_direction(professor: Professor) -> bool:
     return bool((professor.research_direction or "").strip())
+
+
+@dataclass(slots=True)
+class MatchUsageSummary:
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    cached_tokens: int | None = None
+
+
+@dataclass(slots=True)
+class MatchCalculationActionResult:
+    professor_id: int
+    identity_id: int
+    llm_profile_id: int
+    usage: MatchUsageSummary
+    run_id: int | None = None
 
 
 async def process_pending_drafts_once(
@@ -371,7 +390,7 @@ async def calculate_task_match(
     *,
     force: bool,
     ignore_batch_status: bool = False,
-) -> tuple[int, int, int]:
+) -> MatchCalculationActionResult:
     async with session_factory() as session:
         task = await _load_email_task(session, task_id)
         if not task:
@@ -381,11 +400,11 @@ async def calculate_task_match(
             and task.batch_task.status != BatchTaskStatus.RUNNING.value
             and not ignore_batch_status
         ):
-            return task.professor_id, task.identity_id, task.llm_profile_id
+            return _match_action_result(task)
         if task.primary_material is None:
             if force:
                 raise ValueError("请先选择用于匹配的默认材料")
-            return task.professor_id, task.identity_id, task.llm_profile_id
+            return _match_action_result(task)
         ensure_material_extracted_text(task.primary_material)
         if not _has_professor_match_evidence(task.professor):
             raise ValueError("缺少研究方向或近期论文，暂不能分析匹配度")
@@ -397,7 +416,7 @@ async def calculate_task_match(
             EmailTaskStatus.SENT.value,
             EmailTaskStatus.REPLY_DETECTED.value,
         }:
-            return task.professor_id, task.identity_id, task.llm_profile_id
+            return _match_action_result(task)
 
         try:
             generation = await llm_runtime.generate_match_evaluation(
@@ -408,12 +427,44 @@ async def calculate_task_match(
                 available_materials=list(task.identity.materials),
             )
         except llm_runtime.LLMRuntimeError as exc:
+            run = MatchAnalysisRun(
+                email_task_id=task.id,
+                professor_id=task.professor_id,
+                identity_id=task.identity_id,
+                llm_profile_id=task.llm_profile_id,
+                success=False,
+                duration_ms=exc.duration_ms,
+                endpoint_kind=exc.endpoint_kind,
+                status_code=exc.status_code,
+                error_message=str(exc),
+            )
+            session.add(run)
+            await session.flush()
             task.last_error = str(exc)
             task.updated_at = datetime.now(UTC)
             await session.commit()
-            return task.professor_id, task.identity_id, task.llm_profile_id
+            return _match_action_result(task, run_id=run.id)
 
         result = generation.result
+        run = MatchAnalysisRun(
+            email_task_id=task.id,
+            professor_id=task.professor_id,
+            identity_id=task.identity_id,
+            llm_profile_id=task.llm_profile_id,
+            success=True,
+            match_score=result.match_score,
+            prompt_tokens=generation.usage.prompt_tokens if generation.usage else None,
+            completion_tokens=generation.usage.completion_tokens if generation.usage else None,
+            total_tokens=generation.usage.total_tokens if generation.usage else None,
+            cached_tokens=generation.usage.cached_tokens if generation.usage else None,
+            duration_ms=generation.duration_ms,
+            endpoint_kind=generation.endpoint_kind,
+            status_code=generation.status_code,
+            prompt_hash=generation.prompt_hash,
+            stable_prefix_hash=generation.stable_prefix_hash,
+        )
+        session.add(run)
+        await session.flush()
         task.match_score = result.match_score
         task.match_reason = result.match_reason
         task.fit_points = result.fit_points
@@ -423,7 +474,11 @@ async def calculate_task_match(
         task.updated_at = datetime.now(UTC)
         task.last_error = None
         await session.commit()
-        return task.professor_id, task.identity_id, task.llm_profile_id
+        return _match_action_result(
+            task,
+            usage=_match_usage_summary(generation.usage),
+            run_id=run.id,
+        )
 
 
 async def regenerate_task_draft(
@@ -433,10 +488,38 @@ async def regenerate_task_draft(
     return await generate_task_draft(session_factory, task_id, force=True)
 
 
+def _match_usage_summary(
+    usage: llm_runtime.ChatCompletionUsage | None,
+) -> MatchUsageSummary:
+    if usage is None:
+        return MatchUsageSummary()
+    return MatchUsageSummary(
+        prompt_tokens=usage.prompt_tokens,
+        completion_tokens=usage.completion_tokens,
+        total_tokens=usage.total_tokens,
+        cached_tokens=usage.cached_tokens,
+    )
+
+
+def _match_action_result(
+    task: EmailTask,
+    *,
+    usage: MatchUsageSummary | None = None,
+    run_id: int | None = None,
+) -> MatchCalculationActionResult:
+    return MatchCalculationActionResult(
+        professor_id=task.professor_id,
+        identity_id=task.identity_id,
+        llm_profile_id=task.llm_profile_id,
+        usage=usage or MatchUsageSummary(),
+        run_id=run_id,
+    )
+
+
 async def calculate_task_match_once(
     session_factory: async_sessionmaker[AsyncSession],
     task_id: int,
-) -> tuple[int, int, int]:
+) -> MatchCalculationActionResult:
     return await calculate_task_match(session_factory, task_id, force=True)
 
 
