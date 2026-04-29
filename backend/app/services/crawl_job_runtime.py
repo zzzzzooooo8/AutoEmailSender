@@ -126,12 +126,6 @@ async def run_queued_crawl_jobs_once(
             )
         else:
             await run_faculty_crawler_agent(ctx, llm_profile, trace_callback=trace_callback)
-            await _enrich_saved_candidates(
-                session_factory,
-                ctx,
-                llm_profile=llm_profile,
-                trace_callback=trace_callback,
-            )
         await _complete_running_job(session_factory, job_id)
     except CrawlJobPaused:
         await _emit_trace_event(
