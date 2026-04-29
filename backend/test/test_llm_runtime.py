@@ -203,11 +203,67 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result.prompt_hash), 64)
         self.assertEqual(len(result.stable_prefix_hash), 64)
 
-    def test_match_only_prompt_requires_visible_research_evidence(self) -> None:
+    def test_match_only_prompt_includes_explicit_score_rubric(self) -> None:
         from app.services.llm_runtime import SYSTEM_MATCH_ONLY_PROMPT
 
-        self.assertIn("研究方向或近期论文", SYSTEM_MATCH_ONLY_PROMPT)
-        self.assertIn("证据不足", SYSTEM_MATCH_ONLY_PROMPT)
+        expected_fragments = [
+            "研究主题匹配度：0-50",
+            "能力与方法匹配度：0-30",
+            "个性化理由充分度：0-20",
+            "没有近期论文，但研究方向具体：不限制最高分",
+            "没有近期论文，且研究方向很宽泛：match_score 最高 75",
+            "没有研究方向，但有近期论文：match_score 最高 85",
+            "研究方向和近期论文都缺失：match_score 最高 30",
+            "学生默认材料缺少可见研究、项目或技能证据：match_score 最高 60",
+            "触发上限规则时，risk_points 必须说明原因",
+        ]
+
+        for fragment in expected_fragments:
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, SYSTEM_MATCH_ONLY_PROMPT)
+
+    def test_build_match_prompt_keeps_specific_research_direction_without_recent_papers(self) -> None:
+        from app.models import IdentityMaterial, IdentityProfile, Professor
+
+        identity = IdentityProfile(
+            id=3,
+            name="张三",
+            email_address="sender@example.com",
+            smtp_host="smtp.example.com",
+            smtp_port=465,
+            smtp_username="sender@example.com",
+            smtp_password="secret",
+            default_language="zh-CN",
+            outreach_generation_mode="llm",
+        )
+        primary_material = IdentityMaterial(
+            id=7,
+            identity_id=3,
+            display_name="简历",
+            file_path="data/materials/resume.txt",
+            original_filename="resume.txt",
+            material_type="resume",
+            extracted_text="我做过 biomedical information extraction 与大模型项目。",
+        )
+        professor = Professor(
+            name="李老师",
+            email="prof@example.edu",
+            title="Professor",
+            university="Example University",
+            school="Computer Science",
+            research_direction="LLM-based biomedical information extraction",
+            recent_papers=[],
+        )
+
+        parts = build_match_prompt_parts(
+            identity=identity,
+            primary_material=primary_material,
+            professor=professor,
+            available_materials=[primary_material],
+        )
+
+        self.assertIn("LLM-based biomedical information extraction", parts.prompt)
+        self.assertIn("近期论文：\n- 无", parts.prompt)
 
     def test_build_draft_prompt_requires_template_first_and_limits_changes(self) -> None:
         from app.models import IdentityMaterial, IdentityProfile, Professor
