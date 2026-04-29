@@ -5,9 +5,12 @@ from unittest.mock import patch
 
 from app.models import LLMProfile
 from app.services.llm_runtime import (
+    build_match_prompt_parts,
     build_draft_prompt,
     fetch_llm_profile_models,
+    generate_match_evaluation,
     LLMRuntimeError,
+    parse_completion_usage,
     request_chat_completion,
     resolve_base_url,
 )
@@ -55,6 +58,151 @@ class _FakeAsyncClient:
 
 
 class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    def test_parse_completion_usage_reads_cached_tokens_from_chat_shape(self) -> None:
+        usage = parse_completion_usage(
+            {
+                "prompt_tokens": 1200,
+                "completion_tokens": 80,
+                "total_tokens": 1280,
+                "prompt_tokens_details": {"cached_tokens": 1024},
+            },
+        )
+
+        self.assertIsNotNone(usage)
+        self.assertEqual(usage.prompt_tokens, 1200)
+        self.assertEqual(usage.completion_tokens, 80)
+        self.assertEqual(usage.total_tokens, 1280)
+        self.assertEqual(usage.cached_tokens, 1024)
+
+    def test_build_match_prompt_parts_places_stable_identity_before_professor(self) -> None:
+        from app.models import IdentityMaterial, IdentityProfile, Professor
+
+        identity = IdentityProfile(
+            id=3,
+            name="张三",
+            email_address="sender@example.com",
+            smtp_host="smtp.example.com",
+            smtp_port=465,
+            smtp_username="sender@example.com",
+            smtp_password="secret",
+            default_language="zh-CN",
+            outreach_generation_mode="llm",
+        )
+        primary_material = IdentityMaterial(
+            id=7,
+            identity_id=3,
+            display_name="简历",
+            file_path="data/materials/resume.txt",
+            original_filename="resume.txt",
+            material_type="resume",
+            extracted_text="我做过信息抽取与智能体相关研究。",
+        )
+        professor = Professor(
+            name="李老师",
+            email="prof@example.edu",
+            title="Professor",
+            university="Example University",
+            school="Computer Science",
+            research_direction="Information Extraction",
+            recent_papers=["Paper A"],
+        )
+
+        parts = build_match_prompt_parts(
+            identity=identity,
+            primary_material=primary_material,
+            professor=professor,
+            available_materials=[primary_material],
+        )
+
+        self.assertLess(parts.prompt.index("默认材料"), parts.prompt.index("导师信息"))
+        self.assertIn("信息抽取与智能体", parts.stable_prefix)
+        self.assertNotIn("李老师", parts.stable_prefix)
+        self.assertEqual(len(parts.prompt_hash), 64)
+        self.assertEqual(len(parts.stable_prefix_hash), 64)
+
+    async def test_generate_match_evaluation_uses_temperature_zero_and_prompt_cache_key(self) -> None:
+        from app.models import IdentityMaterial, IdentityProfile, Professor
+
+        identity = IdentityProfile(
+            id=3,
+            name="张三",
+            email_address="sender@example.com",
+            smtp_host="smtp.example.com",
+            smtp_port=465,
+            smtp_username="sender@example.com",
+            smtp_password="secret",
+            current_primary_material_id=7,
+            default_language="zh-CN",
+            outreach_generation_mode="llm",
+        )
+        primary_material = IdentityMaterial(
+            id=7,
+            identity_id=3,
+            display_name="简历",
+            file_path="data/materials/resume.txt",
+            original_filename="resume.txt",
+            material_type="resume",
+            extracted_text="我做过信息抽取与智能体相关研究。",
+        )
+        profile = LLMProfile(
+            id=5,
+            name="openai",
+            provider="openai",
+            api_base_url=None,
+            api_key="test-key",
+            model_name="gpt-test",
+            temperature=0.8,
+        )
+        professor = Professor(
+            name="李老师",
+            email="prof@example.edu",
+            title="Professor",
+            university="Example University",
+            school="Computer Science",
+            research_direction="Information Extraction",
+            recent_papers=["Paper A"],
+        )
+        calls: list[tuple[str, dict[str, object] | None]] = []
+        responses = [
+            _FakeResponse(
+                status_code=200,
+                payload={
+                    "choices": [
+                        {
+                            "message": {
+                                "content": '{"match_score":88,"match_reason":"方向匹配","fit_points":["信息抽取"],"risk_points":[],"keywords":["信息抽取"]}',
+                            },
+                        },
+                    ],
+                    "usage": {
+                        "prompt_tokens": 100,
+                        "completion_tokens": 20,
+                        "total_tokens": 120,
+                        "prompt_tokens_details": {"cached_tokens": 64},
+                    },
+                },
+            ),
+        ]
+
+        with patch(
+            "app.services.llm_runtime.httpx.AsyncClient",
+            side_effect=lambda *args, **kwargs: _FakeAsyncClient(responses, calls),
+        ):
+            result = await generate_match_evaluation(
+                identity=identity,
+                primary_material=primary_material,
+                llm_profile=profile,
+                professor=professor,
+                available_materials=[primary_material],
+            )
+
+        payload = calls[0][1]
+        self.assertEqual(payload["temperature"], 0)
+        self.assertEqual(payload["prompt_cache_key"], "match:v1:3:7:5")
+        self.assertEqual(result.usage.cached_tokens, 64)
+        self.assertEqual(len(result.prompt_hash), 64)
+        self.assertEqual(len(result.stable_prefix_hash), 64)
+
     def test_match_only_prompt_requires_visible_research_evidence(self) -> None:
         from app.services.llm_runtime import SYSTEM_MATCH_ONLY_PROMPT
 
