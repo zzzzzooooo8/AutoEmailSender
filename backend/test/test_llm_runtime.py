@@ -222,6 +222,49 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(fragment=fragment):
                 self.assertIn(fragment, SYSTEM_MATCH_ONLY_PROMPT)
 
+    def test_build_match_prompt_keeps_specific_research_direction_without_recent_papers(self) -> None:
+        from app.models import IdentityMaterial, IdentityProfile, Professor
+
+        identity = IdentityProfile(
+            id=3,
+            name="张三",
+            email_address="sender@example.com",
+            smtp_host="smtp.example.com",
+            smtp_port=465,
+            smtp_username="sender@example.com",
+            smtp_password="secret",
+            default_language="zh-CN",
+            outreach_generation_mode="llm",
+        )
+        primary_material = IdentityMaterial(
+            id=7,
+            identity_id=3,
+            display_name="简历",
+            file_path="data/materials/resume.txt",
+            original_filename="resume.txt",
+            material_type="resume",
+            extracted_text="我做过 biomedical information extraction 与大模型项目。",
+        )
+        professor = Professor(
+            name="李老师",
+            email="prof@example.edu",
+            title="Professor",
+            university="Example University",
+            school="Computer Science",
+            research_direction="LLM-based biomedical information extraction",
+            recent_papers=[],
+        )
+
+        parts = build_match_prompt_parts(
+            identity=identity,
+            primary_material=primary_material,
+            professor=professor,
+            available_materials=[primary_material],
+        )
+
+        self.assertIn("LLM-based biomedical information extraction", parts.prompt)
+        self.assertIn("近期论文：\n- 无", parts.prompt)
+
     def test_build_draft_prompt_requires_template_first_and_limits_changes(self) -> None:
         from app.models import IdentityMaterial, IdentityProfile, Professor
         from app.services.llm_runtime import MatchEvaluationResult
