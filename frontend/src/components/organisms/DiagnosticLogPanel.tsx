@@ -247,31 +247,26 @@ export const DiagnosticLogPanel = () => {
         aria-expanded={isExpanded}
         aria-controls="diagnostic-log-panel-content"
         onClick={toggleExpanded}
-        className="collapsible-card-toggle flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-stone-50 active:bg-stone-50"
+        className="collapsible-card-toggle flex w-full items-center justify-between gap-4 px-6 py-5 text-left transition hover:bg-stone-50 active:bg-stone-50"
       >
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-base font-semibold text-stone-900">
+            <h2 className="text-xl font-semibold text-stone-900">
               开发诊断日志
             </h2>
-            <span className="rounded-full border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs text-stone-600">
-              用于排查错误
+            <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs text-stone-600">
+              本地 {frontendEvents.length} 条
             </span>
           </div>
-          <p className="mt-1 text-sm text-stone-500">
+          <p className="mt-2 text-sm leading-6 text-stone-600">
             排查问题时导出给开发者使用，不作为普通用户内容展示。
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-3">
-          <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs text-stone-600">
-            本地 {frontendEvents.length}
-          </span>
-          <ChevronDown
-            className={`h-5 w-5 text-stone-500 transition-transform ${
-              isExpanded ? "rotate-180" : ""
-            }`}
-          />
-        </div>
+        <ChevronDown
+          className={`h-5 w-5 shrink-0 text-stone-500 transition-transform ${
+            isExpanded ? "rotate-180" : "rotate-0"
+          }`}
+        />
       </button>
 
       {renderContent ? (
@@ -281,8 +276,8 @@ export const DiagnosticLogPanel = () => {
           onTransitionEnd={handleContentTransitionEnd}
           className="collapsible-card-content"
         >
-          <div className="min-h-0 px-5 py-5">
-            <div className="grid gap-3 sm:grid-cols-3">
+          <div className="min-h-0 px-6 pb-6">
+            <div className="mt-5 grid gap-3 sm:grid-cols-3">
               <SummaryMetric
                 label="本地事件"
                 value={filteredFrontendEvents.length}
