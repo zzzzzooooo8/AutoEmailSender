@@ -48,8 +48,12 @@ export const SelectionProvider = ({ children }: PropsWithChildren) => {
   const { notifyError } = useNotification();
   const [identities, setIdentities] = useState<IdentityDTO[]>([]);
   const [llmProfiles, setLlmProfiles] = useState<LLMProfileDTO[]>([]);
-  const [selectedIdentityId, setSelectedIdentityId] = useState<number | null>(null);
-  const [selectedLlmProfileId, setSelectedLlmProfileId] = useState<number | null>(null);
+  const [selectedIdentityId, setSelectedIdentityId] = useState<number | null>(() =>
+    parseStoredId(IDENTITY_STORAGE_KEY),
+  );
+  const [selectedLlmProfileId, setSelectedLlmProfileId] = useState<number | null>(() =>
+    parseStoredId(LLM_STORAGE_KEY),
+  );
   const [loading, setLoading] = useState(true);
   const bootstrappedRef = useRef(false);
 
