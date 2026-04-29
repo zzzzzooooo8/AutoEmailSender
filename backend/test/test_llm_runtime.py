@@ -116,6 +116,22 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("必须以提供的套磁信模板为基础润色", prompt)
         self.assertIn("只允许改动：称呼、匹配理由、个性化一段、结尾、主题", prompt)
         self.assertIn("不得改写整体结构、段落顺序和主要话术风格", prompt)
+        self.assertIn("导师研究方向", prompt)
+        self.assertIn("Information Extraction", prompt)
+        self.assertIn("围绕导师研究方向", prompt)
+        self.assertIn("轻微", prompt)
+        self.assertIn("保留可表达的富文本标记", prompt)
+        self.assertIn("加粗", prompt)
+        self.assertIn("链接", prompt)
+
+    def test_system_draft_prompt_requires_research_direction_and_format_preservation(self) -> None:
+        from app.services.llm_runtime import SYSTEM_DRAFT_PROMPT
+
+        self.assertIn("导师研究方向", SYSTEM_DRAFT_PROMPT)
+        self.assertIn("轻微", SYSTEM_DRAFT_PROMPT)
+        self.assertIn("不要从零重写", SYSTEM_DRAFT_PROMPT)
+        self.assertIn("保留", SYSTEM_DRAFT_PROMPT)
+        self.assertIn("加粗", SYSTEM_DRAFT_PROMPT)
 
     def test_resolve_base_url_keeps_user_supplied_api_v3(self) -> None:
         self.assertEqual(

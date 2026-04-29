@@ -138,6 +138,10 @@ SYSTEM_DRAFT_PROMPT = dedent(
     - 只能输出一个 JSON 对象。
     - 必须保留模板的整体结构、段落顺序和主要话术风格。
     - 只允许改动：称呼、匹配理由、个性化一段、结尾、主题。
+    - 必须围绕导师研究方向进行个性化改写，不能只写泛泛的“我关注您的研究”。
+    - 只做轻微修改，不要从零重写整封邮件。
+    - 尽量保留模板中可表达的富文本标记，例如加粗、斜体、链接和列表。
+    - 如果模板包含表格，尽量保留其中的信息顺序和语义，但仍按允许的 rich_body 结构输出。
     - rich_body 根节点必须是 {"type":"doc","blocks":[...]}。
     - blocks 只允许 paragraph、bullet_list、numbered_list。
     - 内联节点只允许 text、strong、emphasis、link、line_break。
@@ -880,6 +884,9 @@ def build_draft_prompt(
         5. 用中文生成专业、克制、具体的套磁邮件。
         6. rich_body 必须是可渲染为邮件正文的受控富文本 JSON。
         7. suggested_material_ids 只能返回可选材料里存在的 id。
+        8. 必须围绕导师研究方向进行个性化改写，研究方向来自“导师信息 - 研究方向”。
+        9. 只做轻微修改，尽量保留可表达的富文本标记，例如加粗、斜体、链接和列表。
+        10. 如果模板包含表格，保留表格中的信息顺序和语义，但不要输出 schema 不支持的表格节点。
         """,
         current_match=current_match,
     )
