@@ -8,6 +8,7 @@ from typing import Any
 from deepagents import create_deep_agent
 from deepagents.backends import StateBackend
 from langchain.agents.middleware.types import AgentMiddleware
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from pydantic import ValidationError
@@ -40,6 +41,7 @@ CONTROLLED_CRAWLER_TOOL_NAMES = frozenset(
     }
 )
 MAX_TRACE_EVENT_CHARS = 20000
+SAVE_TOOL_NAME = "save_professor_candidates"
 
 
 FACULTY_CRAWLER_SYSTEM_PROMPT = """你是 AutoEmailSender 的受控高校导师信息抓取代理。
@@ -109,6 +111,124 @@ class ControlledCrawlerToolMiddleware(AgentMiddleware[Any, Any, Any]):
             for candidate_tool in tools
             if _tool_name(candidate_tool) in CONTROLLED_CRAWLER_TOOL_NAMES
         ]
+
+
+class SaveHistoryCompactionMiddleware(AgentMiddleware[Any, Any, Any]):
+    """Replace completed save tool exchanges with a compact progress summary."""
+
+    def wrap_model_call(self, request: Any, handler: Callable[[Any], Any]) -> Any:
+        messages = list(request.messages)
+        compacted_messages = compact_save_tool_history(messages)
+        if compacted_messages != messages:
+            request = request.override(messages=compacted_messages)
+        return handler(request)
+
+    async def awrap_model_call(
+        self,
+        request: Any,
+        handler: Callable[[Any], Awaitable[Any]],
+    ) -> Any:
+        messages = list(request.messages)
+        compacted_messages = compact_save_tool_history(messages)
+        if compacted_messages != messages:
+            request = request.override(messages=compacted_messages)
+        return await handler(request)
+
+
+def compact_save_tool_history(messages: list[Any]) -> list[Any]:
+    save_call_ids = _collect_completed_save_call_ids(messages)
+    if not save_call_ids:
+        return messages
+
+    summary = _build_save_history_summary(messages, save_call_ids)
+    compacted: list[Any] = []
+    inserted_summary = False
+    for message in messages:
+        if _is_completed_save_ai_message(message, save_call_ids):
+            if not inserted_summary:
+                compacted.append(HumanMessage(content=summary))
+                inserted_summary = True
+            continue
+        if _is_save_tool_message(message, save_call_ids):
+            continue
+        compacted.append(message)
+    return compacted
+
+
+def _collect_completed_save_call_ids(messages: list[Any]) -> set[str]:
+    save_call_ids: set[str] = set()
+    tool_message_ids: set[str] = set()
+    for message in messages:
+        tool_calls = getattr(message, "tool_calls", []) or []
+        if tool_calls and all(tool_call.get("name") == SAVE_TOOL_NAME for tool_call in tool_calls):
+            for tool_call in tool_calls:
+                if isinstance(tool_call.get("id"), str):
+                    save_call_ids.add(tool_call["id"])
+        tool_call_id = getattr(message, "tool_call_id", None)
+        if isinstance(tool_call_id, str):
+            tool_message_ids.add(tool_call_id)
+    return save_call_ids & tool_message_ids
+
+
+def _is_completed_save_ai_message(message: Any, save_call_ids: set[str]) -> bool:
+    tool_calls = getattr(message, "tool_calls", []) or []
+    if not tool_calls:
+        return False
+    return all(tool_call.get("id") in save_call_ids for tool_call in tool_calls)
+
+
+def _is_save_tool_message(message: Any, save_call_ids: set[str]) -> bool:
+    return getattr(message, "tool_call_id", None) in save_call_ids
+
+
+def _build_save_history_summary(messages: list[Any], save_call_ids: set[str]) -> str:
+    total_saved = 0
+    last_status = "unknown"
+    failed_lines: list[str] = []
+    for message in messages:
+        if not _is_save_tool_message(message, save_call_ids):
+            continue
+        parsed = _parse_tool_json_content(getattr(message, "content", ""))
+        if parsed is None:
+            continue
+        total_saved = _coerce_int(parsed.get("total_saved_count"), total_saved)
+        last_status = str(parsed.get("batch_status") or last_status)
+        failed_items = parsed.get("failed_items")
+        if not isinstance(failed_items, list):
+            continue
+        for item in failed_items:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name") or f"index={item.get('index')}"
+            reason = item.get("reason") or "未知原因"
+            failed_lines.append(f"- {name}: {reason}")
+
+    failure_text = "\n".join(failed_lines[-10:]) if failed_lines else "无"
+    return (
+        "候选保存历史已压缩。\n"
+        f"从任务开始到现在已成功保存 {total_saved} 条。\n"
+        f"最近保存批次状态：{last_status}。\n"
+        f"最近失败项：\n{failure_text}\n"
+        "继续从页面中尚未保存的候选位置往后提取；"
+        "如果上一批被 rejected，请优先修正失败项并重试该批。"
+    )
+
+
+def _parse_tool_json_content(content: object) -> dict[str, Any] | None:
+    if not isinstance(content, str):
+        return None
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _coerce_int(value: object, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _format_save_batch_result_for_model(result: CandidateBatchSaveResult) -> dict[str, Any]:
@@ -255,7 +375,10 @@ def create_faculty_crawler_agent(ctx: CrawlToolContext, llm_profile: LLMProfile)
             save_professor_candidates,
         ],
         system_prompt=FACULTY_CRAWLER_SYSTEM_PROMPT,
-        middleware=[ControlledCrawlerToolMiddleware()],
+        middleware=[
+            ControlledCrawlerToolMiddleware(),
+            SaveHistoryCompactionMiddleware(),
+        ],
         backend=StateBackend(),
         name="faculty_crawler_agent",
     )
