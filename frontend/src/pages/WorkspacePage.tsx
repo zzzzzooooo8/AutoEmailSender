@@ -753,7 +753,7 @@ export const WorkspacePage = () => {
       return;
     }
 
-    void runAction(() => calculateMatch(currentTaskId), '计算匹配失败', '计算匹配失败');
+    void runAction(async () => (await calculateMatch(currentTaskId)).thread, '计算匹配失败', '计算匹配失败');
   }, [currentTaskId, runAction]);
 
   const handleGenerateDraft = useCallback(() => {

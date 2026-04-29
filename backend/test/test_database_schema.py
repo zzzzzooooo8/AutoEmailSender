@@ -13,7 +13,7 @@ from app.services.outreach_templates import import_outreach_template_file
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "a4b6c8d0e2f1"
+HEAD_REVISION = "b8c9d0e1f2a3"
 LEGACY_RUNTIME_REVISION = "7a1d5e42c9bd"
 
 
@@ -58,6 +58,7 @@ class DatabaseSchemaTests(unittest.TestCase):
                 "test_compose_sessions",
                 "test_compose_messages",
                 "operation_logs",
+                "match_analysis_runs",
             }.issubset(table_names),
         )
         self.assertNotIn("attachment_assets", table_names)
@@ -70,6 +71,7 @@ class DatabaseSchemaTests(unittest.TestCase):
         log_columns = self._get_columns("email_logs")
         settings_columns = self._get_columns("app_settings")
         operation_log_columns = self._get_columns("operation_logs")
+        match_run_columns = self._get_columns("match_analysis_runs")
 
         self.assertIn("current_primary_material_id", identity_columns)
         self.assertNotIn("resume_file_path", identity_columns)
@@ -104,6 +106,28 @@ class DatabaseSchemaTests(unittest.TestCase):
                 "created_at",
             }.issubset(operation_log_columns),
         )
+        self.assertTrue(
+            {
+                "id",
+                "email_task_id",
+                "professor_id",
+                "identity_id",
+                "llm_profile_id",
+                "success",
+                "match_score",
+                "prompt_tokens",
+                "completion_tokens",
+                "total_tokens",
+                "cached_tokens",
+                "duration_ms",
+                "endpoint_kind",
+                "status_code",
+                "prompt_hash",
+                "stable_prefix_hash",
+                "error_message",
+                "created_at",
+            }.issubset(match_run_columns),
+        )
 
         operation_log_indexes = {
             row[1]
@@ -120,6 +144,19 @@ class DatabaseSchemaTests(unittest.TestCase):
                 "ix_operation_logs_entity_id",
                 "ix_operation_logs_created_at",
             }.issubset(operation_log_indexes),
+        )
+        match_run_indexes = {
+            row[1]
+            for row in self.connection.execute(
+                "PRAGMA index_list('match_analysis_runs')"
+            ).fetchall()
+        }
+        self.assertTrue(
+            {
+                "ix_match_analysis_runs_email_task_id",
+                "ix_match_analysis_runs_professor_id",
+                "ix_match_analysis_runs_created_at",
+            }.issubset(match_run_indexes),
         )
 
     def test_crawl_job_tables_exist(self) -> None:

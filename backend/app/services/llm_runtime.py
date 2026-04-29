@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 from dataclasses import dataclass, field
 from math import ceil
@@ -175,6 +176,7 @@ class ChatCompletionUsage:
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     total_tokens: int | None = None
+    cached_tokens: int | None = None
 
 
 @dataclass(slots=True)
@@ -193,6 +195,15 @@ class DraftTokenEstimate:
     estimated_prompt_tokens: int
     estimated_completion_tokens_upper_bound: int
     estimated_total_tokens_upper_bound: int
+
+
+@dataclass(slots=True)
+class MatchPromptParts:
+    prompt: str
+    stable_prefix: str
+    prompt_hash: str
+    stable_prefix_hash: str
+    prompt_cache_key: str | None = None
 
 
 class MatchAndDraftResult(BaseModel):
@@ -264,6 +275,14 @@ class GeneratedMatchAndDraft:
 class GeneratedMatchEvaluation:
     result: MatchEvaluationResult
     usage: ChatCompletionUsage | None = None
+    request_url: str | None = None
+    attempted_urls: list[str] = field(default_factory=list)
+    endpoint_kind: str | None = None
+    status_code: int | None = None
+    duration_ms: int | None = None
+    prompt_hash: str | None = None
+    stable_prefix_hash: str | None = None
+    prompt_cache_key: str | None = None
 
 
 @dataclass(slots=True)
@@ -372,32 +391,48 @@ async def generate_match_evaluation(
     professor: Professor,
     available_materials: list[IdentityMaterial],
 ) -> GeneratedMatchEvaluation:
-    prompt = build_match_prompt(
+    prompt_parts = build_match_prompt_parts(
         identity=identity,
         primary_material=primary_material,
         professor=professor,
         available_materials=available_materials,
+        llm_profile=llm_profile,
     )
+    payload: dict[str, object] = {
+        "model": llm_profile.model_name,
+        "messages": [
+            {
+                "role": "system",
+                "content": SYSTEM_MATCH_ONLY_PROMPT,
+            },
+            {
+                "role": "user",
+                "content": prompt_parts.prompt,
+            },
+        ],
+        "temperature": 0,
+        "max_tokens": llm_profile.max_tokens or DEFAULT_LLM_MAX_TOKENS,
+    }
+    if prompt_parts.prompt_cache_key:
+        payload["prompt_cache_key"] = prompt_parts.prompt_cache_key
+
     completion = await request_chat_completion(
         llm_profile,
-        {
-            "model": llm_profile.model_name,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": SYSTEM_MATCH_ONLY_PROMPT,
-                },
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
-            ],
-            "temperature": llm_profile.temperature if llm_profile.temperature is not None else DEFAULT_LLM_TEMPERATURE,
-            "max_tokens": llm_profile.max_tokens or DEFAULT_LLM_MAX_TOKENS,
-        },
+        payload,
     )
     result = parse_structured_result(completion.content, MatchEvaluationResult)
-    return GeneratedMatchEvaluation(result=result, usage=completion.usage)
+    return GeneratedMatchEvaluation(
+        result=result,
+        usage=completion.usage,
+        request_url=completion.request_url,
+        attempted_urls=completion.attempted_urls,
+        endpoint_kind=completion.endpoint_kind,
+        status_code=completion.status_code,
+        duration_ms=completion.duration_ms,
+        prompt_hash=prompt_parts.prompt_hash,
+        stable_prefix_hash=prompt_parts.stable_prefix_hash,
+        prompt_cache_key=prompt_parts.prompt_cache_key,
+    )
 
 
 async def generate_draft_content(
@@ -826,20 +861,87 @@ def build_match_prompt(
     professor: Professor,
     available_materials: list[IdentityMaterial],
 ) -> str:
-    return _build_base_generation_prompt(
+    return build_match_prompt_parts(
         identity=identity,
         primary_material=primary_material,
         professor=professor,
         available_materials=available_materials,
-        custom_subject=None,
-        custom_body=None,
-        extra_requirements="""
+    ).prompt
+
+
+def build_match_prompt_parts(
+    *,
+    identity: IdentityProfile,
+    primary_material: IdentityMaterial | None,
+    professor: Professor,
+    available_materials: list[IdentityMaterial],
+    llm_profile: LLMProfile | None = None,
+) -> MatchPromptParts:
+    sorted_materials = sorted(available_materials, key=lambda material: material.id or 0)
+    material_block = "\n".join(
+        f"- id={material.id}, name={_format_nullable(material.display_name)}, type={_format_nullable(material.material_type)}"
+        for material in sorted_materials
+    )
+    primary_material_text = (primary_material.extracted_text if primary_material else "") or ""
+    if len(primary_material_text) > 5000:
+        primary_material_text = f"{primary_material_text[:5000]}\n...(已截断)"
+
+    stable_prefix = dedent(
+        f"""
         任务要求：
         1. 只判断匹配度，不要生成邮件草稿。
         2. match_reason 要简洁但具体。
         3. fit_points / risk_points / keywords 尽量聚焦，不要泛泛而谈。
-        """,
-        current_match=None,
+
+        当前发送身份：
+        - 姓名：{_format_nullable(identity.name)}
+        - 发件邮箱：{_format_nullable(identity.email_address)}
+        - 默认语言：{_format_nullable(identity.default_language)}
+        - 匹配阈值：{identity.match_threshold if identity.match_threshold is not None else "未设置"}
+
+        默认材料：
+        - 名称：{_format_nullable(primary_material.display_name if primary_material else None)}
+        - 标签：{_format_nullable(primary_material.material_type if primary_material else None)}
+
+        默认材料文本：
+        {primary_material_text or "未上传可提取文本的默认材料"}
+
+        可选材料：
+        {material_block or "- 无可用材料"}
+        """
+    ).strip()
+
+    professor_papers = "\n".join(f"- {paper}" for paper in (professor.recent_papers or []))
+    dynamic_suffix = dedent(
+        f"""
+        导师信息：
+        - 姓名：{_format_nullable(professor.name)}
+        - 邮箱：{_format_nullable(professor.email)}
+        - 职称：{_format_nullable(professor.title)}
+        - 学校：{_format_nullable(professor.university)}
+        - 学院：{_format_nullable(professor.school)}
+        - 院系：{_format_nullable(professor.department)}
+        - 研究方向：{_format_nullable(professor.research_direction)}
+        - 主页：{_format_nullable(professor.profile_url)}
+        - 近期论文：
+        {professor_papers or "- 无"}
+        """
+    ).strip()
+    prompt = f"{stable_prefix}\n\n{dynamic_suffix}"
+    return MatchPromptParts(
+        prompt=prompt,
+        stable_prefix=stable_prefix,
+        prompt_hash=_hash_prompt(prompt),
+        stable_prefix_hash=_hash_prompt(stable_prefix),
+        prompt_cache_key=(
+            _build_match_prompt_cache_key(
+                identity=identity,
+                primary_material=primary_material,
+                llm_profile=llm_profile,
+            )
+            if llm_profile is not None
+            else None
+        ),
     )
 
 
@@ -1007,6 +1109,36 @@ def resolve_template_text(
     return extracted_text or None
 
 
+def _hash_prompt(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _format_nullable(value: object) -> str:
+    if value is None:
+        return "未知"
+    if isinstance(value, str):
+        return value.strip() or "未知"
+    return str(value)
+
+
+def _is_official_openai_profile(profile: LLMProfile) -> bool:
+    if profile.provider != "openai":
+        return False
+    return resolve_base_url(profile.api_base_url).rstrip("/") == DEFAULT_BASE_URL
+
+
+def _build_match_prompt_cache_key(
+    *,
+    identity: IdentityProfile,
+    primary_material: IdentityMaterial | None,
+    llm_profile: LLMProfile,
+) -> str | None:
+    if not _is_official_openai_profile(llm_profile):
+        return None
+    material_id = primary_material.id if primary_material is not None else "none"
+    return f"match:v1:{identity.id}:{material_id}:{llm_profile.id}"
+
+
 def extract_json_object(raw_text: str) -> str:
     text = raw_text.strip()
     if text.startswith("```"):
@@ -1061,6 +1193,10 @@ def build_responses_payload(payload: dict[str, object]) -> dict[str, object]:
         request_payload["temperature"] = payload["temperature"]
     if payload.get("max_tokens") is not None:
         request_payload["max_output_tokens"] = payload["max_tokens"]
+    if payload.get("prompt_cache_key") is not None:
+        request_payload["prompt_cache_key"] = payload["prompt_cache_key"]
+    if payload.get("prompt_cache_retention") is not None:
+        request_payload["prompt_cache_retention"] = payload["prompt_cache_retention"]
     return request_payload
 
 
@@ -1127,6 +1263,13 @@ def format_http_error(status_code: int, response_text: str, request_url: str) ->
 def parse_completion_usage(raw_usage: object) -> ChatCompletionUsage | None:
     if not isinstance(raw_usage, dict):
         return None
+    cached_tokens = None
+    for details_key in ("prompt_tokens_details", "input_tokens_details"):
+        details = raw_usage.get(details_key)
+        if isinstance(details, dict):
+            cached_tokens = _coerce_token_count(details.get("cached_tokens"))
+            if cached_tokens is not None:
+                break
     return ChatCompletionUsage(
         prompt_tokens=_coerce_token_count(
             raw_usage.get("prompt_tokens", raw_usage.get("input_tokens")),
@@ -1135,6 +1278,7 @@ def parse_completion_usage(raw_usage: object) -> ChatCompletionUsage | None:
             raw_usage.get("completion_tokens", raw_usage.get("output_tokens")),
         ),
         total_tokens=_coerce_token_count(raw_usage.get("total_tokens")),
+        cached_tokens=cached_tokens,
     )
 
 

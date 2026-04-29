@@ -20,6 +20,7 @@ from app.models.email_task import (
 from app.models.identity_profile import IdentityProfile
 from app.models.identity_material import IdentityMaterial, IdentityMaterialType
 from app.models.llm_profile import LLMProfile
+from app.models.match_analysis_run import MatchAnalysisRun
 from app.models.operation_log import OperationLog
 from app.models.professor import Professor
 from app.models.test_compose_message import TestComposeMessage
@@ -47,6 +48,7 @@ __all__ = [
     "IdentityMaterial",
     "IdentityMaterialType",
     "LLMProfile",
+    "MatchAnalysisRun",
     "MailDeliveryMode",
     "OperationLog",
     "Professor",

@@ -18,6 +18,12 @@ import {
   PROFESSOR_DASHBOARD_STATUS_OPTIONS,
   type ProfessorDashboardStatusFilter,
 } from '@/features/professor-status/dashboardStatus';
+import {
+  formatTokenUsageDescription,
+  runWarmupThenConcurrent,
+  sumTokenUsage,
+  type TokenUsage,
+} from '@/features/match-analysis/client/tokenUsage';
 import { calculateMatch } from '@/lib/api/emailTasksApi';
 import { useConfirmDialog } from '@/lib/useConfirmDialog';
 import { listProfessors } from '@/lib/api/professorsApi';
@@ -33,7 +39,7 @@ const hasMatchEvidence = (professor: ProfessorDashboardItemDTO) =>
 export const HomePage = () => {
   const navigate = useNavigate();
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
-  const { notifyError, notifyWarning } = useNotification();
+  const { notifyError, notifySuccess, notifyWarning } = useNotification();
   const { selectedIdentityId, selectedLlmProfileId, selectedIdentity, selectedLlmProfile } =
     useSelectionContext();
   const [professors, setProfessors] = useState<ProfessorDashboardItemDTO[]>([]);
@@ -197,7 +203,7 @@ export const HomePage = () => {
   };
 
   const runCalculateMatchForProfessor = useCallback(
-    async (professorId: number) => {
+    async (professorId: number): Promise<TokenUsage> => {
       if (!selectedIdentityId || !selectedLlmProfileId) {
         throw new Error('请先选择身份和模型');
       }
@@ -206,7 +212,8 @@ export const HomePage = () => {
       if (!workspace.current_task.id) {
         throw new Error('未能为该导师准备工作区任务');
       }
-      await calculateMatch(workspace.current_task.id);
+      const result = await calculateMatch(workspace.current_task.id);
+      return result.usage;
     },
     [selectedIdentityId, selectedLlmProfileId],
   );
@@ -231,8 +238,9 @@ export const HomePage = () => {
 
     toggleScoringProfessor(professorId, true);
     try {
-      await runCalculateMatchForProfessor(professorId);
+      const usage = await runCalculateMatchForProfessor(professorId);
       await loadProfessors();
+      notifySuccess('匹配分析完成', formatTokenUsageDescription(usage));
     } catch (actionError) {
       const message = actionError instanceof Error ? actionError.message : '计算匹配失败';
       notifyError('计算匹配失败', message);
@@ -275,31 +283,33 @@ export const HomePage = () => {
       return;
     }
 
-    if (skippedCount > 0) {
-      notifyWarning(
-        '已跳过缺少研究信息的导师',
-        `已跳过 ${skippedCount} 位缺少研究方向或近期论文的导师。`,
-      );
-    }
-
     try {
-      for (const professor of analyzableProfessors) {
-        toggleScoringProfessor(professor.id, true);
-        try {
-          await runCalculateMatchForProfessor(professor.id);
-        } catch (actionError) {
-          failedNames.push(
-            actionError instanceof Error
-              ? `${professor.name}：${actionError.message}`
-              : `${professor.name}：计算匹配失败`,
-          );
-        } finally {
-          toggleScoringProfessor(professor.id, false);
-        }
-      }
+      const usageResults = await runWarmupThenConcurrent(
+        analyzableProfessors,
+        3,
+        async (professor): Promise<TokenUsage | null> => {
+          toggleScoringProfessor(professor.id, true);
+          try {
+            return await runCalculateMatchForProfessor(professor.id);
+          } catch (actionError) {
+            failedNames.push(
+              actionError instanceof Error
+                ? `${professor.name}：${actionError.message}`
+                : `${professor.name}：计算匹配失败`,
+            );
+            return null;
+          } finally {
+            toggleScoringProfessor(professor.id, false);
+          }
+        },
+      );
       await loadProfessors();
+      const successfulUsages = usageResults.filter((usage): usage is TokenUsage => usage !== null);
+      const summary = `成功 ${successfulUsages.length} 位 / 失败 ${failedNames.length} 位 / 跳过 ${skippedCount} 位；${formatTokenUsageDescription(sumTokenUsage(successfulUsages))}`;
       if (failedNames.length > 0) {
-        notifyError('部分导师计算失败', failedNames.slice(0, 2).join('；'));
+        notifyError('部分导师计算失败', `${summary}；${failedNames.slice(0, 2).join('；')}`);
+      } else {
+        notifySuccess('批量匹配分析完成', summary);
       }
     } finally {
       setBulkScoring(false);
