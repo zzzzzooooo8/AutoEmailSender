@@ -10,14 +10,18 @@ from deepagents.backends import StateBackend
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
+from pydantic import ValidationError
 
 from app.models import LLMProfile
 from app.services.crawler_tools import (
+    CandidateBatchFailure,
+    CandidateBatchSaveResult,
     CrawlToolContext,
     ProfessorCandidatePayload,
     browser_investigate,
+    count_saved_candidates,
     crawl_page_with_crawl4ai,
-    save_candidates,
+    save_candidate_batch,
 )
 from app.services.llm_runtime import (
     DEFAULT_LLM_TEMPERATURE,
@@ -107,6 +111,53 @@ class ControlledCrawlerToolMiddleware(AgentMiddleware[Any, Any, Any]):
         ]
 
 
+def _format_save_batch_result_for_model(result: CandidateBatchSaveResult) -> dict[str, Any]:
+    return {
+        "batch_status": result["batch_status"],
+        "attempted_count": result["attempted_count"],
+        "saved_count": result["saved_count"],
+        "failed_count": result["failed_count"],
+        "failed_items": result["failed_items"],
+        "total_saved_count": result["total_saved_count"],
+    }
+
+
+def _validate_professor_candidate_batch(
+    candidates: list[dict[str, object]],
+) -> tuple[list[ProfessorCandidatePayload], list[CandidateBatchFailure]]:
+    payloads: list[ProfessorCandidatePayload] = []
+    failed_items: list[CandidateBatchFailure] = []
+    for index, candidate in enumerate(candidates):
+        try:
+            payloads.append(ProfessorCandidatePayload.model_validate(candidate))
+        except ValidationError as exc:
+            failed_items.append(
+                {
+                    "index": index,
+                    "name": _candidate_name(candidate),
+                    "reason": _format_validation_error(exc),
+                }
+            )
+    return payloads, failed_items
+
+
+def _candidate_name(candidate: dict[str, object]) -> str | None:
+    name = candidate.get("name") or candidate.get("姓名")
+    if name is None:
+        return None
+    cleaned = str(name).strip()
+    return cleaned or None
+
+
+def _format_validation_error(exc: ValidationError) -> str:
+    parts: list[str] = []
+    for error in exc.errors():
+        loc = ".".join(str(item) for item in error.get("loc", ())) or "candidate"
+        message = str(error.get("msg") or "字段无效")
+        parts.append(f"{loc}: {message}")
+    return "; ".join(parts)
+
+
 def build_trace_event(event: Any) -> dict[str, object]:
     """Convert LangGraph stream events into bounded JSON-safe dictionaries."""
     try:
@@ -171,7 +222,7 @@ def create_faculty_crawler_agent(ctx: CrawlToolContext, llm_profile: LLMProfile)
     @tool
     async def save_professor_candidates(
         candidates: list[dict[str, object]],
-    ) -> list[dict[str, Any]]:
+    ) -> dict[str, Any]:
         """校验并保存教授候选，只写入候选表。
 
         每个候选对象必须使用这些英文键：
@@ -179,21 +230,21 @@ def create_faculty_crawler_agent(ctx: CrawlToolContext, llm_profile: LLMProfile)
         recent_papers, profile_url, source_url, confidence, field_confidence, evidence。
         单次保存请控制在 10 位候选以内。
         """
-        payloads = [
-            ProfessorCandidatePayload.model_validate(candidate)
-            for candidate in candidates
-        ]
-        saved = await save_candidates(ctx, payloads)
-        return [
-            {
-                "id": candidate.id,
-                "name": candidate.name,
-                "email": candidate.email,
-                "profile_url": candidate.profile_url,
-                "confidence": candidate.confidence,
-            }
-            for candidate in saved
-        ]
+        payloads, failed_items = _validate_professor_candidate_batch(candidates)
+        if failed_items:
+            return _format_save_batch_result_for_model(
+                {
+                    "batch_status": "rejected",
+                    "attempted_count": len(candidates),
+                    "saved_count": 0,
+                    "failed_count": len(failed_items),
+                    "failed_items": failed_items,
+                    "total_saved_count": await count_saved_candidates(ctx),
+                }
+            )
+
+        result = await save_candidate_batch(ctx, payloads)
+        return _format_save_batch_result_for_model(result)
 
     model = build_faculty_crawler_model(llm_profile)
     return create_deep_agent(
