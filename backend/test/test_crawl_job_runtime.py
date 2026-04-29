@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.models import Base, CrawlCandidate, CrawlJob, CrawlJobRun, CrawlJobStatus, CrawlPage, LLMProfile
-from app.services.crawl_job_runtime import run_queued_crawl_jobs_once
+from app.services.crawl_job_runtime import _enrich_saved_candidates, run_queued_crawl_jobs_once
 from app.services.crawl_job_runs import create_initial_crawl_job_run
 from app.services.crawler_tools import (
     CandidateEnrichmentPayload,
@@ -582,7 +582,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
         serialized_raw_event = json.dumps(records[0]["raw_event"], ensure_ascii=False)
         self.assertIn(oversized_payload, serialized_raw_event)
 
-    async def test_run_queued_crawl_job_enriches_profiles_after_discovery(self) -> None:
+    async def test_run_queued_crawl_job_does_not_auto_enrich_profiles_after_discovery(self) -> None:
         job_id = await self._create_default_profile_and_job(
             start_url="https://cai.jxufe.edu.cn/lists/26.html",
         )
@@ -665,10 +665,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             processed = await run_queued_crawl_jobs_once(self.session_factory)
 
         self.assertEqual(processed, 1)
-        self.assertEqual(
-            sequence,
-            ["discover", "enrich:https://cta.jxufe.edu.cn/home/teacherInfo/detail?uid=1:profile"],
-        )
+        self.assertEqual(sequence, ["discover"])
         job = await self._get_job(job_id)
         self.assertEqual(job.status, CrawlJobStatus.NEEDS_REVIEW.value)
         trace_messages = [
@@ -676,10 +673,8 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             for item in job.agent_trace or []
             if isinstance(item, dict)
         ]
-        self.assertIn("开始统一补全候选导师详情，共 1 位待补全", trace_messages)
-        self.assertIn("开始补全候选导师详情：张三", trace_messages)
-        self.assertIn("候选导师详情补全成功：张三（院系、研究方向、近期论文）", trace_messages)
-        self.assertIn("候选导师详情补全完成：成功 1 位，未变化 0 位，失败 0 位", trace_messages)
+        self.assertNotIn("开始统一补全候选导师详情，共 1 位待补全", trace_messages)
+        self.assertNotIn("开始补全候选导师详情：张三", trace_messages)
 
         async with self.session_factory() as session:
             candidate = await session.scalar(
@@ -687,49 +682,36 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertIsNotNone(candidate)
             assert candidate is not None
-            self.assertEqual(candidate.research_direction, "大语言模型、智能体")
-            self.assertEqual(candidate.department, "计算机科学系")
-            self.assertEqual(candidate.recent_papers, ["Paper A", "Paper B"])
+            self.assertIsNone(candidate.research_direction)
+            self.assertIsNone(candidate.department)
+            self.assertEqual(candidate.recent_papers, [])
 
-    async def test_run_queued_crawl_job_enriches_candidate_email_when_missing(self) -> None:
+    async def test_enrich_saved_candidates_fills_candidate_email_when_missing(self) -> None:
         job_id = await self._create_default_profile_and_job(
             start_url="https://cai.jxufe.edu.cn/lists/26.html",
         )
-
-        async def fake_run(
-            ctx: CrawlToolContext,
-            llm_profile: LLMProfile,
-            trace_callback=None,
-        ) -> dict[str, object]:
-            _ = llm_profile
-            if trace_callback is not None:
-                await trace_callback(
-                    {
-                        "type": "updates",
-                        "data": {
-                            "model": {
-                                "messages": [
-                                    "tool_calls=[{'name': 'save_professor_candidates'}]",
-                                ]
-                            }
-                        },
-                    }
+        ctx = CrawlToolContext(
+            job_id=job_id,
+            start_url="https://cai.jxufe.edu.cn/lists/26.html",
+            university="示例大学",
+            school="计算机学院",
+            session_factory=self.session_factory,
+        )
+        await save_candidates(
+            ctx,
+            [
+                ProfessorCandidatePayload(
+                    name="王五",
+                    email=None,
+                    title="教授、博导",
+                    department="计算机学院",
+                    research_direction="网络安全",
+                    recent_papers=["Paper X"],
+                    profile_url="https://cta.jxufe.edu.cn/home/teacherInfo/detail?uid=3",
                 )
-            await save_candidates(
-                ctx,
-                [
-                    ProfessorCandidatePayload(
-                        name="王五",
-                        email=None,
-                        title="教授、博导",
-                        department="计算机学院",
-                        research_direction="网络安全",
-                        recent_papers=["Paper X"],
-                        profile_url="https://cta.jxufe.edu.cn/home/teacherInfo/detail?uid=3",
-                    )
-                ],
-            )
-            return {}
+            ],
+        )
+        llm_profile = await self._get_default_llm_profile()
 
         async def fake_crawl_page_with_crawl4ai(
             ctx: CrawlToolContext,
@@ -758,16 +740,17 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             return CandidateEnrichmentPayload()
 
         with patch(
-            "app.services.crawl_job_runtime.run_faculty_crawler_agent",
-            new=fake_run,
-        ), patch(
             "app.services.crawl_job_runtime.crawl_page_with_crawl4ai",
             new=fake_crawl_page_with_crawl4ai,
         ), patch(
             "app.services.crawl_job_runtime.enrich_candidate_profile_with_llm",
             new=fake_enrich_with_llm,
         ):
-            await run_queued_crawl_jobs_once(self.session_factory)
+            await _enrich_saved_candidates(
+                self.session_factory,
+                ctx,
+                llm_profile=llm_profile,
+            )
 
         async with self.session_factory() as session:
             candidate = await session.scalar(
@@ -860,42 +843,33 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             assert candidate is not None
             self.assertEqual(candidate.email, "existing@example.edu")
 
-    async def test_run_queued_crawl_job_records_enrichment_failure_events(self) -> None:
+    async def test_enrich_saved_candidates_records_failure_events(self) -> None:
         job_id = await self._create_default_profile_and_job(
             start_url="https://cai.jxufe.edu.cn/lists/26.html",
         )
-
-        async def fake_run(
-            ctx: CrawlToolContext,
-            llm_profile: LLMProfile,
-            trace_callback=None,
-        ) -> dict[str, object]:
-            _ = llm_profile
-            if trace_callback is not None:
-                await trace_callback(
-                    {
-                        "type": "updates",
-                        "data": {
-                            "model": {
-                                "messages": [
-                                    "tool_calls=[{'name': 'save_professor_candidates'}]",
-                                ]
-                            }
-                        },
-                    }
+        ctx = CrawlToolContext(
+            job_id=job_id,
+            start_url="https://cai.jxufe.edu.cn/lists/26.html",
+            university="示例大学",
+            school="计算机学院",
+            session_factory=self.session_factory,
+        )
+        await save_candidates(
+            ctx,
+            [
+                ProfessorCandidatePayload(
+                    name="张三",
+                    email="zhang@example.edu",
+                    title="教授、博导",
+                    profile_url="https://cta.jxufe.edu.cn/home/teacherInfo/detail?uid=1",
                 )
-            await save_candidates(
-                ctx,
-                [
-                    ProfessorCandidatePayload(
-                        name="张三",
-                        email="zhang@example.edu",
-                        title="教授、博导",
-                        profile_url="https://cta.jxufe.edu.cn/home/teacherInfo/detail?uid=1",
-                    )
-                ],
-            )
-            return {}
+            ],
+        )
+        llm_profile = await self._get_default_llm_profile()
+        trace_events: list[dict[str, object]] = []
+
+        async def trace_callback(event: dict[str, object]) -> None:
+            trace_events.append(event)
 
         async def fake_crawl_page_with_crawl4ai(
             ctx: CrawlToolContext,
@@ -916,61 +890,49 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             )
 
         with patch(
-            "app.services.crawl_job_runtime.run_faculty_crawler_agent",
-            new=fake_run,
-        ), patch(
             "app.services.crawl_job_runtime.crawl_page_with_crawl4ai",
             new=fake_crawl_page_with_crawl4ai,
         ):
-            processed = await run_queued_crawl_jobs_once(self.session_factory)
+            enriched_count = await _enrich_saved_candidates(
+                self.session_factory,
+                ctx,
+                llm_profile=llm_profile,
+                trace_callback=trace_callback,
+            )
 
-        self.assertEqual(processed, 1)
-        job = await self._get_job(job_id)
+        self.assertEqual(enriched_count, 0)
         trace_messages = [
             item.get("message")
-            for item in job.agent_trace or []
+            for item in trace_events
             if isinstance(item, dict)
         ]
         self.assertIn("开始统一补全候选导师详情，共 1 位待补全", trace_messages)
         self.assertIn("候选导师详情补全失败：张三", trace_messages)
         self.assertIn("候选导师详情补全完成：成功 0 位，未变化 0 位，失败 1 位", trace_messages)
 
-    async def test_run_queued_crawl_job_enrichment_falls_back_to_rules_when_llm_returns_empty(self) -> None:
+    async def test_enrich_saved_candidates_falls_back_to_rules_when_llm_returns_empty(self) -> None:
         job_id = await self._create_default_profile_and_job(
             start_url="https://cai.jxufe.edu.cn/lists/26.html",
         )
-
-        async def fake_run(
-            ctx: CrawlToolContext,
-            llm_profile: LLMProfile,
-            trace_callback=None,
-        ) -> dict[str, object]:
-            _ = llm_profile
-            if trace_callback is not None:
-                await trace_callback(
-                    {
-                        "type": "updates",
-                        "data": {
-                            "model": {
-                                "messages": [
-                                    "tool_calls=[{'name': 'save_professor_candidates'}]",
-                                ]
-                            }
-                        },
-                    }
+        ctx = CrawlToolContext(
+            job_id=job_id,
+            start_url="https://cai.jxufe.edu.cn/lists/26.html",
+            university="示例大学",
+            school="计算机学院",
+            session_factory=self.session_factory,
+        )
+        await save_candidates(
+            ctx,
+            [
+                ProfessorCandidatePayload(
+                    name="王五",
+                    email="wang.wu@example.edu",
+                    title="教授、博导",
+                    profile_url="https://cta.jxufe.edu.cn/home/teacherInfo/detail?uid=2",
                 )
-            await save_candidates(
-                ctx,
-                [
-                    ProfessorCandidatePayload(
-                        name="王五",
-                        email="wang.wu@example.edu",
-                        title="教授、博导",
-                        profile_url="https://cta.jxufe.edu.cn/home/teacherInfo/detail?uid=2",
-                    )
-                ],
-            )
-            return {}
+            ],
+        )
+        llm_profile = await self._get_default_llm_profile()
 
         async def fake_crawl_page_with_crawl4ai(
             ctx: CrawlToolContext,
@@ -999,18 +961,19 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             return CandidateEnrichmentPayload()
 
         with patch(
-            "app.services.crawl_job_runtime.run_faculty_crawler_agent",
-            new=fake_run,
-        ), patch(
             "app.services.crawl_job_runtime.crawl_page_with_crawl4ai",
             new=fake_crawl_page_with_crawl4ai,
         ), patch(
             "app.services.crawl_job_runtime.enrich_candidate_profile_with_llm",
             new=fake_enrich_with_llm,
         ):
-            processed = await run_queued_crawl_jobs_once(self.session_factory)
+            enriched_count = await _enrich_saved_candidates(
+                self.session_factory,
+                ctx,
+                llm_profile=llm_profile,
+            )
 
-        self.assertEqual(processed, 1)
+        self.assertEqual(enriched_count, 1)
         async with self.session_factory() as session:
             candidate = await session.scalar(
                 select(CrawlCandidate).where(CrawlCandidate.job_id == job_id)
@@ -1051,6 +1014,17 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             await session.commit()
             await session.refresh(job)
             return job.id
+
+    async def _get_default_llm_profile(self) -> LLMProfile:
+        async with self.session_factory() as session:
+            profile = await session.scalar(
+                select(LLMProfile)
+                .where(LLMProfile.is_default.is_(True))
+                .limit(1)
+            )
+            if profile is None:
+                raise AssertionError("default LLM profile not found")
+            return profile
 
     async def _get_current_run(self, job_id: int) -> CrawlJobRun:
         async with self.session_factory() as session:

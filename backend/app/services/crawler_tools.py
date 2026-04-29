@@ -7,14 +7,14 @@ import ipaddress
 import platform
 import re
 import socket
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 from urllib.parse import urljoin, urlparse
 
 import httpx
 import httpcore
 from bs4 import BeautifulSoup
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.crawl_job import CrawlCandidate, CrawlJob, CrawlJobStatus, CrawlPage
@@ -108,6 +108,21 @@ class CandidateEnrichmentPayload(BaseModel):
     department: str | None = None
     research_direction: str | None = None
     recent_papers: list[str] = Field(default_factory=list)
+
+
+class CandidateBatchFailure(TypedDict):
+    index: int
+    name: str | None
+    reason: str
+
+
+class CandidateBatchSaveResult(TypedDict):
+    batch_status: Literal["saved", "rejected"]
+    attempted_count: int
+    saved_count: int
+    failed_count: int
+    failed_items: list[CandidateBatchFailure]
+    total_saved_count: int
 
 
 @dataclass(frozen=True)
@@ -847,6 +862,66 @@ async def save_candidates(
         )
         for candidate in candidates
     ]
+    return await _save_normalized_candidate_payloads(ctx, payloads)
+
+
+async def save_candidate_batch(
+    ctx: CrawlToolContext,
+    candidates: Sequence[ProfessorCandidatePayload],
+) -> CandidateBatchSaveResult:
+    payloads: list[dict[str, Any]] = []
+    failed_items: list[CandidateBatchFailure] = []
+    for index, candidate in enumerate(candidates):
+        try:
+            payloads.append(
+                normalize_candidate_payload(
+                    candidate,
+                    university=ctx.university,
+                    school=ctx.school,
+                )
+            )
+        except (TypeError, ValueError) as exc:
+            failed_items.append(
+                {
+                    "index": index,
+                    "name": _clean_optional(getattr(candidate, "name", None)),
+                    "reason": str(exc),
+                }
+            )
+
+    if failed_items:
+        return {
+            "batch_status": "rejected",
+            "attempted_count": len(candidates),
+            "saved_count": 0,
+            "failed_count": len(failed_items),
+            "failed_items": failed_items,
+            "total_saved_count": await count_saved_candidates(ctx),
+        }
+
+    saved = await _save_normalized_candidate_payloads(ctx, payloads)
+    return {
+        "batch_status": "saved",
+        "attempted_count": len(candidates),
+        "saved_count": len(saved),
+        "failed_count": 0,
+        "failed_items": [],
+        "total_saved_count": await count_saved_candidates(ctx),
+    }
+
+
+async def count_saved_candidates(ctx: CrawlToolContext) -> int:
+    async with ctx.session_factory() as session:
+        count = await session.scalar(
+            select(func.count()).select_from(CrawlCandidate).where(CrawlCandidate.job_id == ctx.job_id)
+        )
+    return int(count or 0)
+
+
+async def _save_normalized_candidate_payloads(
+    ctx: CrawlToolContext,
+    payloads: Sequence[dict[str, Any]],
+) -> list[CrawlCandidate]:
     saved: list[CrawlCandidate] = []
     async with ctx.session_factory() as session:
         if await _is_crawl_job_stopped(session, ctx.job_id):
@@ -856,14 +931,14 @@ async def save_candidates(
         seen_emails = set(existing_emails)
         for payload in payloads:
             email = payload["email"]
-            if email and email.lower() in seen_emails:
+            if email and str(email).lower() in seen_emails:
                 continue
 
             row = CrawlCandidate(job_id=ctx.job_id, **payload)
             session.add(row)
             saved.append(row)
             if email:
-                seen_emails.add(email.lower())
+                seen_emails.add(str(email).lower())
 
         if await _is_crawl_job_stopped(session, ctx.job_id):
             await session.rollback()
