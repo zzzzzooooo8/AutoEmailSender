@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatTokenUsageDescription,
+  runWarmupThenConcurrent,
   runWithConcurrency,
   sumTokenUsage,
 } from './tokenUsage';
@@ -46,5 +47,19 @@ describe('tokenUsage', () => {
 
     expect(results).toEqual([2, 4, 6, 8, 10]);
     expect(maxActive).toBeLessThanOrEqual(2);
+  });
+
+  it('runs first item before concurrent remainder', async () => {
+    const events: string[] = [];
+
+    const results = await runWarmupThenConcurrent([1, 2, 3], 2, async (item) => {
+      events.push(`start:${item}`);
+      await new Promise((resolve) => setTimeout(resolve, item === 1 ? 2 : 1));
+      events.push(`end:${item}`);
+      return item;
+    });
+
+    expect(results).toEqual([1, 2, 3]);
+    expect(events.slice(0, 2)).toEqual(['start:1', 'end:1']);
   });
 });

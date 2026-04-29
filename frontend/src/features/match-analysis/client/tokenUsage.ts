@@ -59,3 +59,17 @@ export async function runWithConcurrency<T, R>(
 
   return results;
 }
+
+export async function runWarmupThenConcurrent<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (items.length === 0) return [];
+
+  const first = await worker(items[0], 0);
+  const rest = await runWithConcurrency(items.slice(1), concurrency, (item, index) =>
+    worker(item, index + 1),
+  );
+  return [first, ...rest];
+}
