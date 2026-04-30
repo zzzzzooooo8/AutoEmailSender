@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { ChevronDown, Loader2, RefreshCw, RotateCcw, Search } from 'lucide-react';
 import { getTokenUsageChart, listTokenUsageRecords } from '@/lib/api/tokenUsage';
@@ -65,7 +65,10 @@ export function TokenUsageCenterCard() {
   const [chartLoaded, setChartLoaded] = useState(false);
   const [chartError, setChartError] = useState<string | null>(null);
 
-  const currentFilters = { featureType, startAt, endAt };
+  const currentFilters = useMemo(
+    () => ({ featureType, startAt, endAt }),
+    [endAt, featureType, startAt],
+  );
 
   const loadRecords = useCallback(
     async (nextPage = page, filters: TokenUsageFiltersState = currentFilters) => {
