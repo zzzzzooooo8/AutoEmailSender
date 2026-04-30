@@ -408,6 +408,86 @@ class TokenUsageRecordsServiceTests(unittest.TestCase):
         self.assertEqual(payload["pagination"]["total_records"], 7)
         self.assertEqual(len(payload["records"]), 2)
 
+    def test_builds_hourly_chart_for_recent_6_hours(self) -> None:
+        self._run_async(self._seed_history_records())
+        now = datetime(2026, 4, 30, 10, 0, 0, tzinfo=UTC)
+
+        async def run_query():
+            async with self.session_factory() as session:
+                from app.services.token_usage_records import build_token_usage_chart
+
+                return await build_token_usage_chart(
+                    session,
+                    feature_type="match_analysis",
+                    preset="last_6_hours",
+                    now=now,
+                )
+
+        result = self._run_async(run_query())
+
+        self.assertEqual(result.granularity, "hour")
+        self.assertEqual(len(result.buckets), 6)
+        self.assertEqual(result.buckets[-1].bucket_label, "10:00")
+        self.assertEqual(result.buckets[-1].input_tokens, 100)
+        self.assertEqual(result.buckets[-1].output_tokens, 10)
+
+    def test_custom_chart_uses_daily_granularity_for_long_ranges(self) -> None:
+        self._run_async(self._seed_history_records())
+        start_at = datetime(2026, 4, 27, 0, 0, 0, tzinfo=UTC)
+        end_at = datetime(2026, 4, 30, 10, 0, 0, tzinfo=UTC)
+
+        async def run_query():
+            async with self.session_factory() as session:
+                from app.services.token_usage_records import build_token_usage_chart
+
+                return await build_token_usage_chart(
+                    session,
+                    feature_type="all",
+                    preset="custom",
+                    start_at=start_at,
+                    end_at=end_at,
+                    now=end_at,
+                )
+
+        result = self._run_async(run_query())
+
+        self.assertEqual(result.granularity, "day")
+        self.assertGreaterEqual(len(result.buckets), 4)
+        self.assertEqual(result.buckets[-1].bucket_label, "04-30")
+        self.assertGreater(result.buckets[-1].input_tokens, 0)
+
+    def test_api_returns_chart_buckets(self) -> None:
+        self._run_async(self._seed_history_records())
+
+        from app.core.database import get_async_session
+        from main import create_app
+
+        async def override_session():
+            async with self.session_factory() as session:
+                yield session
+
+        app = create_app()
+        app.dependency_overrides[get_async_session] = override_session
+        client = TestClient(app)
+        try:
+            response = client.get(
+                "/api/token-usage/chart",
+                params={
+                    "preset": "custom",
+                    "feature_type": "match_analysis",
+                    "start_at": "2026-04-30T08:00:00+00:00",
+                    "end_at": "2026-04-30T10:00:00+00:00",
+                },
+            )
+        finally:
+            client.close()
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        payload = response.json()
+        self.assertEqual(payload["granularity"], "hour")
+        self.assertEqual(len(payload["buckets"]), 3)
+        self.assertEqual(payload["buckets"][-1]["bucket_label"], "10:00")
+
 
 if __name__ == "__main__":
     unittest.main()
