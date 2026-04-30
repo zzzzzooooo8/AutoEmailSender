@@ -1,13 +1,33 @@
 import { useCallback, useEffect, useState } from 'react';
 import clsx from 'clsx';
-import { ChevronDown, Loader2, RefreshCw } from 'lucide-react';
-import { listTokenUsageRecords } from '@/lib/api/tokenUsage';
-import type { TokenUsageRecordDTO, TokenUsageRecordListDTO } from '@/types';
+import { ChevronDown, Loader2, RefreshCw, RotateCcw, Search } from 'lucide-react';
+import { getTokenUsageChart, listTokenUsageRecords } from '@/lib/api/tokenUsage';
+import type {
+  TokenUsageChartDTO,
+  TokenUsageChartPresetDTO,
+  TokenUsageRecordDTO,
+  TokenUsageRecordFeatureFilterDTO,
+  TokenUsageRecordListDTO,
+} from '@/types';
 import {
+  calculateStackedBarSegments,
+  formatDateTimeLocalValue,
   formatTokenRecordStatus,
   formatTokenValue,
   getTokenRecordFeatureTone,
+  parseDateTimeLocalValue,
+  resolveTokenUsagePageJump,
 } from '@/features/token-usage/client/tokenUsage';
+
+const PAGE_SIZE = 5;
+const defaultFeatureType: TokenUsageRecordFeatureFilterDTO = 'all';
+const defaultChartPreset: TokenUsageChartPresetDTO = 'last_24_hours';
+
+interface TokenUsageFiltersState {
+  featureType: TokenUsageRecordFeatureFilterDTO;
+  startAt: string | null;
+  endAt: string | null;
+}
 
 const emptyResult: TokenUsageRecordListDTO = {
   records: [],
@@ -18,6 +38,12 @@ const emptyResult: TokenUsageRecordListDTO = {
     total_tokens: 0,
     record_count: 0,
   },
+  pagination: {
+    page: 1,
+    page_size: PAGE_SIZE,
+    total_records: 0,
+    total_pages: 0,
+  },
 };
 
 export function TokenUsageCenterCard() {
@@ -26,26 +52,134 @@ export function TokenUsageCenterCard() {
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [featureType, setFeatureType] =
+    useState<TokenUsageRecordFeatureFilterDTO>(defaultFeatureType);
+  const [startAt, setStartAt] = useState<string | null>(null);
+  const [endAt, setEndAt] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageInput, setPageInput] = useState('1');
+  const [chartPreset, setChartPreset] =
+    useState<TokenUsageChartPresetDTO>(defaultChartPreset);
+  const [chart, setChart] = useState<TokenUsageChartDTO | null>(null);
+  const [chartLoading, setChartLoading] = useState(false);
+  const [chartLoaded, setChartLoaded] = useState(false);
+  const [chartError, setChartError] = useState<string | null>(null);
 
-  const loadRecords = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setResult(await listTokenUsageRecords(20));
-      setLoaded(true);
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : '加载 token 消耗记录失败');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const currentFilters = { featureType, startAt, endAt };
+
+  const loadRecords = useCallback(
+    async (nextPage = page, filters: TokenUsageFiltersState = currentFilters) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const nextResult = await listTokenUsageRecords({
+          page: nextPage,
+          pageSize: PAGE_SIZE,
+          featureType: filters.featureType,
+          startAt: filters.startAt,
+          endAt: filters.endAt,
+        });
+        setResult(nextResult);
+        setPage(nextResult.pagination.page);
+        setPageInput(String(nextResult.pagination.page));
+        setLoaded(true);
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : '加载 token 消耗记录失败');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [currentFilters, page],
+  );
+
+  const loadChart = useCallback(
+    async (
+      nextPreset = chartPreset,
+      filters: TokenUsageFiltersState = currentFilters,
+    ) => {
+      setChartLoading(true);
+      setChartError(null);
+      try {
+        setChart(
+          await getTokenUsageChart({
+            featureType: filters.featureType,
+            preset: nextPreset,
+            startAt: filters.startAt,
+            endAt: filters.endAt,
+          }),
+        );
+        setChartLoaded(true);
+      } catch (loadError) {
+        setChartError(loadError instanceof Error ? loadError.message : '加载趋势图失败');
+      } finally {
+        setChartLoading(false);
+      }
+    },
+    [chartPreset, currentFilters],
+  );
 
   useEffect(() => {
-    if (!open || loading || loaded || error) {
+    if (!open) {
       return;
     }
-    void loadRecords();
-  }, [error, loadRecords, loaded, loading, open]);
+    if (!loading && !loaded && !error) {
+      void loadRecords(1);
+    }
+    if (!chartLoading && !chartLoaded && !chartError) {
+      void loadChart(defaultChartPreset);
+    }
+  }, [
+    chartError,
+    chartLoaded,
+    chartLoading,
+    error,
+    loadChart,
+    loadRecords,
+    loaded,
+    loading,
+    open,
+  ]);
+
+  const handleSearch = () => {
+    setPage(1);
+    setPageInput('1');
+    void loadRecords(1);
+    void loadChart(chartPreset);
+  };
+
+  const handleReset = () => {
+    const resetFilters = {
+      featureType: defaultFeatureType,
+      startAt: null,
+      endAt: null,
+    };
+    setFeatureType(resetFilters.featureType);
+    setStartAt(resetFilters.startAt);
+    setEndAt(resetFilters.endAt);
+    setChartPreset(defaultChartPreset);
+    setPage(1);
+    setPageInput('1');
+    void loadRecords(1, resetFilters);
+    void loadChart(defaultChartPreset, resetFilters);
+  };
+
+  const handlePageChange = (nextPage: number) => {
+    void loadRecords(nextPage);
+  };
+
+  const handlePageJump = () => {
+    const nextPage = resolveTokenUsagePageJump(pageInput, result.pagination.total_pages);
+    if (nextPage === null) {
+      setPageInput(String(page));
+      return;
+    }
+    void loadRecords(nextPage);
+  };
+
+  const handlePresetChange = (nextPreset: TokenUsageChartPresetDTO) => {
+    setChartPreset(nextPreset);
+    void loadChart(nextPreset);
+  };
 
   return (
     <section className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
@@ -62,7 +196,7 @@ export function TokenUsageCenterCard() {
               Token 消耗记录中心
             </h2>
             <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs text-stone-600">
-              最近 {result.summary.record_count} 条
+              共 {result.summary.record_count.toLocaleString('zh-CN')} 条
             </span>
           </div>
           <p className="mt-2 text-sm leading-6 text-stone-600">
@@ -78,7 +212,18 @@ export function TokenUsageCenterCard() {
       </button>
 
       {open ? (
-        <div id="token-usage-center-content" className="px-6 pb-6">
+        <div id="token-usage-center-content" className="space-y-5 px-6 pb-6">
+          <TokenUsageFilters
+            featureType={featureType}
+            startAt={startAt}
+            endAt={endAt}
+            onFeatureTypeChange={setFeatureType}
+            onStartAtChange={setStartAt}
+            onEndAtChange={setEndAt}
+            onSubmit={handleSearch}
+            onReset={handleReset}
+          />
+
           {loading ? (
             <div className="flex items-center justify-center gap-2 rounded-2xl border border-stone-200 bg-stone-50 px-4 py-8 text-sm text-stone-500">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -89,30 +234,117 @@ export function TokenUsageCenterCard() {
               <div>{error}</div>
               <button
                 type="button"
-                onClick={() => void loadRecords()}
-                className="mt-3 inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-medium text-red-700 transition hover:bg-red-50"
+                onClick={() => void loadRecords(page)}
+                className="ui-btn-secondary mt-3 border-red-200 bg-white px-3 py-2 text-xs text-red-700 transition hover:bg-red-50"
               >
                 <RefreshCw className="h-3.5 w-3.5" />
                 重试
               </button>
             </div>
-          ) : result.records.length === 0 ? (
-            <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-8 text-center text-sm text-stone-500">
-              暂无 token 消耗记录
-            </div>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-5">
               <TokenUsageSummaryGrid result={result} />
-              <div className="overflow-hidden rounded-2xl border border-stone-200">
-                {result.records.map((record) => (
-                  <TokenUsageRecordRow key={record.id} record={record} />
-                ))}
-              </div>
+              {result.records.length === 0 ? (
+                <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-8 text-center text-sm text-stone-500">
+                  暂无 token 消耗记录
+                </div>
+              ) : (
+                <div className="overflow-hidden rounded-2xl border border-stone-200">
+                  {result.records.map((record) => (
+                    <TokenUsageRecordRow key={record.id} record={record} />
+                  ))}
+                </div>
+              )}
+              <TokenUsagePagination
+                page={page}
+                totalPages={result.pagination.total_pages}
+                pageInput={pageInput}
+                onPageInputChange={setPageInput}
+                onPageChange={handlePageChange}
+                onJump={handlePageJump}
+              />
+              <TokenUsageTrendChart
+                chart={chart}
+                preset={chartPreset}
+                loading={chartLoading}
+                error={chartError}
+                onPresetChange={handlePresetChange}
+                onRetry={() => void loadChart(chartPreset)}
+              />
             </div>
           )}
         </div>
       ) : null}
     </section>
+  );
+}
+
+function TokenUsageFilters({
+  featureType,
+  startAt,
+  endAt,
+  onFeatureTypeChange,
+  onStartAtChange,
+  onEndAtChange,
+  onSubmit,
+  onReset,
+}: {
+  featureType: TokenUsageRecordFeatureFilterDTO;
+  startAt: string | null;
+  endAt: string | null;
+  onFeatureTypeChange: (value: TokenUsageRecordFeatureFilterDTO) => void;
+  onStartAtChange: (value: string | null) => void;
+  onEndAtChange: (value: string | null) => void;
+  onSubmit: () => void;
+  onReset: () => void;
+}) {
+  return (
+    <div className="grid gap-3 rounded-2xl border border-stone-200 bg-stone-50/70 p-4 md:grid-cols-[1fr_1fr_1fr_auto]">
+      <label className="block">
+        <span className="mb-2 block text-xs font-medium text-stone-500">功能筛选</span>
+        <select
+          aria-label="功能筛选"
+          value={featureType}
+          onChange={(event) =>
+            onFeatureTypeChange(event.target.value as TokenUsageRecordFeatureFilterDTO)
+          }
+          className="h-10 w-full rounded-xl border border-stone-200 bg-white px-3 text-sm text-stone-700"
+        >
+          <option value="all">全部功能</option>
+          <option value="crawl">智能爬取</option>
+          <option value="match_analysis">匹配分析</option>
+          <option value="draft_generation">AI 草稿</option>
+        </select>
+      </label>
+      <label className="block">
+        <span className="mb-2 block text-xs font-medium text-stone-500">开始时间</span>
+        <input
+          type="datetime-local"
+          value={formatDateTimeLocalValue(startAt)}
+          onChange={(event) => onStartAtChange(parseDateTimeLocalValue(event.target.value))}
+          className="h-10 w-full rounded-xl border border-stone-200 px-3 text-sm text-stone-700"
+        />
+      </label>
+      <label className="block">
+        <span className="mb-2 block text-xs font-medium text-stone-500">结束时间</span>
+        <input
+          type="datetime-local"
+          value={formatDateTimeLocalValue(endAt)}
+          onChange={(event) => onEndAtChange(parseDateTimeLocalValue(event.target.value))}
+          className="h-10 w-full rounded-xl border border-stone-200 px-3 text-sm text-stone-700"
+        />
+      </label>
+      <div className="flex items-end gap-2">
+        <button type="button" onClick={onSubmit} className="ui-btn-primary h-10 px-3">
+          <Search className="h-4 w-4" />
+          查询
+        </button>
+        <button type="button" onClick={onReset} className="ui-btn-secondary h-10 px-3">
+          <RotateCcw className="h-4 w-4" />
+          重置
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -184,3 +416,167 @@ function TokenUsageRecordRow({ record }: { record: TokenUsageRecordDTO }) {
     </article>
   );
 }
+
+function TokenUsagePagination({
+  page,
+  totalPages,
+  pageInput,
+  onPageInputChange,
+  onPageChange,
+  onJump,
+}: {
+  page: number;
+  totalPages: number;
+  pageInput: string;
+  onPageInputChange: (value: string) => void;
+  onPageChange: (page: number) => void;
+  onJump: () => void;
+}) {
+  if (totalPages <= 0) {
+    return null;
+  }
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-2 text-sm text-stone-600">
+      <button
+        type="button"
+        className="ui-btn-secondary px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+        disabled={page <= 1}
+        onClick={() => onPageChange(page - 1)}
+      >
+        上一页
+      </button>
+      <span>第 {page} / {totalPages} 页</span>
+      <input
+        aria-label="跳转页号"
+        type="number"
+        min={1}
+        max={totalPages}
+        value={pageInput}
+        onChange={(event) => onPageInputChange(event.target.value)}
+        className="h-9 w-20 rounded-xl border border-stone-200 px-3 text-sm"
+      />
+      <button type="button" className="ui-btn-primary px-3 py-1.5 text-sm" onClick={onJump}>
+        跳转
+      </button>
+      <button
+        type="button"
+        className="ui-btn-secondary px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+        disabled={page >= totalPages}
+        onClick={() => onPageChange(page + 1)}
+      >
+        下一页
+      </button>
+    </div>
+  );
+}
+
+function TokenUsageTrendChart({
+  chart,
+  preset,
+  loading,
+  error,
+  onPresetChange,
+  onRetry,
+}: {
+  chart: TokenUsageChartDTO | null;
+  preset: TokenUsageChartPresetDTO;
+  loading: boolean;
+  error: string | null;
+  onPresetChange: (value: TokenUsageChartPresetDTO) => void;
+  onRetry: () => void;
+}) {
+  const maxTotal = Math.max(
+    ...(chart?.buckets.map((bucket) => bucket.input_tokens + bucket.output_tokens) ?? [0]),
+    0,
+  );
+  return (
+    <section className="border-t border-stone-200 pt-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h3 className="text-base font-semibold text-stone-900">输入 / 输出趋势</h3>
+        <div className="flex flex-wrap gap-2">
+          {chartPresetOptions.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => onPresetChange(option.value)}
+              className={clsx(
+                'rounded-xl border px-3 py-1.5 text-xs font-medium transition',
+                preset === option.value
+                  ? 'border-primary bg-primary text-white'
+                  : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50',
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {loading ? (
+        <div className="mt-3 flex items-center justify-center gap-2 rounded-2xl border border-stone-200 bg-stone-50 px-4 py-8 text-sm text-stone-500">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          正在加载趋势图...
+        </div>
+      ) : error ? (
+        <div className="mt-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">
+          {error}
+          <button type="button" className="ml-3 underline" onClick={onRetry}>
+            重试
+          </button>
+        </div>
+      ) : chart === null || chart.buckets.length === 0 || maxTotal === 0 ? (
+        <div className="mt-3 rounded-2xl border border-stone-200 bg-stone-50 px-4 py-8 text-center text-sm text-stone-500">
+          暂无趋势数据
+        </div>
+      ) : (
+        <div className="mt-4 overflow-x-auto rounded-2xl border border-stone-200 bg-[#fcfbf8] px-4 py-4">
+          <div className="flex min-w-max items-end gap-3">
+            {chart.buckets.map((bucket) => {
+              const segments = calculateStackedBarSegments({
+                inputTokens: bucket.input_tokens,
+                outputTokens: bucket.output_tokens,
+                maxTotalTokens: maxTotal,
+              });
+              return (
+                <div key={bucket.bucket_start} className="flex w-12 flex-col items-center gap-2">
+                  <div
+                    aria-label={`${bucket.bucket_label} 输入 ${bucket.input_tokens} 输出 ${bucket.output_tokens}`}
+                    className="flex h-36 w-7 flex-col justify-end overflow-hidden rounded-t-lg bg-stone-200"
+                    title={`输入 ${bucket.input_tokens.toLocaleString('zh-CN')} / 输出 ${bucket.output_tokens.toLocaleString('zh-CN')}`}
+                  >
+                    <div
+                      style={{ height: `${segments.outputPercent}%` }}
+                      className="w-full bg-sky-500"
+                    />
+                    <div
+                      style={{ height: `${segments.inputPercent}%` }}
+                      className="w-full bg-emerald-500"
+                    />
+                  </div>
+                  <span className="text-[11px] text-stone-500">{bucket.bucket_label}</span>
+                </div>
+              );
+            })}
+            <div className="ml-2 self-start text-xs leading-6 text-stone-500">
+              <div>
+                <span className="text-emerald-600">■</span> 输入
+              </div>
+              <div>
+                <span className="text-sky-600">■</span> 输出
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+const chartPresetOptions: Array<{
+  value: TokenUsageChartPresetDTO;
+  label: string;
+}> = [
+  { value: 'last_6_hours', label: '最近 6 小时' },
+  { value: 'last_24_hours', label: '最近 24 小时' },
+  { value: 'last_7_days', label: '最近 7 天' },
+  { value: 'custom', label: '自定义范围' },
+];
