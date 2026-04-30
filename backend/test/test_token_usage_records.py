@@ -282,7 +282,7 @@ class TokenUsageRecordsServiceTests(unittest.TestCase):
 
         async def run_query():
             async with self.session_factory() as session:
-                return await list_token_usage_records(session, limit=20)
+                return await list_token_usage_records(session, page=1, page_size=20)
 
         result = self._run_async(run_query())
 
@@ -320,7 +320,7 @@ class TokenUsageRecordsServiceTests(unittest.TestCase):
         app.dependency_overrides[get_async_session] = override_session
         client = TestClient(app)
         try:
-            response = client.get("/api/token-usage/records?limit=2")
+            response = client.get("/api/token-usage/records?page=1&page_size=2")
         finally:
             client.close()
 
@@ -328,7 +328,8 @@ class TokenUsageRecordsServiceTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(len(payload["records"]), 2)
         self.assertEqual(payload["records"][0]["feature_type"], "match_analysis")
-        self.assertEqual(payload["summary"]["record_count"], 2)
+        self.assertEqual(payload["summary"]["record_count"], 3)
+        self.assertEqual(payload["pagination"]["total_records"], 3)
 
     def test_lists_records_with_pagination(self) -> None:
         self._run_async(self._seed_history_records())

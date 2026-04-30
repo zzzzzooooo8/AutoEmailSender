@@ -7,6 +7,12 @@ from pydantic import BaseModel, Field
 
 
 TokenUsageFeatureType = Literal["crawl", "match_analysis", "draft_generation"]
+TokenUsageFeatureFilter = Literal[
+    "all",
+    "crawl",
+    "match_analysis",
+    "draft_generation",
+]
 TokenUsageStatus = Literal["success", "failed", "running", "unknown"]
 
 
@@ -33,6 +39,14 @@ class TokenUsageSummaryRead(BaseModel):
     record_count: int = 0
 
 
+class TokenUsagePaginationRead(BaseModel):
+    page: int
+    page_size: int
+    total_records: int
+    total_pages: int
+
+
 class TokenUsageRecordListRead(BaseModel):
     records: list[TokenUsageRecordRead] = Field(default_factory=list)
     summary: TokenUsageSummaryRead
+    pagination: TokenUsagePaginationRead

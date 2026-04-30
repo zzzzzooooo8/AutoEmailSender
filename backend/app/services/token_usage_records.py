@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -15,6 +16,7 @@ from app.models import (
     MatchAnalysisRun,
 )
 from app.schemas.token_usage import (
+    TokenUsagePaginationRead,
     TokenUsageRecordListRead,
     TokenUsageRecordRead,
     TokenUsageSummaryRead,
@@ -24,36 +26,97 @@ from app.schemas.token_usage import (
 async def list_token_usage_records(
     session: AsyncSession,
     *,
-    limit: int = 20,
+    page: int = 1,
+    page_size: int = 5,
+    feature_type: str = "all",
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
 ) -> TokenUsageRecordListRead:
-    resolved_limit = min(max(limit, 1), 100)
-    candidates: list[TokenUsageRecordRead] = []
-    candidates.extend(await _list_crawl_records(session, limit=resolved_limit))
-    candidates.extend(await _list_match_records(session, limit=resolved_limit))
-    candidates.extend(await _list_draft_records(session, limit=resolved_limit))
+    if start_at is not None and end_at is not None and start_at > end_at:
+        raise ValueError("开始时间不能晚于结束时间")
 
-    records = sorted(candidates, key=lambda item: item.created_at, reverse=True)[
-        :resolved_limit
-    ]
-    return TokenUsageRecordListRead(
-        records=records,
-        summary=_build_summary(records),
+    resolved_page = max(page, 1)
+    resolved_page_size = min(max(page_size, 1), 100)
+    candidates = await _list_all_candidate_records(session)
+    records = sorted(
+        _filter_records(
+            candidates,
+            feature_type=feature_type,
+            start_at=start_at,
+            end_at=end_at,
+        ),
+        key=lambda item: item.created_at,
+        reverse=True,
     )
+    total_records = len(records)
+    total_pages = (total_records + resolved_page_size - 1) // resolved_page_size
+    start_index = (resolved_page - 1) * resolved_page_size
+    page_records = records[start_index : start_index + resolved_page_size]
+
+    return TokenUsageRecordListRead(
+        records=page_records,
+        summary=_build_summary(records),
+        pagination=TokenUsagePaginationRead(
+            page=resolved_page,
+            page_size=resolved_page_size,
+            total_records=total_records,
+            total_pages=total_pages,
+        ),
+    )
+
+
+async def _list_all_candidate_records(
+    session: AsyncSession,
+) -> list[TokenUsageRecordRead]:
+    candidates: list[TokenUsageRecordRead] = []
+    candidates.extend(await _list_crawl_records(session, limit=None))
+    candidates.extend(await _list_match_records(session, limit=None))
+    candidates.extend(await _list_draft_records(session, limit=None))
+    return candidates
+
+
+def _filter_records(
+    records: list[TokenUsageRecordRead],
+    *,
+    feature_type: str,
+    start_at: datetime | None,
+    end_at: datetime | None,
+) -> list[TokenUsageRecordRead]:
+    filtered = records
+    if feature_type != "all":
+        filtered = [item for item in filtered if item.feature_type == feature_type]
+    if start_at is not None:
+        comparable_start = _to_utc_naive(start_at)
+        filtered = [
+            item
+            for item in filtered
+            if _to_utc_naive(item.created_at) >= comparable_start
+        ]
+    if end_at is not None:
+        comparable_end = _to_utc_naive(end_at)
+        filtered = [
+            item for item in filtered if _to_utc_naive(item.created_at) <= comparable_end
+        ]
+    return filtered
 
 
 async def _list_crawl_records(
     session: AsyncSession,
     *,
-    limit: int,
+    limit: int | None,
 ) -> list[TokenUsageRecordRead]:
+    statement = (
+        select(CrawlJobRun)
+        .options(
+            selectinload(CrawlJobRun.job).selectinload(CrawlJob.llm_profile),
+        )
+        .order_by(CrawlJobRun.created_at.desc())
+    )
+    if limit is not None:
+        statement = statement.limit(limit)
     runs = list(
         await session.scalars(
-            select(CrawlJobRun)
-            .options(
-                selectinload(CrawlJobRun.job).selectinload(CrawlJob.llm_profile),
-            )
-            .order_by(CrawlJobRun.created_at.desc())
-            .limit(limit),
+            statement,
         ),
     )
     return [_crawl_run_to_record(run) for run in runs]
@@ -62,18 +125,22 @@ async def _list_crawl_records(
 async def _list_match_records(
     session: AsyncSession,
     *,
-    limit: int,
+    limit: int | None,
 ) -> list[TokenUsageRecordRead]:
+    statement = (
+        select(MatchAnalysisRun)
+        .options(
+            selectinload(MatchAnalysisRun.professor),
+            selectinload(MatchAnalysisRun.identity),
+            selectinload(MatchAnalysisRun.llm_profile),
+        )
+        .order_by(MatchAnalysisRun.created_at.desc())
+    )
+    if limit is not None:
+        statement = statement.limit(limit)
     runs = list(
         await session.scalars(
-            select(MatchAnalysisRun)
-            .options(
-                selectinload(MatchAnalysisRun.professor),
-                selectinload(MatchAnalysisRun.identity),
-                selectinload(MatchAnalysisRun.llm_profile),
-            )
-            .order_by(MatchAnalysisRun.created_at.desc())
-            .limit(limit),
+            statement,
         ),
     )
     return [_match_run_to_record(run) for run in runs]
@@ -82,19 +149,23 @@ async def _list_match_records(
 async def _list_draft_records(
     session: AsyncSession,
     *,
-    limit: int,
+    limit: int | None,
 ) -> list[TokenUsageRecordRead]:
+    statement = (
+        select(EmailLog)
+        .options(
+            selectinload(EmailLog.professor),
+            selectinload(EmailLog.identity),
+            selectinload(EmailLog.llm_profile),
+        )
+        .where(EmailLog.direction == EmailDirection.DRAFT.value)
+        .order_by(EmailLog.created_at.desc())
+    )
+    if limit is not None:
+        statement = statement.limit(limit * 3)
     logs = list(
         await session.scalars(
-            select(EmailLog)
-            .options(
-                selectinload(EmailLog.professor),
-                selectinload(EmailLog.identity),
-                selectinload(EmailLog.llm_profile),
-            )
-            .where(EmailLog.direction == EmailDirection.DRAFT.value)
-            .order_by(EmailLog.created_at.desc())
-            .limit(limit * 3),
+            statement,
         ),
     )
     records = [
@@ -103,7 +174,7 @@ async def _list_draft_records(
         for record in [_draft_log_to_record(log)]
         if record is not None
     ]
-    return records[:limit]
+    return records if limit is None else records[:limit]
 
 
 def _crawl_run_to_record(run: CrawlJobRun) -> TokenUsageRecordRead:
@@ -209,6 +280,12 @@ def _map_crawl_status(status: str) -> str:
     }:
         return "failed"
     return "unknown"
+
+
+def _to_utc_naive(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(UTC).replace(tzinfo=None)
 
 
 def _build_summary(records: list[TokenUsageRecordRead]) -> TokenUsageSummaryRead:

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
-from app.schemas.token_usage import TokenUsageRecordListRead
+from app.schemas.token_usage import TokenUsageFeatureFilter, TokenUsageRecordListRead
 from app.services.token_usage_records import list_token_usage_records
 
 
@@ -13,7 +15,21 @@ router = APIRouter(prefix="/api/token-usage", tags=["token-usage"])
 
 @router.get("/records", response_model=TokenUsageRecordListRead)
 async def list_records(
-    limit: int = Query(default=20, ge=1, le=100),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=5, ge=1, le=100),
+    feature_type: TokenUsageFeatureFilter = Query(default="all"),
+    start_at: datetime | None = Query(default=None),
+    end_at: datetime | None = Query(default=None),
     session: AsyncSession = Depends(get_async_session),
 ) -> TokenUsageRecordListRead:
-    return await list_token_usage_records(session, limit=limit)
+    try:
+        return await list_token_usage_records(
+            session,
+            page=page,
+            page_size=page_size,
+            feature_type=feature_type,
+            start_at=start_at,
+            end_at=end_at,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
