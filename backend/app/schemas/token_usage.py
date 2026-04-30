@@ -14,6 +14,13 @@ TokenUsageFeatureFilter = Literal[
     "draft_generation",
 ]
 TokenUsageStatus = Literal["success", "failed", "running", "unknown"]
+TokenUsageChartPreset = Literal[
+    "last_6_hours",
+    "last_24_hours",
+    "last_7_days",
+    "custom",
+]
+TokenUsageChartGranularity = Literal["hour", "day"]
 
 
 class TokenUsageRecordRead(BaseModel):
@@ -50,3 +57,19 @@ class TokenUsageRecordListRead(BaseModel):
     records: list[TokenUsageRecordRead] = Field(default_factory=list)
     summary: TokenUsageSummaryRead
     pagination: TokenUsagePaginationRead
+
+
+class TokenUsageChartBucketRead(BaseModel):
+    bucket_start: datetime
+    bucket_label: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+
+
+class TokenUsageChartRead(BaseModel):
+    preset: TokenUsageChartPreset
+    granularity: TokenUsageChartGranularity
+    range_start: datetime
+    range_end: datetime
+    buckets: list[TokenUsageChartBucketRead] = Field(default_factory=list)

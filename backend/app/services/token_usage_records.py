@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -16,6 +16,10 @@ from app.models import (
     MatchAnalysisRun,
 )
 from app.schemas.token_usage import (
+    TokenUsageChartBucketRead,
+    TokenUsageChartGranularity,
+    TokenUsageChartPreset,
+    TokenUsageChartRead,
     TokenUsagePaginationRead,
     TokenUsageRecordListRead,
     TokenUsageRecordRead,
@@ -32,7 +36,11 @@ async def list_token_usage_records(
     start_at: datetime | None = None,
     end_at: datetime | None = None,
 ) -> TokenUsageRecordListRead:
-    if start_at is not None and end_at is not None and start_at > end_at:
+    if (
+        start_at is not None
+        and end_at is not None
+        and _to_utc_naive(start_at) > _to_utc_naive(end_at)
+    ):
         raise ValueError("开始时间不能晚于结束时间")
 
     resolved_page = max(page, 1)
@@ -62,6 +70,53 @@ async def list_token_usage_records(
             total_records=total_records,
             total_pages=total_pages,
         ),
+    )
+
+
+async def build_token_usage_chart(
+    session: AsyncSession,
+    *,
+    feature_type: str = "all",
+    preset: TokenUsageChartPreset = "last_24_hours",
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
+    now: datetime | None = None,
+) -> TokenUsageChartRead:
+    range_start, range_end, granularity = _resolve_chart_range(
+        preset=preset,
+        start_at=start_at,
+        end_at=end_at,
+        now=now,
+    )
+    candidates = await _list_all_candidate_records(session)
+    records = _filter_records(
+        candidates,
+        feature_type=feature_type,
+        start_at=range_start,
+        end_at=range_end + _bucket_duration(granularity) - timedelta(microseconds=1),
+    )
+    bucket_totals = _aggregate_chart_buckets(records, granularity=granularity)
+    buckets = [
+        TokenUsageChartBucketRead(
+            bucket_start=bucket_start,
+            bucket_label=_format_bucket_label(bucket_start, granularity),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=input_tokens + output_tokens,
+        )
+        for bucket_start, input_tokens, output_tokens in _iter_chart_buckets(
+            range_start,
+            range_end,
+            granularity=granularity,
+            bucket_totals=bucket_totals,
+        )
+    ]
+    return TokenUsageChartRead(
+        preset=preset,
+        granularity=granularity,
+        range_start=range_start,
+        range_end=range_end,
+        buckets=buckets,
     )
 
 
@@ -280,6 +335,116 @@ def _map_crawl_status(status: str) -> str:
     }:
         return "failed"
     return "unknown"
+
+
+def _resolve_chart_range(
+    *,
+    preset: TokenUsageChartPreset,
+    start_at: datetime | None,
+    end_at: datetime | None,
+    now: datetime | None,
+) -> tuple[datetime, datetime, TokenUsageChartGranularity]:
+    resolved_now = _as_utc_aware(now or datetime.now(UTC))
+    if preset == "last_6_hours":
+        range_end = _floor_hour(resolved_now)
+        return range_end - timedelta(hours=5), range_end, "hour"
+    if preset == "last_24_hours":
+        range_end = _floor_hour(resolved_now)
+        return range_end - timedelta(hours=23), range_end, "hour"
+    if preset == "last_7_days":
+        range_end = _floor_day(resolved_now)
+        return range_end - timedelta(days=6), range_end, "day"
+
+    if start_at is None or end_at is None:
+        raise ValueError("自定义趋势图需要开始时间和结束时间")
+    if _as_utc_aware(start_at) > _as_utc_aware(end_at):
+        raise ValueError("开始时间不能晚于结束时间")
+
+    range_start = _as_utc_aware(start_at)
+    range_end = _as_utc_aware(end_at)
+    if range_end - range_start <= timedelta(hours=48):
+        return _floor_hour(range_start), _floor_hour(range_end), "hour"
+    return _floor_day(range_start), _floor_day(range_end), "day"
+
+
+def _aggregate_chart_buckets(
+    records: list[TokenUsageRecordRead],
+    *,
+    granularity: TokenUsageChartGranularity,
+) -> dict[datetime, tuple[int, int]]:
+    buckets: dict[datetime, tuple[int, int]] = {}
+    for record in records:
+        bucket_start = _bucket_start(record.created_at, granularity)
+        current_input, current_output = buckets.get(bucket_start, (0, 0))
+        buckets[bucket_start] = (
+            current_input + (record.input_tokens or 0),
+            current_output + (record.output_tokens or 0),
+        )
+    return buckets
+
+
+def _iter_chart_buckets(
+    range_start: datetime,
+    range_end: datetime,
+    *,
+    granularity: TokenUsageChartGranularity,
+    bucket_totals: dict[datetime, tuple[int, int]],
+) -> list[tuple[datetime, int, int]]:
+    buckets: list[tuple[datetime, int, int]] = []
+    current = range_start
+    while current <= range_end:
+        input_tokens, output_tokens = bucket_totals.get(current, (0, 0))
+        buckets.append((current, input_tokens, output_tokens))
+        current = _next_bucket(current, granularity)
+    return buckets
+
+
+def _bucket_start(
+    value: datetime,
+    granularity: TokenUsageChartGranularity,
+) -> datetime:
+    utc_value = _as_utc_aware(value)
+    if granularity == "hour":
+        return _floor_hour(utc_value)
+    return _floor_day(utc_value)
+
+
+def _next_bucket(
+    value: datetime,
+    granularity: TokenUsageChartGranularity,
+) -> datetime:
+    if granularity == "hour":
+        return value + timedelta(hours=1)
+    return value + timedelta(days=1)
+
+
+def _bucket_duration(granularity: TokenUsageChartGranularity) -> timedelta:
+    if granularity == "hour":
+        return timedelta(hours=1)
+    return timedelta(days=1)
+
+
+def _format_bucket_label(
+    value: datetime,
+    granularity: TokenUsageChartGranularity,
+) -> str:
+    if granularity == "hour":
+        return value.strftime("%H:00")
+    return value.strftime("%m-%d")
+
+
+def _floor_hour(value: datetime) -> datetime:
+    return _as_utc_aware(value).replace(minute=0, second=0, microsecond=0)
+
+
+def _floor_day(value: datetime) -> datetime:
+    return _as_utc_aware(value).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _as_utc_aware(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _to_utc_naive(value: datetime) -> datetime:
