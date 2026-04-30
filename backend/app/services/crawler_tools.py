@@ -1027,6 +1027,7 @@ async def save_candidate_batch(
             )
 
     if failed_items:
+        budget_fields = record_save_batch_failure(ctx, candidates, failed_items)
         return {
             "batch_status": "rejected",
             "attempted_count": len(candidates),
@@ -1034,9 +1035,11 @@ async def save_candidate_batch(
             "failed_count": len(failed_items),
             "failed_items": failed_items,
             "total_saved_count": await count_saved_candidates(ctx),
+            **budget_fields,
         }
 
     saved = await _save_normalized_candidate_payloads(ctx, payloads)
+    record_save_batch_success(ctx)
     return {
         "batch_status": "saved",
         "attempted_count": len(candidates),
@@ -1044,6 +1047,11 @@ async def save_candidate_batch(
         "failed_count": 0,
         "failed_items": [],
         "total_saved_count": await count_saved_candidates(ctx),
+        "retry_allowed": True,
+        "failure_fingerprint": None,
+        "consecutive_same_batch_failures": 0,
+        "total_save_failures": ctx.save_failure_budget.total_save_failures,
+        "terminal_reason": None,
     }
 
 

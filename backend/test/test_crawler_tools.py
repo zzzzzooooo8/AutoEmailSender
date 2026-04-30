@@ -530,6 +530,11 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["failed_count"], 0)
             self.assertEqual(result["failed_items"], [])
             self.assertEqual(result["total_saved_count"], 2)
+            self.assertTrue(result["retry_allowed"])
+            self.assertIsNone(result["failure_fingerprint"])
+            self.assertEqual(result["consecutive_same_batch_failures"], 0)
+            self.assertEqual(result["total_save_failures"], 0)
+            self.assertIsNone(result["terminal_reason"])
             self.assertNotIn("candidates", result)
 
     async def test_save_candidate_batch_rejects_entire_batch_when_one_item_fails(self) -> None:
@@ -558,6 +563,66 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["failed_items"][0]["index"], 1)
             self.assertIn("必填文本不能为空", result["failed_items"][0]["reason"])
             self.assertEqual(result["total_saved_count"], 0)
+            self.assertTrue(result["retry_allowed"])
+            self.assertIsNotNone(result["failure_fingerprint"])
+            self.assertEqual(result["consecutive_same_batch_failures"], 1)
+            self.assertEqual(result["total_save_failures"], 1)
+            self.assertIsNone(result["terminal_reason"])
+            self.assertEqual(await harness.count_rows(CrawlCandidate), 0)
+
+    async def test_save_candidate_batch_trips_same_batch_failure_budget(self) -> None:
+        async with _RealCrawlerSessionHarness() as harness:
+            job_id = await harness.create_job()
+            ctx = CrawlToolContext(
+                job_id=job_id,
+                start_url="https://cs.example.edu/faculty",
+                university="示例大学",
+                school="计算机学院",
+                session_factory=harness.session_factory,
+            )
+            candidates = [ProfessorCandidatePayload(name="", email="bad@example.edu")]
+
+            result = await save_candidate_batch(ctx, candidates)
+
+            self.assertEqual(result["batch_status"], "rejected")
+            self.assertTrue(result["retry_allowed"])
+            self.assertIsNotNone(result["failure_fingerprint"])
+            self.assertEqual(result["consecutive_same_batch_failures"], 1)
+            self.assertEqual(result["total_save_failures"], 1)
+            self.assertIsNone(result["terminal_reason"])
+
+            with self.assertRaises(CrawlJobSaveBudgetExceeded) as raised:
+                await save_candidate_batch(ctx, candidates)
+
+            self.assertIn("同一候选批次连续保存失败 2 次", str(raised.exception))
+            self.assertEqual(await harness.count_rows(CrawlCandidate), 0)
+
+    async def test_save_candidate_batch_does_not_count_stopped_job_as_failure(self) -> None:
+        async with _RealCrawlerSessionHarness() as harness:
+            job_id = await harness.create_job()
+            async with harness.session_factory() as session:
+                job = await session.get(CrawlJob, job_id)
+                assert job is not None
+                job.status = CrawlJobStatus.CANCELED.value
+                await session.commit()
+
+            ctx = CrawlToolContext(
+                job_id=job_id,
+                start_url="https://cs.example.edu/faculty",
+                university="示例大学",
+                school="计算机学院",
+                session_factory=harness.session_factory,
+            )
+
+            result = await save_candidate_batch(
+                ctx,
+                [ProfessorCandidatePayload(name="张三", email="zhang@example.edu")],
+            )
+
+            self.assertEqual(result["batch_status"], "saved")
+            self.assertEqual(result["saved_count"], 0)
+            self.assertEqual(ctx.save_failure_budget.total_save_failures, 0)
+            self.assertEqual(ctx.save_failure_budget.same_batch_save_failures, 0)
             self.assertEqual(await harness.count_rows(CrawlCandidate), 0)
 
     async def test_record_page_snapshot_skips_canceled_job(self) -> None:
