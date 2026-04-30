@@ -648,7 +648,14 @@ export interface EmailTaskSchedulePayloadDTO extends EmailTaskApprovalPayloadDTO
 }
 
 export type TokenUsageRecordFeatureTypeDTO = 'crawl' | 'match_analysis' | 'draft_generation';
+export type TokenUsageRecordFeatureFilterDTO = 'all' | TokenUsageRecordFeatureTypeDTO;
 export type TokenUsageRecordStatusDTO = 'success' | 'failed' | 'running' | 'unknown';
+export type TokenUsageChartPresetDTO =
+  | 'last_6_hours'
+  | 'last_24_hours'
+  | 'last_7_days'
+  | 'custom';
+export type TokenUsageChartGranularityDTO = 'hour' | 'day';
 
 export interface TokenUsageRecordDTO {
   id: string;
@@ -673,9 +680,33 @@ export interface TokenUsageSummaryDTO {
   record_count: number;
 }
 
+export interface TokenUsagePaginationDTO {
+  page: number;
+  page_size: number;
+  total_records: number;
+  total_pages: number;
+}
+
 export interface TokenUsageRecordListDTO {
   records: TokenUsageRecordDTO[];
   summary: TokenUsageSummaryDTO;
+  pagination: TokenUsagePaginationDTO;
+}
+
+export interface TokenUsageChartBucketDTO {
+  bucket_start: string;
+  bucket_label: string;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+}
+
+export interface TokenUsageChartDTO {
+  preset: TokenUsageChartPresetDTO;
+  granularity: TokenUsageChartGranularityDTO;
+  range_start: string;
+  range_end: string;
+  buckets: TokenUsageChartBucketDTO[];
 }
 
 export const PROFESSOR_STATUS_LABELS = {

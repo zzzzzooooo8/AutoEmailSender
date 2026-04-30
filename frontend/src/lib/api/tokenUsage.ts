@@ -1,7 +1,40 @@
 import { apiFetch } from '@/lib/api/client';
-import type { TokenUsageRecordListDTO } from '@/types';
+import {
+  buildTokenUsageChartQueryParams,
+  buildTokenUsageRecordQueryParams,
+} from '@/features/token-usage/client/tokenUsage';
+import type {
+  TokenUsageChartDTO,
+  TokenUsageChartPresetDTO,
+  TokenUsageRecordFeatureFilterDTO,
+  TokenUsageRecordListDTO,
+} from '@/types';
 
-export const listTokenUsageRecords = (limit = 20) =>
-  apiFetch<TokenUsageRecordListDTO>('/api/token-usage/records', undefined, {
-    limit,
-  });
+export interface TokenUsageRecordQuery {
+  page: number;
+  pageSize: number;
+  featureType: TokenUsageRecordFeatureFilterDTO;
+  startAt: string | null;
+  endAt: string | null;
+}
+
+export interface TokenUsageChartQuery {
+  featureType: TokenUsageRecordFeatureFilterDTO;
+  preset: TokenUsageChartPresetDTO;
+  startAt: string | null;
+  endAt: string | null;
+}
+
+export const listTokenUsageRecords = (query: TokenUsageRecordQuery) =>
+  apiFetch<TokenUsageRecordListDTO>(
+    '/api/token-usage/records',
+    undefined,
+    buildTokenUsageRecordQueryParams(query),
+  );
+
+export const getTokenUsageChart = (query: TokenUsageChartQuery) =>
+  apiFetch<TokenUsageChartDTO>(
+    '/api/token-usage/chart',
+    undefined,
+    buildTokenUsageChartQueryParams(query),
+  );

@@ -1,4 +1,6 @@
 import type {
+  TokenUsageChartPresetDTO,
+  TokenUsageRecordFeatureFilterDTO,
   TokenUsageRecordFeatureTypeDTO,
   TokenUsageRecordStatusDTO,
 } from '@/types';
@@ -30,3 +32,106 @@ export const getTokenRecordFeatureTone = (
   };
   return tones[featureType] ?? 'stone';
 };
+
+export const buildTokenUsageRecordQueryParams = ({
+  page,
+  pageSize,
+  featureType,
+  startAt,
+  endAt,
+}: {
+  page: number;
+  pageSize: number;
+  featureType: TokenUsageRecordFeatureFilterDTO;
+  startAt: string | null;
+  endAt: string | null;
+}) => ({
+  page,
+  page_size: pageSize,
+  ...(featureType !== 'all' ? { feature_type: featureType } : {}),
+  ...(startAt ? { start_at: startAt } : {}),
+  ...(endAt ? { end_at: endAt } : {}),
+});
+
+export const buildTokenUsageChartQueryParams = ({
+  featureType,
+  preset,
+  startAt,
+  endAt,
+}: {
+  featureType: TokenUsageRecordFeatureFilterDTO;
+  preset: TokenUsageChartPresetDTO;
+  startAt: string | null;
+  endAt: string | null;
+}) => ({
+  preset,
+  ...(featureType !== 'all' ? { feature_type: featureType } : {}),
+  ...(preset === 'custom' && startAt ? { start_at: startAt } : {}),
+  ...(preset === 'custom' && endAt ? { end_at: endAt } : {}),
+});
+
+export const parseDateTimeLocalValue = (value: string): string | null => {
+  if (!value.trim()) {
+    return null;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date.toISOString();
+};
+
+export const formatDateTimeLocalValue = (value: string | null): string => {
+  if (!value) {
+    return '';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  return [
+    date.getFullYear(),
+    '-',
+    padDatePart(date.getMonth() + 1),
+    '-',
+    padDatePart(date.getDate()),
+    'T',
+    padDatePart(date.getHours()),
+    ':',
+    padDatePart(date.getMinutes()),
+  ].join('');
+};
+
+export const resolveTokenUsagePageJump = (
+  pageInput: string,
+  totalPages: number,
+): number | null => {
+  const nextPage = Number(pageInput);
+  if (!Number.isInteger(nextPage) || nextPage < 1 || nextPage > totalPages) {
+    return null;
+  }
+  return nextPage;
+};
+
+export const calculateStackedBarSegments = ({
+  inputTokens,
+  outputTokens,
+  maxTotalTokens,
+}: {
+  inputTokens: number;
+  outputTokens: number;
+  maxTotalTokens: number;
+}) => {
+  if (maxTotalTokens <= 0) {
+    return { inputPercent: 0, outputPercent: 0, totalPercent: 0 };
+  }
+  const inputPercent = Math.round((inputTokens / maxTotalTokens) * 100);
+  const outputPercent = Math.round((outputTokens / maxTotalTokens) * 100);
+  return {
+    inputPercent,
+    outputPercent,
+    totalPercent: inputPercent + outputPercent,
+  };
+};
+
+const padDatePart = (value: number): string => String(value).padStart(2, '0');
