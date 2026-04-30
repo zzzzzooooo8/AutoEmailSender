@@ -40,6 +40,29 @@ class FacultyCrawlerAgentSaveResultTests(unittest.TestCase):
         self.assertNotIn("name", str(result))
         self.assertNotIn("profile_url", str(result))
 
+    def test_format_save_batch_result_for_model_includes_budget_metadata_when_present(self) -> None:
+        result = _format_save_batch_result_for_model(
+            {
+                "batch_status": "rejected",
+                "attempted_count": 1,
+                "saved_count": 0,
+                "failed_count": 1,
+                "failed_items": [{"index": 0, "name": "张三", "reason": "name: Field required"}],
+                "total_saved_count": 0,
+                "retry_allowed": True,
+                "failure_fingerprint": "abc123def456",
+                "consecutive_same_batch_failures": 1,
+                "total_save_failures": 1,
+                "terminal_reason": None,
+            }
+        )
+
+        self.assertEqual(result["retry_allowed"], True)
+        self.assertEqual(result["failure_fingerprint"], "abc123def456")
+        self.assertEqual(result["consecutive_same_batch_failures"], 1)
+        self.assertEqual(result["total_save_failures"], 1)
+        self.assertIsNone(result["terminal_reason"])
+
     def test_validate_professor_candidate_batch_collects_schema_failures(self) -> None:
         payloads, failed_items = _validate_professor_candidate_batch(
             [
