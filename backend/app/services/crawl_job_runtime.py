@@ -20,6 +20,7 @@ from app.services.crawl_job_runs import (
 from app.services.crawler_tools import (
     CrawlJobCanceled,
     CrawlJobPaused,
+    CrawlJobSaveBudgetExceeded,
     CrawlToolContext,
     CandidateEnrichmentPayload,
     ProfessorCandidatePayload,
@@ -147,6 +148,21 @@ async def run_queued_crawl_jobs_once(
             },
         )
         await _mark_job_canceled(session_factory, job_id)
+    except CrawlJobSaveBudgetExceeded as exc:
+        await _emit_trace_event(
+            trace_callback,
+            {
+                "event_type": "save_failure_circuit_breaker",
+                "message": str(exc),
+                "failure_fingerprint": exc.failure_fingerprint,
+                "consecutive_same_batch_failures": exc.same_batch_save_failures,
+                "total_save_failures": exc.total_save_failures,
+                "terminal_reason": exc.terminal_reason,
+                "latest_failure_summary": exc.latest_failure_summary,
+                "created_at": datetime.now(UTC).isoformat(),
+            },
+        )
+        await _mark_job_failed(session_factory, job_id, str(exc))
     except asyncio.CancelledError:
         await _mark_job_failed(session_factory, job_id, WORKER_CANCELLED_ERROR)
         raise

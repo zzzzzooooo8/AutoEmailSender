@@ -15,6 +15,7 @@ from app.services.crawl_job_runtime import _enrich_saved_candidates, run_queued_
 from app.services.crawl_job_runs import create_initial_crawl_job_run
 from app.services.crawler_tools import (
     CandidateEnrichmentPayload,
+    CrawlJobSaveBudgetExceeded,
     CrawlToolContext,
     PageSnapshot,
     ProfessorCandidatePayload,
@@ -491,6 +492,54 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run.status, CrawlJobStatus.FAILED.value)
         self.assertIsNotNone(run.error_message)
         self.assertIsNotNone(run.finished_at)
+
+    async def test_run_queued_crawl_job_fails_when_save_failure_budget_is_exceeded(self) -> None:
+        job_id = await self._create_default_profile_and_job()
+
+        async def fake_run(
+            ctx: CrawlToolContext,
+            llm_profile: LLMProfile,
+            trace_callback=None,
+        ) -> dict[str, object]:
+            _ = ctx, llm_profile, trace_callback
+            raise CrawlJobSaveBudgetExceeded(
+                terminal_reason="同一候选批次连续保存失败 2 次，已停止以避免继续消耗 token",
+                failure_fingerprint="abc123def456",
+                same_batch_save_failures=2,
+                total_save_failures=2,
+                latest_failure_summary="张三: name: Field required",
+            )
+
+        with patch(
+            "app.services.crawl_job_runtime.run_faculty_crawler_agent",
+            new=fake_run,
+        ):
+            processed = await run_queued_crawl_jobs_once(self.session_factory)
+
+        self.assertEqual(processed, 1)
+        job = await self._get_job(job_id)
+        self.assertEqual(job.status, CrawlJobStatus.FAILED.value)
+        self.assertIsNotNone(job.error_message)
+        self.assertIn("同一候选批次连续保存失败 2 次", job.error_message)
+        self.assertIn("张三: name: Field required", job.error_message)
+        run = await self._get_current_run(job_id)
+        self.assertEqual(run.status, CrawlJobStatus.FAILED.value)
+        self.assertEqual(run.error_message, job.error_message)
+        self.assertIsNotNone(run.finished_at)
+
+        trace_events = [item for item in job.agent_trace or [] if isinstance(item, dict)]
+        breaker_events = [
+            item
+            for item in trace_events
+            if item.get("event_type") == "save_failure_circuit_breaker"
+        ]
+        self.assertEqual(len(breaker_events), 1)
+        raw_event = breaker_events[0]["raw"]
+        self.assertIsInstance(raw_event, dict)
+        assert isinstance(raw_event, dict)
+        self.assertEqual(raw_event["failure_fingerprint"], "abc123def456")
+        self.assertEqual(raw_event["consecutive_same_batch_failures"], 2)
+        self.assertEqual(raw_event["total_save_failures"], 2)
 
     async def test_run_queued_crawl_job_surfaces_latest_page_failure_when_no_candidates_saved(self) -> None:
         job_id = await self._create_default_profile_and_job()
