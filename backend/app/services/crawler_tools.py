@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+import hashlib
 import ipaddress
 import platform
 import re
 import socket
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -33,6 +34,14 @@ CRAWL4AI_BROWSER_DELAY_SECONDS = 1.5
 CRAWL4AI_BROWSER_WAIT_SELECTOR = "css:body"
 UNSAFE_CRAWL_URL_MESSAGE = "URL 不允许指向本机、内网或不可解析地址"
 MULTI_LABEL_PUBLIC_SUFFIXES = ("ac.cn", "com.cn", "edu.cn", "gov.cn", "net.cn", "org.cn")
+SAVE_SAME_BATCH_FAILURE_LIMIT = 2
+SAVE_TOTAL_FAILURE_LIMIT = 4
+SAME_BATCH_SAVE_FAILURE_REASON = (
+    "同一候选批次连续保存失败 2 次，已停止以避免继续消耗 token"
+)
+TOTAL_SAVE_FAILURE_REASON = (
+    "候选保存失败累计达到 4 次，已停止以避免继续消耗 token"
+)
 CrawlPageIntent = Literal["generic", "directory", "profile"]
 _DEFAULT_BROWSER_WAIT_FOR = object()
 
@@ -123,6 +132,27 @@ class CandidateBatchSaveResult(TypedDict):
     failed_count: int
     failed_items: list[CandidateBatchFailure]
     total_saved_count: int
+    retry_allowed: NotRequired[bool]
+    failure_fingerprint: NotRequired[str | None]
+    consecutive_same_batch_failures: NotRequired[int]
+    total_save_failures: NotRequired[int]
+    terminal_reason: NotRequired[str | None]
+
+
+class SaveFailureBudgetFields(TypedDict):
+    retry_allowed: bool
+    failure_fingerprint: str | None
+    consecutive_same_batch_failures: int
+    total_save_failures: int
+    terminal_reason: str | None
+
+
+@dataclass
+class SaveFailureBudgetState:
+    last_failed_save_fingerprint: str | None = None
+    same_batch_save_failures: int = 0
+    total_save_failures: int = 0
+    last_save_failure_summary: str | None = None
 
 
 @dataclass(frozen=True)
@@ -133,6 +163,7 @@ class CrawlToolContext:
     school: str
     session_factory: async_sessionmaker[AsyncSession]
     http_blocked_hosts: set[str] = field(default_factory=set)
+    save_failure_budget: SaveFailureBudgetState = field(default_factory=SaveFailureBudgetState)
 
     def mark_http_blocked(self, url: str) -> None:
         host = (urlparse(url).hostname or "").lower()
@@ -150,6 +181,112 @@ class CrawlJobPaused(RuntimeError):
 
 class CrawlJobCanceled(RuntimeError):
     """Raised internally when a crawl job is canceled at a safe checkpoint."""
+
+
+class CrawlJobSaveBudgetExceeded(RuntimeError):
+    """Raised internally when repeated candidate save failures exceed the retry budget."""
+
+    def __init__(
+        self,
+        *,
+        terminal_reason: str,
+        failure_fingerprint: str,
+        same_batch_save_failures: int,
+        total_save_failures: int,
+        latest_failure_summary: str,
+    ) -> None:
+        self.terminal_reason = terminal_reason
+        self.failure_fingerprint = failure_fingerprint
+        self.same_batch_save_failures = same_batch_save_failures
+        self.total_save_failures = total_save_failures
+        self.latest_failure_summary = latest_failure_summary
+        super().__init__(f"抓取结果未成功保存：{terminal_reason}。最近失败：{latest_failure_summary}")
+
+
+def save_candidate_batch_fingerprint(candidates: Sequence[object]) -> str:
+    identities = sorted(_candidate_identity(candidate) for candidate in candidates)
+    raw = "\n".join(identities)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+
+
+def record_save_batch_failure(
+    ctx: CrawlToolContext,
+    candidates: Sequence[object],
+    failed_items: Sequence[CandidateBatchFailure],
+) -> SaveFailureBudgetFields:
+    fingerprint = save_candidate_batch_fingerprint(candidates)
+    state = ctx.save_failure_budget
+    if state.last_failed_save_fingerprint == fingerprint:
+        state.same_batch_save_failures += 1
+    else:
+        state.last_failed_save_fingerprint = fingerprint
+        state.same_batch_save_failures = 1
+
+    state.total_save_failures += 1
+    summary = _summarize_save_failure(failed_items)
+    state.last_save_failure_summary = summary
+
+    terminal_reason: str | None = None
+    if state.same_batch_save_failures >= SAVE_SAME_BATCH_FAILURE_LIMIT:
+        terminal_reason = SAME_BATCH_SAVE_FAILURE_REASON
+    elif state.total_save_failures >= SAVE_TOTAL_FAILURE_LIMIT:
+        terminal_reason = TOTAL_SAVE_FAILURE_REASON
+
+    fields: SaveFailureBudgetFields = {
+        "retry_allowed": terminal_reason is None,
+        "failure_fingerprint": fingerprint,
+        "consecutive_same_batch_failures": state.same_batch_save_failures,
+        "total_save_failures": state.total_save_failures,
+        "terminal_reason": terminal_reason,
+    }
+    if terminal_reason is not None:
+        raise CrawlJobSaveBudgetExceeded(
+            terminal_reason=terminal_reason,
+            failure_fingerprint=fingerprint,
+            same_batch_save_failures=state.same_batch_save_failures,
+            total_save_failures=state.total_save_failures,
+            latest_failure_summary=summary,
+        )
+    return fields
+
+
+def record_save_batch_success(ctx: CrawlToolContext) -> None:
+    state = ctx.save_failure_budget
+    state.last_failed_save_fingerprint = None
+    state.same_batch_save_failures = 0
+    state.last_save_failure_summary = None
+
+
+def _candidate_identity(candidate: object) -> str:
+    return "|".join(
+        (
+            f"name={_candidate_identity_value(candidate, 'name')}",
+            f"email={_candidate_identity_value(candidate, 'email')}",
+            f"profile_url={_candidate_identity_value(candidate, 'profile_url')}",
+        )
+    )
+
+
+def _candidate_identity_value(candidate: object, key: str) -> str:
+    if isinstance(candidate, dict):
+        value = candidate.get(key)
+    else:
+        value = getattr(candidate, key, None)
+    if value is None:
+        return ""
+    return str(value).strip().lower()
+
+
+def _summarize_save_failure(failed_items: Sequence[CandidateBatchFailure]) -> str:
+    if not failed_items:
+        return "保存失败但未返回字段原因"
+    parts: list[str] = []
+    for item in failed_items[:3]:
+        name = item.get("name") or f"index={item['index']}"
+        parts.append(f"{name}: {item['reason']}")
+    if len(failed_items) > 3:
+        parts.append(f"另有 {len(failed_items) - 3} 项失败")
+    return "；".join(parts)
 
 
 @dataclass(frozen=True)
