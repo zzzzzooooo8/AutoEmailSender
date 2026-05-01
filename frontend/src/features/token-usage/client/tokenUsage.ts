@@ -37,35 +37,41 @@ export const buildTokenUsageRecordQueryParams = ({
   page,
   pageSize,
   featureType,
+  modelName,
   startAt,
   endAt,
 }: {
   page: number;
   pageSize: number;
   featureType: TokenUsageRecordFeatureFilterDTO;
+  modelName: string | null;
   startAt: string | null;
   endAt: string | null;
 }) => ({
   page,
   page_size: pageSize,
   ...(featureType !== 'all' ? { feature_type: featureType } : {}),
+  ...(modelName ? { model_name: modelName } : {}),
   ...(startAt ? { start_at: startAt } : {}),
   ...(endAt ? { end_at: endAt } : {}),
 });
 
 export const buildTokenUsageChartQueryParams = ({
   featureType,
+  modelName,
   preset,
   startAt,
   endAt,
 }: {
   featureType: TokenUsageRecordFeatureFilterDTO;
+  modelName: string | null;
   preset: TokenUsageChartPresetDTO;
   startAt: string | null;
   endAt: string | null;
 }) => ({
   preset,
   ...(featureType !== 'all' ? { feature_type: featureType } : {}),
+  ...(modelName ? { model_name: modelName } : {}),
   ...(preset === 'custom' && startAt ? { start_at: startAt } : {}),
   ...(preset === 'custom' && endAt ? { end_at: endAt } : {}),
 });

@@ -36,6 +36,7 @@ describe('token usage center helpers', () => {
         page: 1,
         pageSize: 5,
         featureType: 'all',
+        modelName: null,
         startAt: null,
         endAt: null,
       }),
@@ -49,6 +50,7 @@ describe('token usage center helpers', () => {
         page: 3,
         pageSize: 5,
         featureType: 'match_analysis',
+        modelName: 'gpt-4o-mini',
         startAt: '2026-04-30T02:00:00.000Z',
         endAt: '2026-04-30T10:00:00.000Z',
       }),
@@ -56,6 +58,7 @@ describe('token usage center helpers', () => {
       page: 3,
       page_size: 5,
       feature_type: 'match_analysis',
+      model_name: 'gpt-4o-mini',
       start_at: '2026-04-30T02:00:00.000Z',
       end_at: '2026-04-30T10:00:00.000Z',
     });
@@ -65,6 +68,7 @@ describe('token usage center helpers', () => {
     expect(
       buildTokenUsageChartQueryParams({
         featureType: 'all',
+        modelName: null,
         preset: 'last_24_hours',
         startAt: '2026-04-30T02:00:00.000Z',
         endAt: '2026-04-30T10:00:00.000Z',
@@ -76,6 +80,7 @@ describe('token usage center helpers', () => {
     expect(
       buildTokenUsageChartQueryParams({
         featureType: 'crawl',
+        modelName: 'gpt-4o-mini',
         preset: 'custom',
         startAt: '2026-04-30T02:00:00.000Z',
         endAt: '2026-04-30T10:00:00.000Z',
@@ -83,6 +88,7 @@ describe('token usage center helpers', () => {
     ).toEqual({
       preset: 'custom',
       feature_type: 'crawl',
+      model_name: 'gpt-4o-mini',
       start_at: '2026-04-30T02:00:00.000Z',
       end_at: '2026-04-30T10:00:00.000Z',
     });

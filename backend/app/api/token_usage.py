@@ -26,6 +26,7 @@ async def list_records(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=5, ge=1, le=100),
     feature_type: TokenUsageFeatureFilter = Query(default="all"),
+    model_name: str | None = Query(default=None),
     start_at: datetime | None = Query(default=None),
     end_at: datetime | None = Query(default=None),
     session: AsyncSession = Depends(get_async_session),
@@ -36,6 +37,7 @@ async def list_records(
             page=page,
             page_size=page_size,
             feature_type=feature_type,
+            model_name=model_name,
             start_at=start_at,
             end_at=end_at,
         )
@@ -47,6 +49,7 @@ async def list_records(
 async def get_chart(
     preset: TokenUsageChartPreset = Query(default="last_24_hours"),
     feature_type: TokenUsageFeatureFilter = Query(default="all"),
+    model_name: str | None = Query(default=None),
     start_at: datetime | None = Query(default=None),
     end_at: datetime | None = Query(default=None),
     session: AsyncSession = Depends(get_async_session),
@@ -56,6 +59,7 @@ async def get_chart(
             session,
             preset=preset,
             feature_type=feature_type,
+            model_name=model_name,
             start_at=start_at,
             end_at=end_at,
         )

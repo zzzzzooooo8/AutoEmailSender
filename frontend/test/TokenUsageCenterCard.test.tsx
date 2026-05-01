@@ -48,12 +48,14 @@ describe("TokenUsageCenterCard", () => {
         page: 1,
         pageSize: 5,
         featureType: "all",
+        modelName: null,
         startAt: null,
         endAt: null,
       }),
     );
     expect(mockedGetTokenUsageChart).toHaveBeenCalledWith({
       featureType: "all",
+      modelName: null,
       preset: "last_24_hours",
       startAt: null,
       endAt: null,
@@ -65,14 +67,14 @@ describe("TokenUsageCenterCard", () => {
 
   it("filters records and chart by feature type", async () => {
     mockedListTokenUsageRecords.mockResolvedValue(createRecordListResult());
-    render(<TokenUsageCenterCard />);
+    const { container } = render(<TokenUsageCenterCard />);
 
     fireEvent.click(screen.getByRole("button", { name: /Token 消耗记录中心/ }));
     await waitFor(() => expect(mockedListTokenUsageRecords).toHaveBeenCalled());
 
-    fireEvent.change(screen.getByLabelText("功能筛选"), {
-      target: { value: "match_analysis" },
-    });
+    expect(container.querySelector("select")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "功能筛选" }));
+    fireEvent.click(screen.getByRole("option", { name: "匹配分析" }));
     fireEvent.click(screen.getByRole("button", { name: "查询" }));
 
     await waitFor(() =>
@@ -80,12 +82,48 @@ describe("TokenUsageCenterCard", () => {
         page: 1,
         pageSize: 5,
         featureType: "match_analysis",
+        modelName: null,
         startAt: null,
         endAt: null,
       }),
     );
     expect(mockedGetTokenUsageChart).toHaveBeenLastCalledWith({
       featureType: "match_analysis",
+      modelName: null,
+      preset: "last_24_hours",
+      startAt: null,
+      endAt: null,
+    });
+  });
+
+  it("filters records and chart by model name", async () => {
+    mockedListTokenUsageRecords.mockResolvedValue(
+      createRecordListResult({
+        model_options: ["gpt-test", "gpt-alt"],
+      }),
+    );
+    render(<TokenUsageCenterCard />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Token 消耗记录中心/ }));
+    await waitFor(() => expect(mockedListTokenUsageRecords).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "模型筛选" }));
+    fireEvent.click(screen.getByRole("option", { name: "gpt-alt" }));
+    fireEvent.click(screen.getByRole("button", { name: "查询" }));
+
+    await waitFor(() =>
+      expect(mockedListTokenUsageRecords).toHaveBeenLastCalledWith({
+        page: 1,
+        pageSize: 5,
+        featureType: "all",
+        modelName: "gpt-alt",
+        startAt: null,
+        endAt: null,
+      }),
+    );
+    expect(mockedGetTokenUsageChart).toHaveBeenLastCalledWith({
+      featureType: "all",
+      modelName: "gpt-alt",
       preset: "last_24_hours",
       startAt: null,
       endAt: null,
@@ -118,6 +156,7 @@ describe("TokenUsageCenterCard", () => {
         page: 3,
         pageSize: 5,
         featureType: "all",
+        modelName: null,
         startAt: null,
         endAt: null,
       }),
@@ -132,7 +171,25 @@ describe("TokenUsageCenterCard", () => {
 
     await waitFor(() => expect(screen.getByText("输入 / 输出趋势")).toBeInTheDocument());
     expect(screen.getByText("10:00")).toBeInTheDocument();
-    expect(screen.getByLabelText("10:00 输入 200 输出 30")).toBeInTheDocument();
+    expect(screen.getByText("250 tokens")).toBeInTheDocument();
+    expect(screen.getByText("0 tokens")).toBeInTheDocument();
+
+    const bar = screen.getByLabelText("10:00 输入 200 输出 30 总计 230");
+    fireEvent.mouseEnter(bar, { clientX: 180, clientY: 90 });
+    fireEvent.mouseMove(bar, { clientX: 210, clientY: 120 });
+    expect(screen.getByRole("tooltip")).toHaveStyle({
+      left: "224px",
+      top: "134px",
+    });
+
+    expect(screen.getByText("合计 230 tokens")).toBeInTheDocument();
+    expect(screen.getAllByText("输入tokens").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("200 tokens").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("输出tokens").length).toBeGreaterThan(0);
+    expect(screen.getByText("30 tokens")).toBeInTheDocument();
+
+    fireEvent.mouseLeave(bar);
+    expect(screen.queryByText("合计 230 tokens")).not.toBeInTheDocument();
   });
 });
 
@@ -169,6 +226,7 @@ function createRecordListResult(
       total_records: 1,
       total_pages: 1,
     },
+    model_options: ["gpt-test"],
     ...overrides,
   };
 }

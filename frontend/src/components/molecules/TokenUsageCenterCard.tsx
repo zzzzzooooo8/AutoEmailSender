@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import clsx from 'clsx';
 import { ChevronDown, Loader2, RefreshCw, RotateCcw, Search } from 'lucide-react';
+import { NativeSelectField } from '@/components/atoms/NativeSelectField';
 import { getTokenUsageChart, listTokenUsageRecords } from '@/lib/api/tokenUsage';
 import type {
   TokenUsageChartDTO,
@@ -22,11 +24,24 @@ import {
 const PAGE_SIZE = 5;
 const defaultFeatureType: TokenUsageRecordFeatureFilterDTO = 'all';
 const defaultChartPreset: TokenUsageChartPresetDTO = 'last_24_hours';
+const chartAxisPaddingRatio = 1.08;
+const chartAxisNiceSteps = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
+const chartTooltipOffset = 14;
+const chartTooltipWidth = 288;
+const chartTooltipHeight = 150;
+const chartTooltipViewportPadding = 12;
 
 interface TokenUsageFiltersState {
   featureType: TokenUsageRecordFeatureFilterDTO;
+  modelName: string | null;
   startAt: string | null;
   endAt: string | null;
+}
+
+interface ChartTooltipState {
+  bucketStart: string;
+  x: number;
+  y: number;
 }
 
 const emptyResult: TokenUsageRecordListDTO = {
@@ -44,6 +59,7 @@ const emptyResult: TokenUsageRecordListDTO = {
     total_records: 0,
     total_pages: 0,
   },
+  model_options: [],
 };
 
 export function TokenUsageCenterCard() {
@@ -54,6 +70,7 @@ export function TokenUsageCenterCard() {
   const [error, setError] = useState<string | null>(null);
   const [featureType, setFeatureType] =
     useState<TokenUsageRecordFeatureFilterDTO>(defaultFeatureType);
+  const [modelName, setModelName] = useState<string | null>(null);
   const [startAt, setStartAt] = useState<string | null>(null);
   const [endAt, setEndAt] = useState<string | null>(null);
   const [page, setPage] = useState(1);
@@ -66,8 +83,8 @@ export function TokenUsageCenterCard() {
   const [chartError, setChartError] = useState<string | null>(null);
 
   const currentFilters = useMemo(
-    () => ({ featureType, startAt, endAt }),
-    [endAt, featureType, startAt],
+    () => ({ featureType, modelName, startAt, endAt }),
+    [endAt, featureType, modelName, startAt],
   );
 
   const loadRecords = useCallback(
@@ -79,6 +96,7 @@ export function TokenUsageCenterCard() {
           page: nextPage,
           pageSize: PAGE_SIZE,
           featureType: filters.featureType,
+          modelName: filters.modelName,
           startAt: filters.startAt,
           endAt: filters.endAt,
         });
@@ -106,6 +124,7 @@ export function TokenUsageCenterCard() {
         setChart(
           await getTokenUsageChart({
             featureType: filters.featureType,
+            modelName: filters.modelName,
             preset: nextPreset,
             startAt: filters.startAt,
             endAt: filters.endAt,
@@ -153,10 +172,12 @@ export function TokenUsageCenterCard() {
   const handleReset = () => {
     const resetFilters = {
       featureType: defaultFeatureType,
+      modelName: null,
       startAt: null,
       endAt: null,
     };
     setFeatureType(resetFilters.featureType);
+    setModelName(resetFilters.modelName);
     setStartAt(resetFilters.startAt);
     setEndAt(resetFilters.endAt);
     setChartPreset(defaultChartPreset);
@@ -218,9 +239,12 @@ export function TokenUsageCenterCard() {
         <div id="token-usage-center-content" className="space-y-5 px-6 pb-6">
           <TokenUsageFilters
             featureType={featureType}
+            modelName={modelName}
+            modelOptions={result.model_options}
             startAt={startAt}
             endAt={endAt}
             onFeatureTypeChange={setFeatureType}
+            onModelNameChange={setModelName}
             onStartAtChange={setStartAt}
             onEndAtChange={setEndAt}
             onSubmit={handleSearch}
@@ -284,41 +308,64 @@ export function TokenUsageCenterCard() {
 
 function TokenUsageFilters({
   featureType,
+  modelName,
+  modelOptions,
   startAt,
   endAt,
   onFeatureTypeChange,
+  onModelNameChange,
   onStartAtChange,
   onEndAtChange,
   onSubmit,
   onReset,
 }: {
   featureType: TokenUsageRecordFeatureFilterDTO;
+  modelName: string | null;
+  modelOptions: string[];
   startAt: string | null;
   endAt: string | null;
   onFeatureTypeChange: (value: TokenUsageRecordFeatureFilterDTO) => void;
+  onModelNameChange: (value: string | null) => void;
   onStartAtChange: (value: string | null) => void;
   onEndAtChange: (value: string | null) => void;
   onSubmit: () => void;
   onReset: () => void;
 }) {
+  const resolvedModelOptions = modelName
+    ? Array.from(new Set([...modelOptions, modelName])).sort()
+    : modelOptions;
   return (
-    <div className="grid gap-3 rounded-2xl border border-stone-200 bg-stone-50/70 p-4 md:grid-cols-[1fr_1fr_1fr_auto]">
-      <label className="block">
-        <span className="mb-2 block text-xs font-medium text-stone-500">功能筛选</span>
-        <select
-          aria-label="功能筛选"
-          value={featureType}
-          onChange={(event) =>
-            onFeatureTypeChange(event.target.value as TokenUsageRecordFeatureFilterDTO)
-          }
-          className="h-10 w-full rounded-xl border border-stone-200 bg-white px-3 text-sm text-stone-700"
-        >
-          <option value="all">全部功能</option>
-          <option value="crawl">智能爬取</option>
-          <option value="match_analysis">匹配分析</option>
-          <option value="draft_generation">AI 草稿</option>
-        </select>
-      </label>
+    <div className="grid gap-3 rounded-2xl border border-stone-200 bg-stone-50/70 p-4 md:grid-cols-[1fr_1fr_1fr_1fr_auto]">
+      <NativeSelectField
+        label="功能筛选"
+        ariaLabel="功能筛选"
+        value={featureType}
+        wrapperClassName="block"
+        shellClassName="h-10"
+        onChange={(event) =>
+          onFeatureTypeChange(event.target.value as TokenUsageRecordFeatureFilterDTO)
+        }
+      >
+        <option value="all">全部功能</option>
+        <option value="crawl">智能爬取</option>
+        <option value="match_analysis">匹配分析</option>
+        <option value="draft_generation">AI 草稿</option>
+      </NativeSelectField>
+      <NativeSelectField
+        label="模型筛选"
+        ariaLabel="模型筛选"
+        value={modelName ?? ''}
+        wrapperClassName="block"
+        shellClassName="h-10"
+        onChange={(event) => onModelNameChange(event.target.value || null)}
+      >
+        <option value="">全部模型</option>
+        {resolvedModelOptions.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </NativeSelectField>
       <label className="block">
         <span className="mb-2 block text-xs font-medium text-stone-500">开始时间</span>
         <input
@@ -488,14 +535,30 @@ function TokenUsageTrendChart({
   onPresetChange: (value: TokenUsageChartPresetDTO) => void;
   onRetry: () => void;
 }) {
+  const [activeBucketStart, setActiveBucketStart] = useState<string | null>(null);
+  const [tooltip, setTooltip] = useState<ChartTooltipState | null>(null);
   const maxTotal = Math.max(
     ...(chart?.buckets.map((bucket) => bucket.input_tokens + bucket.output_tokens) ?? [0]),
     0,
   );
+  const axisMax = resolveChartAxisMax(maxTotal);
+  const axisTicks = buildChartAxisTicks(axisMax);
   return (
     <section className="border-t border-stone-200 pt-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className="text-base font-semibold text-stone-900">输入 / 输出趋势</h3>
+        <div>
+          <h3 className="text-base font-semibold text-stone-900">输入 / 输出趋势</h3>
+          <div className="mt-2 flex flex-wrap gap-4 text-xs text-stone-500">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-sm bg-[#4665f6]" />
+              输入tokens
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-sm bg-[#96b4ff]" />
+              输出tokens
+            </span>
+          </div>
+        </div>
         <div className="flex flex-wrap gap-2">
           {chartPresetOptions.map((option) => (
             <button
@@ -531,47 +594,215 @@ function TokenUsageTrendChart({
           暂无趋势数据
         </div>
       ) : (
-        <div className="mt-4 overflow-x-auto rounded-2xl border border-stone-200 bg-[#fcfbf8] px-4 py-4">
-          <div className="flex min-w-max items-end gap-3">
-            {chart.buckets.map((bucket) => {
-              const segments = calculateStackedBarSegments({
-                inputTokens: bucket.input_tokens,
-                outputTokens: bucket.output_tokens,
-                maxTotalTokens: maxTotal,
-              });
-              return (
-                <div key={bucket.bucket_start} className="flex w-12 flex-col items-center gap-2">
-                  <div
-                    aria-label={`${bucket.bucket_label} 输入 ${bucket.input_tokens} 输出 ${bucket.output_tokens}`}
-                    className="flex h-36 w-7 flex-col justify-end overflow-hidden rounded-t-lg bg-stone-200"
-                    title={`输入 ${bucket.input_tokens.toLocaleString('zh-CN')} / 输出 ${bucket.output_tokens.toLocaleString('zh-CN')}`}
-                  >
-                    <div
-                      style={{ height: `${segments.outputPercent}%` }}
-                      className="w-full bg-sky-500"
-                    />
-                    <div
-                      style={{ height: `${segments.inputPercent}%` }}
-                      className="w-full bg-emerald-500"
-                    />
-                  </div>
-                  <span className="text-[11px] text-stone-500">{bucket.bucket_label}</span>
+        <div className="mt-4 overflow-x-auto rounded-2xl border border-stone-200 bg-white px-4 py-5 shadow-sm">
+          <div className="min-w-[720px] pl-24 pr-5">
+            <div className="relative h-72 border-b border-stone-500">
+              {axisTicks.map((tick) => (
+                <div
+                  key={tick}
+                  className={clsx(
+                    'absolute left-0 right-0',
+                    tick === 0
+                      ? 'border-t border-stone-500'
+                      : 'border-t border-dashed border-stone-200',
+                  )}
+                  style={{ bottom: `${(tick / axisMax) * 100}%` }}
+                >
+                  <span className="absolute right-[calc(100%+0.875rem)] top-0 -translate-y-1/2 whitespace-nowrap text-xs text-stone-500">
+                    {formatChartAxisTokenValue(tick)}
+                  </span>
                 </div>
-              );
-            })}
-            <div className="ml-2 self-start text-xs leading-6 text-stone-500">
-              <div>
-                <span className="text-emerald-600">■</span> 输入
+              ))}
+              <div className="relative z-10 flex h-full items-end justify-between gap-6">
+                {chart.buckets.map((bucket) => {
+                  const totalTokens = bucket.input_tokens + bucket.output_tokens;
+                  const segments = calculateStackedBarSegments({
+                    inputTokens: bucket.input_tokens,
+                    outputTokens: bucket.output_tokens,
+                    maxTotalTokens: axisMax,
+                  });
+                  const inputShare =
+                    totalTokens > 0 ? (bucket.input_tokens / totalTokens) * 100 : 0;
+                  const outputShare =
+                    totalTokens > 0 ? (bucket.output_tokens / totalTokens) * 100 : 0;
+                  const totalPercent =
+                    totalTokens > 0 ? Math.max(segments.totalPercent, 1.5) : 0;
+                  const active = activeBucketStart === bucket.bucket_start;
+                  const activeTooltip =
+                    active && tooltip?.bucketStart === bucket.bucket_start ? tooltip : null;
+
+                  return (
+                    <div
+                      key={bucket.bucket_start}
+                      className="relative flex h-full min-w-14 flex-1 flex-col items-center justify-end"
+                    >
+                      {active ? (
+                        <div className="pointer-events-none absolute inset-y-0 -left-3 -right-3 bg-[#f4f7ff]" />
+                      ) : null}
+                      <button
+                        type="button"
+                        aria-label={`${bucket.bucket_label} 输入 ${bucket.input_tokens} 输出 ${bucket.output_tokens} 总计 ${totalTokens}`}
+                        className="relative z-10 flex h-full w-full items-end justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+                        onMouseEnter={(event) => {
+                          setActiveBucketStart(bucket.bucket_start);
+                          setTooltip(createChartTooltipState(bucket.bucket_start, event));
+                        }}
+                        onMouseMove={(event) => {
+                          setTooltip(createChartTooltipState(bucket.bucket_start, event));
+                        }}
+                        onMouseLeave={() => {
+                          setActiveBucketStart(null);
+                          setTooltip(null);
+                        }}
+                        onFocus={() => setActiveBucketStart(bucket.bucket_start)}
+                        onBlur={() => {
+                          setActiveBucketStart(null);
+                          setTooltip(null);
+                        }}
+                      >
+                        <span
+                          className="flex w-14 max-w-[80%] min-w-8 flex-col overflow-hidden rounded-t-sm bg-stone-100 shadow-[0_0_0_1px_rgba(70,101,246,0.05)] transition-all"
+                          style={{ height: `${totalPercent}%` }}
+                        >
+                          {bucket.output_tokens > 0 ? (
+                            <span
+                              className="w-full bg-[#96b4ff]"
+                              style={{ height: `${outputShare}%` }}
+                            />
+                          ) : null}
+                          {bucket.input_tokens > 0 ? (
+                            <span
+                              className="w-full bg-[#4665f6]"
+                              style={{ height: `${inputShare}%` }}
+                            />
+                          ) : null}
+                        </span>
+                      </button>
+                      {activeTooltip ? (
+                        <div
+                          role="tooltip"
+                          className="pointer-events-none fixed z-[80] w-72 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-700 shadow-[0_16px_38px_-16px_rgba(41,37,36,0.38)]"
+                          style={{ left: activeTooltip.x, top: activeTooltip.y }}
+                        >
+                          <div className="flex items-center justify-between border-b border-stone-100 pb-2">
+                            <span className="font-medium text-stone-500">
+                              {bucket.bucket_label}
+                            </span>
+                            <span className="font-semibold text-stone-900">
+                              合计 {formatChartTokenNumber(totalTokens)} tokens
+                            </span>
+                          </div>
+                          <div className="space-y-2 pt-3">
+                            <div className="flex items-center justify-between gap-4">
+                              <span className="inline-flex items-center gap-2 text-stone-500">
+                                <span className="h-2.5 w-2.5 rounded-sm bg-[#4665f6]" />
+                                输入tokens
+                              </span>
+                              <span className="font-semibold text-stone-900">
+                                {formatChartTokenNumber(bucket.input_tokens)} tokens
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between gap-4">
+                              <span className="inline-flex items-center gap-2 text-stone-500">
+                                <span className="h-2.5 w-2.5 rounded-sm bg-[#96b4ff]" />
+                                输出tokens
+                              </span>
+                              <span className="font-semibold text-stone-900">
+                                {formatChartTokenNumber(bucket.output_tokens)} tokens
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
               </div>
-              <div>
-                <span className="text-sky-600">■</span> 输出
-              </div>
+            </div>
+            <div className="flex justify-between gap-6 pt-3">
+              {chart.buckets.map((bucket) => (
+                <span
+                  key={bucket.bucket_start}
+                  className="min-w-14 flex-1 text-center text-xs text-stone-500"
+                >
+                  {bucket.bucket_label}
+                </span>
+              ))}
             </div>
           </div>
         </div>
       )}
     </section>
   );
+}
+
+function createChartTooltipState(
+  bucketStart: string,
+  event: ReactMouseEvent<HTMLElement>,
+): ChartTooltipState {
+  const position = resolveChartTooltipPosition(event.clientX, event.clientY);
+  return {
+    bucketStart,
+    x: position.x,
+    y: position.y,
+  };
+}
+
+function resolveChartTooltipPosition(
+  clientX: number,
+  clientY: number,
+): { x: number; y: number } {
+  const viewportWidth = typeof window === 'undefined' ? 0 : window.innerWidth;
+  const viewportHeight = typeof window === 'undefined' ? 0 : window.innerHeight;
+  let x = clientX + chartTooltipOffset;
+  let y = clientY + chartTooltipOffset;
+
+  if (
+    viewportWidth > 0 &&
+    x + chartTooltipWidth + chartTooltipViewportPadding > viewportWidth
+  ) {
+    x = Math.max(
+      chartTooltipViewportPadding,
+      clientX - chartTooltipWidth - chartTooltipOffset,
+    );
+  }
+  if (
+    viewportHeight > 0 &&
+    y + chartTooltipHeight + chartTooltipViewportPadding > viewportHeight
+  ) {
+    y = Math.max(
+      chartTooltipViewportPadding,
+      clientY - chartTooltipHeight - chartTooltipOffset,
+    );
+  }
+
+  return { x: Math.round(x), y: Math.round(y) };
+}
+
+function resolveChartAxisMax(maxTotal: number): number {
+  if (maxTotal <= 0) {
+    return 1;
+  }
+  const paddedMax = maxTotal * chartAxisPaddingRatio;
+  const magnitude = 10 ** Math.floor(Math.log10(paddedMax));
+  const normalized = paddedMax / magnitude;
+  const step =
+    chartAxisNiceSteps.find((candidate) => normalized <= candidate) ?? 10;
+  return Math.max(5, Math.ceil(step * magnitude));
+}
+
+function buildChartAxisTicks(axisMax: number): number[] {
+  return Array.from({ length: 6 }, (_, index) =>
+    Math.round((axisMax / 5) * (5 - index)),
+  );
+}
+
+function formatChartAxisTokenValue(value: number): string {
+  return `${formatChartTokenNumber(value)} tokens`;
+}
+
+function formatChartTokenNumber(value: number): string {
+  return value.toLocaleString('zh-CN');
 }
 
 const chartPresetOptions: Array<{

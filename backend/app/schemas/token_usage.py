@@ -57,6 +57,7 @@ class TokenUsageRecordListRead(BaseModel):
     records: list[TokenUsageRecordRead] = Field(default_factory=list)
     summary: TokenUsageSummaryRead
     pagination: TokenUsagePaginationRead
+    model_options: list[str] = Field(default_factory=list)
 
 
 class TokenUsageChartBucketRead(BaseModel):

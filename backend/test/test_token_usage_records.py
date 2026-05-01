@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models import (
@@ -111,6 +112,7 @@ class TokenUsageRecordsServiceTests(unittest.TestCase):
                     status=CrawlJobStatus.RUNNING.value,
                     input_tokens=100,
                     output_tokens=20,
+                    cached_tokens=12,
                     total_tokens=120,
                     created_at=now - timedelta(minutes=4),
                     updated_at=now - timedelta(minutes=1),
@@ -147,6 +149,7 @@ class TokenUsageRecordsServiceTests(unittest.TestCase):
                         "usage": {
                             "prompt_tokens": 300,
                             "completion_tokens": 40,
+                            "cached_tokens": 24,
                             "total_tokens": 340,
                         },
                     },
@@ -277,6 +280,49 @@ class TokenUsageRecordsServiceTests(unittest.TestCase):
 
             await session.commit()
 
+    async def _seed_alternate_model_record(self) -> None:
+        now = datetime(2026, 4, 29, 10, 30, 0, tzinfo=UTC)
+        async with self.session_factory() as session:
+            identity = (await session.scalars(select(IdentityProfile))).first()
+            professor = (await session.scalars(select(Professor))).first()
+            if identity is None or professor is None:
+                raise AssertionError("seed_records must run before adding alternate model")
+
+            llm_profile = LLMProfile(
+                name="OpenAI Backup",
+                provider="openai",
+                api_key="test-key",
+                model_name="gpt-alt",
+            )
+            session.add(llm_profile)
+            await session.flush()
+
+            task = EmailTask(
+                identity_id=identity.id,
+                llm_profile_id=llm_profile.id,
+                professor_id=professor.id,
+                selected_material_ids=[],
+            )
+            session.add(task)
+            await session.flush()
+
+            session.add(
+                MatchAnalysisRun(
+                    email_task_id=task.id,
+                    professor_id=professor.id,
+                    identity_id=identity.id,
+                    llm_profile_id=llm_profile.id,
+                    success=True,
+                    match_score=88,
+                    prompt_tokens=700,
+                    completion_tokens=70,
+                    cached_tokens=7,
+                    total_tokens=770,
+                    created_at=now,
+                ),
+            )
+            await session.commit()
+
     def test_lists_recent_function_level_token_records(self) -> None:
         self._run_async(self._seed_records())
 
@@ -299,11 +345,13 @@ class TokenUsageRecordsServiceTests(unittest.TestCase):
         self.assertEqual(result.records[0].cached_tokens, 80)
         self.assertEqual(result.records[0].status, "success")
         self.assertEqual(result.records[1].total_tokens, 340)
+        self.assertEqual(result.records[1].cached_tokens, 24)
         self.assertEqual(result.records[2].status, "running")
+        self.assertEqual(result.records[2].cached_tokens, 12)
         self.assertEqual(result.summary.record_count, 3)
         self.assertEqual(result.summary.input_tokens, 600)
         self.assertEqual(result.summary.output_tokens, 90)
-        self.assertEqual(result.summary.cached_tokens, 80)
+        self.assertEqual(result.summary.cached_tokens, 116)
         self.assertEqual(result.summary.total_tokens, 690)
 
     def test_api_returns_token_usage_records(self) -> None:
@@ -376,6 +424,43 @@ class TokenUsageRecordsServiceTests(unittest.TestCase):
             [8, 7, 6],
         )
 
+    def test_filters_records_by_model_name_and_returns_model_options(self) -> None:
+        self._run_async(self._seed_records())
+        self._run_async(self._seed_alternate_model_record())
+
+        async def run_query():
+            async with self.session_factory() as session:
+                return await list_token_usage_records(
+                    session,
+                    page=1,
+                    page_size=5,
+                    model_name="gpt-alt",
+                )
+
+        result = self._run_async(run_query())
+
+        self.assertEqual(result.model_options, ["gpt-alt", "gpt-test"])
+        self.assertEqual(result.pagination.total_records, 1)
+        self.assertEqual([item.model_name for item in result.records], ["gpt-alt"])
+        self.assertEqual(result.summary.input_tokens, 700)
+
+    def test_model_options_come_from_configured_llm_profiles(self) -> None:
+        self._run_async(self._seed_records())
+        self._run_async(self._seed_alternate_model_record())
+
+        async def run_query():
+            async with self.session_factory() as session:
+                return await list_token_usage_records(
+                    session,
+                    page=1,
+                    page_size=5,
+                    feature_type="crawl",
+                )
+
+        result = self._run_async(run_query())
+
+        self.assertEqual(result.model_options, ["gpt-alt", "gpt-test"])
+
     def test_api_returns_paginated_filtered_records(self) -> None:
         self._run_async(self._seed_history_records())
 
@@ -430,6 +515,31 @@ class TokenUsageRecordsServiceTests(unittest.TestCase):
         self.assertEqual(result.buckets[-1].bucket_label, "10:00")
         self.assertEqual(result.buckets[-1].input_tokens, 100)
         self.assertEqual(result.buckets[-1].output_tokens, 10)
+
+    def test_builds_chart_filtered_by_model_name(self) -> None:
+        self._run_async(self._seed_records())
+        self._run_async(self._seed_alternate_model_record())
+        start_at = datetime(2026, 4, 29, 10, 0, 0, tzinfo=UTC)
+        end_at = datetime(2026, 4, 29, 10, 59, 0, tzinfo=UTC)
+
+        async def run_query():
+            async with self.session_factory() as session:
+                from app.services.token_usage_records import build_token_usage_chart
+
+                return await build_token_usage_chart(
+                    session,
+                    feature_type="all",
+                    model_name="gpt-alt",
+                    preset="custom",
+                    start_at=start_at,
+                    end_at=end_at,
+                    now=end_at,
+                )
+
+        result = self._run_async(run_query())
+
+        self.assertEqual(result.buckets[-1].input_tokens, 700)
+        self.assertEqual(result.buckets[-1].output_tokens, 70)
 
     def test_custom_chart_uses_daily_granularity_for_long_ranges(self) -> None:
         self._run_async(self._seed_history_records())

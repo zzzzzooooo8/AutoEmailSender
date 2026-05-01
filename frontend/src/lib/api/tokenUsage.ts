@@ -14,12 +14,14 @@ export interface TokenUsageRecordQuery {
   page: number;
   pageSize: number;
   featureType: TokenUsageRecordFeatureFilterDTO;
+  modelName: string | null;
   startAt: string | null;
   endAt: string | null;
 }
 
 export interface TokenUsageChartQuery {
   featureType: TokenUsageRecordFeatureFilterDTO;
+  modelName: string | null;
   preset: TokenUsageChartPresetDTO;
   startAt: string | null;
   endAt: string | null;

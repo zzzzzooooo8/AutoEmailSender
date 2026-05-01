@@ -17,6 +17,14 @@ TOKEN_USAGE_PATTERN = re.compile(
     r"'token_usage':\s*\{'completion_tokens':\s*(?P<output>\d+),\s*"
     r"'prompt_tokens':\s*(?P<input>\d+),\s*'total_tokens':\s*(?P<total>\d+)",
 )
+CACHED_TOKEN_PATTERNS = (
+    re.compile(
+        r"['\"](?:prompt_tokens_details|input_tokens_details|input_token_details)['\"]"
+        r":\s*\{[^{}]*(?:['\"]cached_tokens['\"]|['\"]cache_read['\"]):\s*(?P<cached>\d+)"
+    ),
+    re.compile(r"['\"]cached_tokens['\"]:\s*(?P<cached>\d+)"),
+    re.compile(r"['\"]cache_read['\"]:\s*(?P<cached>\d+)"),
+)
 
 
 async def create_initial_crawl_job_run(
@@ -153,20 +161,35 @@ async def accumulate_crawl_job_run_tokens(
     run.input_tokens += usage["input_tokens"]
     run.output_tokens += usage["output_tokens"]
     run.total_tokens += usage["total_tokens"]
+    cached_tokens = usage.get("cached_tokens")
+    if cached_tokens is not None:
+        run.cached_tokens = (run.cached_tokens or 0) + cached_tokens
     run.updated_at = datetime.now(UTC)
     return True
 
 
-def extract_token_usage(event: dict[str, object]) -> dict[str, int] | None:
+def extract_token_usage(event: dict[str, object]) -> dict[str, int | None] | None:
     haystack = _stringify_trace_payload(event)
     for pattern in (USAGE_METADATA_PATTERN, TOKEN_USAGE_PATTERN):
         match = pattern.search(haystack)
         if match:
-            return {
+            usage = {
                 "input_tokens": int(match.group("input")),
                 "output_tokens": int(match.group("output")),
                 "total_tokens": int(match.group("total")),
             }
+            cached_tokens = _extract_cached_tokens(haystack)
+            if cached_tokens is not None:
+                usage["cached_tokens"] = cached_tokens
+            return usage
+    return None
+
+
+def _extract_cached_tokens(haystack: str) -> int | None:
+    for pattern in CACHED_TOKEN_PATTERNS:
+        match = pattern.search(haystack)
+        if match:
+            return int(match.group("cached"))
     return None
 
 

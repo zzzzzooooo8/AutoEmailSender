@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "6d7e8f9a0b12"
+HEAD_REVISION = "c3d4e5f6a7b8"
 
 
 class ApiEndpointTests(unittest.TestCase):
@@ -1057,6 +1057,9 @@ class ApiEndpointTests(unittest.TestCase):
                     subject="测试草稿",
                     body_text="测试正文",
                     body_html="<p>测试正文</p>",
+                    prompt_tokens=80,
+                    completion_tokens=20,
+                    cached_tokens=32,
                 ),
             ),
         ):
@@ -1074,6 +1077,8 @@ class ApiEndpointTests(unittest.TestCase):
         finally:
             connection.close()
         self.assertIn("information extraction", refreshed_row[0])
+        provider_payload = self._latest_email_log_provider_payload()
+        self.assertEqual(provider_payload["usage"]["cached_tokens"], 32)
 
     def test_app_startup_auto_upgrades_stale_database(self) -> None:
         stale_dir = tempfile.TemporaryDirectory()
@@ -3792,6 +3797,7 @@ class ApiEndpointTests(unittest.TestCase):
         body_html: str,
         prompt_tokens: int | None = None,
         completion_tokens: int | None = None,
+        cached_tokens: int | None = None,
     ):
         from app.services.llm_runtime import (
             ChatCompletionUsage,
@@ -3815,6 +3821,7 @@ class ApiEndpointTests(unittest.TestCase):
                         if prompt_tokens is not None and completion_tokens is not None
                         else None
                     ),
+                    cached_tokens=cached_tokens,
                 )
                 if prompt_tokens is not None or completion_tokens is not None
                 else None
@@ -3909,6 +3916,26 @@ class ApiEndpointTests(unittest.TestCase):
             models=models,
             selected_model_available=selected_model_available,
         )
+
+    def _latest_email_log_provider_payload(self) -> dict[str, object]:
+        connection = sqlite3.connect(self.db_path)
+        try:
+            raw_payload = connection.execute(
+                """
+                SELECT provider_payload
+                FROM email_logs
+                WHERE direction = 'draft'
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ).fetchone()[0]
+        finally:
+            connection.close()
+        if isinstance(raw_payload, str):
+            parsed = json.loads(raw_payload)
+            if isinstance(parsed, dict):
+                return parsed
+        self.fail("未找到草稿 provider_payload")
 
     @staticmethod
     def _build_send_result(*, message_id: str, provider_payload: dict[str, str]):

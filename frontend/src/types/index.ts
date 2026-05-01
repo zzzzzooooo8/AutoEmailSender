@@ -691,6 +691,7 @@ export interface TokenUsageRecordListDTO {
   records: TokenUsageRecordDTO[];
   summary: TokenUsageSummaryDTO;
   pagination: TokenUsagePaginationDTO;
+  model_options: string[];
 }
 
 export interface TokenUsageChartBucketDTO {

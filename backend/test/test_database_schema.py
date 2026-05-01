@@ -13,7 +13,7 @@ from app.services.outreach_templates import import_outreach_template_file
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "b8c9d0e1f2a3"
+HEAD_REVISION = "c3d4e5f6a7b8"
 LEGACY_RUNTIME_REVISION = "7a1d5e42c9bd"
 
 
@@ -178,6 +178,7 @@ class DatabaseSchemaTests(unittest.TestCase):
                 "active_seconds",
                 "input_tokens",
                 "output_tokens",
+                "cached_tokens",
                 "total_tokens",
             }.issubset(self._get_columns("crawl_job_runs")),
         )

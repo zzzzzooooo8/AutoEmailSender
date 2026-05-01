@@ -341,6 +341,7 @@ async def generate_task_draft(
                         {
                             "prompt_tokens": usage.prompt_tokens,
                             "completion_tokens": usage.completion_tokens,
+                            "cached_tokens": usage.cached_tokens,
                             "total_tokens": usage.total_tokens,
                         }
                         if usage is not None

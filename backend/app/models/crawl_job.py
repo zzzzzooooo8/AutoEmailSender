@@ -117,6 +117,7 @@ class CrawlJobRun(Base):
     active_seconds: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    cached_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

@@ -13,6 +13,7 @@ from app.models import (
     CrawlJobStatus,
     EmailDirection,
     EmailLog,
+    LLMProfile,
     MatchAnalysisRun,
 )
 from app.schemas.token_usage import (
@@ -33,6 +34,7 @@ async def list_token_usage_records(
     page: int = 1,
     page_size: int = 5,
     feature_type: str = "all",
+    model_name: str | None = None,
     start_at: datetime | None = None,
     end_at: datetime | None = None,
 ) -> TokenUsageRecordListRead:
@@ -50,6 +52,7 @@ async def list_token_usage_records(
         _filter_records(
             candidates,
             feature_type=feature_type,
+            model_name=model_name,
             start_at=start_at,
             end_at=end_at,
         ),
@@ -70,6 +73,7 @@ async def list_token_usage_records(
             total_records=total_records,
             total_pages=total_pages,
         ),
+        model_options=await _list_model_options(session),
     )
 
 
@@ -80,6 +84,7 @@ async def build_token_usage_chart(
     preset: TokenUsageChartPreset = "last_24_hours",
     start_at: datetime | None = None,
     end_at: datetime | None = None,
+    model_name: str | None = None,
     now: datetime | None = None,
 ) -> TokenUsageChartRead:
     range_start, range_end, granularity = _resolve_chart_range(
@@ -92,6 +97,7 @@ async def build_token_usage_chart(
     records = _filter_records(
         candidates,
         feature_type=feature_type,
+        model_name=model_name,
         start_at=range_start,
         end_at=range_end + _bucket_duration(granularity) - timedelta(microseconds=1),
     )
@@ -134,12 +140,16 @@ def _filter_records(
     records: list[TokenUsageRecordRead],
     *,
     feature_type: str,
+    model_name: str | None,
     start_at: datetime | None,
     end_at: datetime | None,
 ) -> list[TokenUsageRecordRead]:
     filtered = records
     if feature_type != "all":
         filtered = [item for item in filtered if item.feature_type == feature_type]
+    resolved_model_name = _normalize_model_name(model_name)
+    if resolved_model_name is not None:
+        filtered = [item for item in filtered if item.model_name == resolved_model_name]
     if start_at is not None:
         comparable_start = _to_utc_naive(start_at)
         filtered = [
@@ -153,6 +163,26 @@ def _filter_records(
             item for item in filtered if _to_utc_naive(item.created_at) <= comparable_end
         ]
     return filtered
+
+
+def _normalize_model_name(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+async def _list_model_options(session: AsyncSession) -> list[str]:
+    model_names = await session.scalars(
+        select(LLMProfile.model_name).order_by(LLMProfile.model_name.asc()),
+    )
+    return sorted(
+        {
+            model_name.strip()
+            for model_name in model_names
+            if isinstance(model_name, str) and model_name.strip()
+        },
+    )
 
 
 async def _list_crawl_records(
@@ -244,7 +274,7 @@ def _crawl_run_to_record(run: CrawlJobRun) -> TokenUsageRecordRead:
         title=f"智能爬取 - {title_context or '未命名任务'}",
         input_tokens=run.input_tokens,
         output_tokens=run.output_tokens,
-        cached_tokens=None,
+        cached_tokens=run.cached_tokens,
         total_tokens=run.total_tokens,
         model_name=job.llm_profile.model_name if job and job.llm_profile else None,
         identity_name=None,
@@ -283,7 +313,7 @@ def _draft_log_to_record(log: EmailLog) -> TokenUsageRecordRead | None:
         title=f"{professor_name} - AI 草稿",
         input_tokens=usage.get("prompt_tokens"),
         output_tokens=usage.get("completion_tokens"),
-        cached_tokens=None,
+        cached_tokens=usage.get("cached_tokens"),
         total_tokens=usage.get("total_tokens"),
         model_name=log.llm_profile.model_name if log.llm_profile else None,
         identity_name=_identity_name(log.identity),
@@ -301,6 +331,7 @@ def _extract_usage(payload: dict[str, object] | None) -> dict[str, int | None] |
     return {
         "prompt_tokens": _int_or_none(raw_usage.get("prompt_tokens")),
         "completion_tokens": _int_or_none(raw_usage.get("completion_tokens")),
+        "cached_tokens": _int_or_none(raw_usage.get("cached_tokens")),
         "total_tokens": _int_or_none(raw_usage.get("total_tokens")),
     }
 
