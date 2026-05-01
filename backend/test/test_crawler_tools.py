@@ -274,6 +274,30 @@ class CrawlerToolTests(unittest.TestCase):
         self.assertEqual(payload["confidence"], 1.0)
         self.assertEqual(payload["field_confidence"], {"email": 1.0})
 
+    def test_normalize_candidate_payload_keeps_first_valid_email(self) -> None:
+        payload = normalize_candidate_payload(
+            ProfessorCandidatePayload(
+                name="张三",
+                email="zhang@example.edu, zhang.work@example.edu",
+            ),
+            university="示例大学",
+            school="计算机学院",
+        )
+
+        self.assertEqual(payload["email"], "zhang@example.edu")
+
+    def test_normalize_candidate_payload_uses_later_valid_email_when_first_segment_invalid(self) -> None:
+        payload = normalize_candidate_payload(
+            ProfessorCandidatePayload(
+                name="张三",
+                email="办公室邮箱：暂无；zhang (AT) example DOT edu",
+            ),
+            university="示例大学",
+            school="计算机学院",
+        )
+
+        self.assertEqual(payload["email"], "zhang@example.edu")
+
     def test_professor_candidate_payload_accepts_chinese_aliases(self) -> None:
         candidate = ProfessorCandidatePayload.model_validate(
             {

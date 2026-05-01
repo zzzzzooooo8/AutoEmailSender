@@ -576,7 +576,7 @@ def normalize_candidate_payload(
 
     return {
         "name": _clean_required(candidate.name),
-        "email": _clean_optional(candidate.email),
+        "email": _first_valid_email(candidate.email),
         "title": normalize_professor_title(_clean_optional(candidate.title)),
         "university": _clean_optional(candidate.university) or _clean_required(university),
         "school": _clean_optional(candidate.school) or _clean_required(school),
@@ -673,6 +673,13 @@ def extract_first_email_from_text(text: str) -> str | None:
     normalized = re.sub(r"\s+", "", normalized)
     normalized_emails = _EMAIL_PATTERN.findall(normalized)
     return normalized_emails[0] if normalized_emails else None
+
+
+def _first_valid_email(value: str | None) -> str | None:
+    cleaned = _clean_optional(value)
+    if not cleaned:
+        return None
+    return extract_first_email_from_text(cleaned)
 
 
 def extract_candidate_profile_enrichment(text: str) -> dict[str, Any]:
