@@ -403,6 +403,84 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second, snapshot)
         self.assertEqual(crawl_http.await_count, 1)
 
+    async def test_crawl_page_with_crawl4ai_retries_browser_for_template_placeholders(self) -> None:
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="http://cta.jxufe.edu.cn/home/teacherInfo/detail?fid=1",
+            university="江西财经大学",
+            school="计算机与人工智能学院",
+            session_factory=_FakeSessionFactory(),  # type: ignore[arg-type]
+        )
+        http_snapshot = PageSnapshot(
+            url=ctx.start_url,
+            title="教师详情",
+            text="{{name}}\n{{email}}\n{{data}}",
+            html="<html>{{name}}</html>",
+            links=[],
+            fetch_method="http",
+            status="succeeded",
+        )
+        browser_snapshot = PageSnapshot(
+            url=ctx.start_url,
+            title="教师详情",
+            text="张三\n教授\n邮箱：zhang@example.edu",
+            html="<html>张三</html>",
+            links=[],
+            fetch_method="browser",
+            status="succeeded",
+        )
+
+        with patch(
+            "app.services.crawler_tools.crawl_page_with_http",
+            new=AsyncMock(return_value=http_snapshot),
+        ), patch(
+            "app.services.crawler_tools.browser_investigate",
+            new=AsyncMock(return_value=browser_snapshot),
+        ) as browser:
+            actual = await crawl_page_with_crawl4ai(ctx, ctx.start_url, intent="profile")
+
+        self.assertEqual(actual, browser_snapshot)
+        browser.assert_awaited_once()
+
+    async def test_crawl_page_with_crawl4ai_retries_browser_for_site_error_page(self) -> None:
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="http://sim.jxufe.edu.cn/#/staff/detail/5",
+            university="江西财经大学",
+            school="计算机与人工智能学院",
+            session_factory=_FakeSessionFactory(),  # type: ignore[arg-type]
+        )
+        http_snapshot = PageSnapshot(
+            url=ctx.start_url,
+            title="江西财经大学",
+            text="FineCMS error\nError Number: 1064\nSQL syntax",
+            html="<html>FineCMS error</html>",
+            links=[],
+            fetch_method="http",
+            status="succeeded",
+        )
+        browser_snapshot = PageSnapshot(
+            url=ctx.start_url,
+            title="教师详情",
+            text="李四\n副教授\n邮箱：li@example.edu",
+            html="<html>李四</html>",
+            links=[],
+            fetch_method="browser",
+            status="succeeded",
+        )
+
+        with patch(
+            "app.services.crawler_tools.crawl_page_with_http",
+            new=AsyncMock(return_value=http_snapshot),
+        ), patch(
+            "app.services.crawler_tools.browser_investigate",
+            new=AsyncMock(return_value=browser_snapshot),
+        ) as browser:
+            actual = await crawl_page_with_crawl4ai(ctx, ctx.start_url, intent="profile")
+
+        self.assertEqual(actual, browser_snapshot)
+        browser.assert_awaited_once()
+
     async def test_crawl4ai_browser_fetch_offloads_to_thread_on_windows_selector_loop(self) -> None:
         ctx = CrawlToolContext(
             job_id=1,

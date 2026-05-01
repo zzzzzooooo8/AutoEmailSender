@@ -28,6 +28,13 @@ MAX_LINKS = 200
 MAX_HTTP_REDIRECTS = 5
 MAX_RETRIES_FOR_BROWSER_RENDER = 2
 CRAWL4AI_BROWSER_FALLBACK_STATUS = {403, 412, 429}
+INVALID_PROFILE_PAGE_MARKERS = (
+    "{{name}}",
+    "{{email}}",
+    "{{data}}",
+    "FineCMS error",
+    "SQL syntax",
+)
 JS_RENDER_TIMEOUT_MS = 30000
 CRAWL4AI_BROWSER_WAIT_TIMEOUT_MS = 15000
 CRAWL4AI_BROWSER_DELAY_SECONDS = 1.5
@@ -857,6 +864,9 @@ def _should_use_crawl4ai_fallback(snapshot: PageSnapshot) -> bool:
     if snapshot.suspicious_empty:
         return True
 
+    if _looks_like_unrendered_or_error_profile_page(snapshot):
+        return True
+
     if snapshot.status == "failed":
         error_message = (snapshot.error_message or "").lower()
         if any(str(marker) in error_message for marker in CRAWL4AI_BROWSER_FALLBACK_STATUS):
@@ -895,6 +905,11 @@ def _should_use_crawl4ai_fallback(snapshot: PageSnapshot) -> bool:
             "security check",
         )
     )
+
+
+def _looks_like_unrendered_or_error_profile_page(snapshot: PageSnapshot) -> bool:
+    haystack = f"{snapshot.title or ''}\n{snapshot.text}\n{snapshot.html[:2000]}"
+    return any(marker in haystack for marker in INVALID_PROFILE_PAGE_MARKERS)
 
 
 def _is_http_blocked_snapshot(snapshot: PageSnapshot) -> bool:
