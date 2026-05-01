@@ -297,6 +297,26 @@ class CrawlerToolTests(unittest.TestCase):
         self.assertEqual(candidate.source_url, "https://example.edu/faculty")
         self.assertEqual(candidate.confidence, 0.92)
 
+    def test_professor_candidate_payload_normalizes_common_model_type_drift(self) -> None:
+        candidate = ProfessorCandidatePayload.model_validate(
+            {
+                "name": "张三",
+                "recent_papers": "",
+                "field_confidence": {
+                    "overall": 0.9,
+                    "fields": {"name": 1.0, "email": 0.95},
+                },
+                "evidence": "从导师列表页提取",
+            }
+        )
+
+        self.assertEqual(candidate.recent_papers, [])
+        self.assertEqual(
+            candidate.field_confidence,
+            {"overall": 0.9, "name": 1.0, "email": 0.95},
+        )
+        self.assertEqual(candidate.evidence, {"summary": "从导师列表页提取"})
+
     def test_build_candidate_enrichment_prompt_contains_saved_candidate_context(self) -> None:
         candidate = CrawlCandidate(
             id=1,

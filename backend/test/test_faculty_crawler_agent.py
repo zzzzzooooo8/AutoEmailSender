@@ -68,28 +68,28 @@ class FacultyCrawlerAgentSaveResultTests(unittest.TestCase):
             [
                 {
                     "name": "张三",
-                    "recent_papers": [],
-                    "field_confidence": {"name": 0.9},
-                    "evidence": {"source": "页面"},
-                },
-                {
-                    "name": "李四",
-                    "recent_papers": "Paper A",
+                    "recent_papers": "",
                     "field_confidence": 0.8,
                     "evidence": "页面",
+                },
+                {
+                    "recent_papers": [],
                 },
             ]
         )
 
         self.assertEqual([payload.name for payload in payloads], ["张三"])
+        self.assertEqual(payloads[0].recent_papers, [])
+        self.assertEqual(payloads[0].field_confidence, {"overall": 0.8})
+        self.assertEqual(payloads[0].evidence, {"summary": "页面"})
         self.assertEqual(len(failed_items), 1)
         self.assertEqual(failed_items[0]["index"], 1)
-        self.assertEqual(failed_items[0]["name"], "李四")
-        self.assertIn("recent_papers", failed_items[0]["reason"])
+        self.assertIsNone(failed_items[0]["name"])
+        self.assertIn("name", failed_items[0]["reason"])
 
 
 class FacultyCrawlerAgentCompactionTests(unittest.TestCase):
-    def test_compact_save_tool_history_replaces_old_save_pairs_with_summary(self) -> None:
+    def test_compact_save_tool_history_keeps_saved_candidate_identities(self) -> None:
         messages = [
             HumanMessage(content="入口任务"),
             AIMessage(
@@ -97,7 +97,15 @@ class FacultyCrawlerAgentCompactionTests(unittest.TestCase):
                 tool_calls=[
                     {
                         "name": "save_professor_candidates",
-                        "args": {"candidates": [{"name": "张三"}, {"name": "李四"}]},
+                        "args": {
+                            "candidates": [
+                                {
+                                    "name": "张三",
+                                    "profile_url": "https://example.edu/zhang",
+                                },
+                                {"name": "李四"},
+                            ]
+                        },
                         "id": "call_1",
                     }
                 ],
@@ -129,9 +137,10 @@ class FacultyCrawlerAgentCompactionTests(unittest.TestCase):
         self.assertIsInstance(compacted[0], HumanMessage)
         self.assertIsInstance(compacted[1], HumanMessage)
         self.assertIn("已成功保存 3 条", serialized)
-        self.assertNotIn("张三", serialized)
-        self.assertNotIn("李四", serialized)
-        self.assertNotIn("王五", serialized)
+        self.assertIn("最近已保存候选", serialized)
+        self.assertIn("张三 (https://example.edu/zhang)", serialized)
+        self.assertIn("李四", serialized)
+        self.assertIn("王五", serialized)
 
     def test_compact_save_tool_history_keeps_rejected_batch_failures(self) -> None:
         messages = [

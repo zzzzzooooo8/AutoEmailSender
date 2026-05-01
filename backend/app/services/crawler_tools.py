@@ -14,7 +14,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 import httpcore
 from bs4 import BeautifulSoup
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -110,6 +110,65 @@ class ProfessorCandidatePayload(BaseModel):
         default=None,
         validation_alias=AliasChoices("evidence", "证据"),
     )
+
+    @field_validator("research_direction", mode="before")
+    @classmethod
+    def _normalize_research_direction(cls, value: object) -> object:
+        if isinstance(value, list):
+            return "；".join(str(item).strip() for item in value if str(item).strip())
+        return value
+
+    @field_validator("recent_papers", mode="before")
+    @classmethod
+    def _normalize_recent_papers(cls, value: object) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if isinstance(value, str):
+            return [item.strip() for item in re.split(r"[|；;\n]+", value) if item.strip()]
+        return []
+
+    @field_validator("field_confidence", mode="before")
+    @classmethod
+    def _normalize_field_confidence(cls, value: object) -> dict[str, float] | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None
+            numeric = _try_float(stripped)
+            return {"overall": numeric} if numeric is not None else None
+        if isinstance(value, (int, float)):
+            return {"overall": float(value)}
+        if not isinstance(value, dict):
+            return None
+
+        normalized: dict[str, float] = {}
+        for key, item in value.items():
+            if str(key) == "fields" and isinstance(item, dict):
+                for nested_key, nested_item in item.items():
+                    numeric = _try_float(nested_item)
+                    if numeric is not None and str(nested_key).strip():
+                        normalized[str(nested_key).strip()] = numeric
+                continue
+            numeric = _try_float(item)
+            if numeric is not None and str(key).strip():
+                normalized[str(key).strip()] = numeric
+        return normalized or None
+
+    @field_validator("evidence", mode="before")
+    @classmethod
+    def _normalize_evidence(cls, value: object) -> dict[str, object] | None:
+        if value is None:
+            return None
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            stripped = value.strip()
+            return {"summary": stripped} if stripped else None
+        return None
 
 
 class CandidateEnrichmentPayload(BaseModel):
@@ -1176,6 +1235,13 @@ def _clean_optional(value: object) -> str | None:
         return None
     cleaned = str(value).strip()
     return cleaned or None
+
+
+def _try_float(value: object) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _clamp_confidence(value: object) -> float:

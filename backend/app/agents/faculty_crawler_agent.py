@@ -43,6 +43,8 @@ CONTROLLED_CRAWLER_TOOL_NAMES = frozenset(
 )
 MAX_TRACE_EVENT_CHARS = 20000
 SAVE_TOOL_NAME = "save_professor_candidates"
+MAX_COMPACTED_SAVED_CANDIDATES = 30
+MAX_COMPACTED_IDENTITY_CHARS = 180
 
 
 FACULTY_CRAWLER_SYSTEM_PROMPT = """你是 AutoEmailSender 的受控高校导师信息抓取代理。
@@ -183,8 +185,10 @@ def _is_save_tool_message(message: Any, save_call_ids: set[str]) -> bool:
 
 
 def _build_save_history_summary(messages: list[Any], save_call_ids: set[str]) -> str:
+    save_call_candidates = _collect_save_call_candidate_identities(messages, save_call_ids)
     total_saved = 0
     last_status = "unknown"
+    saved_lines: list[str] = []
     failed_lines: list[str] = []
     for message in messages:
         if not _is_save_tool_message(message, save_call_ids):
@@ -192,8 +196,16 @@ def _build_save_history_summary(messages: list[Any], save_call_ids: set[str]) ->
         parsed = _parse_tool_json_content(getattr(message, "content", ""))
         if parsed is None:
             continue
+        tool_call_id = getattr(message, "tool_call_id", None)
+        saved_count = _coerce_int(parsed.get("saved_count"), 0)
         total_saved = _coerce_int(parsed.get("total_saved_count"), total_saved)
         last_status = str(parsed.get("batch_status") or last_status)
+        if (
+            parsed.get("batch_status") == "saved"
+            and saved_count > 0
+            and isinstance(tool_call_id, str)
+        ):
+            saved_lines.extend(save_call_candidates.get(tool_call_id, [])[:saved_count])
         failed_items = parsed.get("failed_items")
         if not isinstance(failed_items, list):
             continue
@@ -205,14 +217,87 @@ def _build_save_history_summary(messages: list[Any], save_call_ids: set[str]) ->
             failed_lines.append(f"- {name}: {reason}")
 
     failure_text = "\n".join(failed_lines[-10:]) if failed_lines else "无"
+    saved_text = (
+        "\n".join(saved_lines[-MAX_COMPACTED_SAVED_CANDIDATES:])
+        if saved_lines
+        else "无"
+    )
     return (
         "候选保存历史已压缩。\n"
         f"从任务开始到现在已成功保存 {total_saved} 条。\n"
         f"最近保存批次状态：{last_status}。\n"
+        f"最近已保存候选（用于避免重复保存）：\n{saved_text}\n"
         f"最近失败项：\n{failure_text}\n"
-        "继续从页面中尚未保存的候选位置往后提取；"
+        "跳过上述已保存候选，继续从页面中尚未保存的候选位置往后提取；"
         "如果上一批被 rejected，请优先修正失败项并重试该批。"
     )
+
+
+def _collect_save_call_candidate_identities(
+    messages: list[Any],
+    save_call_ids: set[str],
+) -> dict[str, list[str]]:
+    identities_by_call_id: dict[str, list[str]] = {}
+    for message in messages:
+        tool_calls = getattr(message, "tool_calls", []) or []
+        for tool_call in tool_calls:
+            if not isinstance(tool_call, dict):
+                continue
+            if tool_call.get("name") != SAVE_TOOL_NAME:
+                continue
+            call_id = tool_call.get("id")
+            if not isinstance(call_id, str) or call_id not in save_call_ids:
+                continue
+            args = tool_call.get("args")
+            if not isinstance(args, dict):
+                continue
+            candidates = args.get("candidates")
+            if not isinstance(candidates, list):
+                continue
+            identities_by_call_id[call_id] = [
+                f"- {identity}"
+                for candidate in candidates
+                if (identity := _format_candidate_identity(candidate)) is not None
+            ]
+    return identities_by_call_id
+
+
+def _format_candidate_identity(candidate: object) -> str | None:
+    if not isinstance(candidate, dict):
+        return None
+
+    name = _summary_text(candidate.get("name") or candidate.get("姓名"))
+    profile_url = _summary_text(
+        candidate.get("profile_url")
+        or candidate.get("主页URL")
+        or candidate.get("主页链接")
+        or candidate.get("个人主页")
+    )
+    email = _summary_text(candidate.get("email") or candidate.get("邮箱"))
+    source_url = _summary_text(
+        candidate.get("source_url")
+        or candidate.get("证据来源")
+        or candidate.get("来源页面")
+        or candidate.get("页面URL")
+    )
+
+    identity = name or email or profile_url or source_url
+    if not identity:
+        return None
+
+    detail = profile_url or email or source_url
+    if detail and detail != identity:
+        identity = f"{identity} ({detail})"
+
+    if len(identity) > MAX_COMPACTED_IDENTITY_CHARS:
+        identity = f"{identity[: MAX_COMPACTED_IDENTITY_CHARS - 3]}..."
+    return identity
+
+
+def _summary_text(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split())
 
 
 def _parse_tool_json_content(content: object) -> dict[str, Any] | None:
