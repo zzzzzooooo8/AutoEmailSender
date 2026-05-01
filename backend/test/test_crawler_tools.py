@@ -455,6 +455,9 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch(
+            "app.services.crawler_tools._crawl_known_profile_api",
+            new=AsyncMock(return_value=None),
+        ), patch(
             "app.services.crawler_tools.crawl_page_with_http",
             new=AsyncMock(return_value=http_snapshot),
         ), patch(
@@ -494,6 +497,9 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch(
+            "app.services.crawler_tools._crawl_known_profile_api",
+            new=AsyncMock(return_value=None),
+        ), patch(
             "app.services.crawler_tools.crawl_page_with_http",
             new=AsyncMock(return_value=http_snapshot),
         ), patch(
@@ -504,6 +510,88 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(actual, browser_snapshot)
         browser.assert_awaited_once()
+
+    async def test_crawl_page_with_crawl4ai_fetches_sim_hash_staff_profile_api(self) -> None:
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="http://sim.jxufe.edu.cn/#/staff/detail/5",
+            university="江西财经大学",
+            school="计算机与人工智能学院",
+            session_factory=_FakeSessionFactory(),  # type: ignore[arg-type]
+        )
+        requested_urls: list[str] = []
+
+        class FakeAsyncClient:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                _ = args, kwargs
+
+            async def __aenter__(self) -> "FakeAsyncClient":
+                return self
+
+            async def __aexit__(self, *args: object) -> None:
+                _ = args
+
+            async def get(self, url: str, *args: object, **kwargs: object) -> httpx.Response:
+                _ = args, kwargs
+                requested_urls.append(url)
+                return httpx.Response(
+                    200,
+                    json={
+                        "code": 200,
+                        "data": {
+                            "name": "万常选",
+                            "birthday": "1962-07",
+                            "researchDirection": "数据挖掘与知识工程、Web数据管理与信息检索",
+                            "content": "<p>E-mail：wanchangxuan@263.net</p>",
+                        },
+                    },
+                    request=httpx.Request("GET", url),
+                )
+
+        with patch(
+            "app.services.crawler_tools.httpx.AsyncClient",
+            new=FakeAsyncClient,
+        ), patch(
+            "app.services.crawler_tools.crawl_page_with_http",
+            new=AsyncMock(
+                return_value=PageSnapshot(
+                    url=ctx.start_url,
+                    title="信息管理与数学学院",
+                    text="",
+                    html="<html><div id='app'></div></html>",
+                    links=[],
+                    fetch_method="http",
+                    status="succeeded",
+                    suspicious_empty=True,
+                ),
+            ),
+        ) as http_fetch, patch(
+            "app.services.crawler_tools.browser_investigate",
+            new=AsyncMock(
+                return_value=PageSnapshot(
+                    url=ctx.start_url,
+                    title="江西财经大学",
+                    text="FineCMS error",
+                    html="<html>FineCMS error</html>",
+                    links=[],
+                    fetch_method="browser",
+                    status="succeeded",
+                ),
+            ),
+        ) as browser:
+            actual = await crawl_page_with_crawl4ai(ctx, ctx.start_url, intent="profile")
+
+        self.assertEqual(
+            requested_urls,
+            ["http://sim.jxufe.edu.cn/prod-api/website/staff/search/5"],
+        )
+        self.assertEqual(actual.url, ctx.start_url)
+        self.assertEqual(actual.title, "万常选")
+        self.assertIn("万常选", actual.text)
+        self.assertIn("数据挖掘与知识工程", actual.text)
+        self.assertIn("wanchangxuan@263.net", actual.text)
+        http_fetch.assert_not_awaited()
+        browser.assert_not_awaited()
 
     async def test_crawl4ai_browser_fetch_offloads_to_thread_on_windows_selector_loop(self) -> None:
         ctx = CrawlToolContext(

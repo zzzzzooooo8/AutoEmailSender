@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from html import escape
 import hashlib
 import ipaddress
 import platform
@@ -41,6 +42,8 @@ CRAWL4AI_BROWSER_DELAY_SECONDS = 1.5
 CRAWL4AI_BROWSER_WAIT_SELECTOR = "css:body"
 UNSAFE_CRAWL_URL_MESSAGE = "URL 不允许指向本机、内网或不可解析地址"
 MULTI_LABEL_PUBLIC_SUFFIXES = ("ac.cn", "com.cn", "edu.cn", "gov.cn", "net.cn", "org.cn")
+SIM_JXUFE_STAFF_HOST = "sim.jxufe.edu.cn"
+SIM_JXUFE_STAFF_DETAIL_FRAGMENT_PATTERN = re.compile(r"^/?staff/detail/(?P<staff_id>\d+)/?$")
 SAVE_SAME_BATCH_FAILURE_LIMIT = 2
 SAVE_TOTAL_FAILURE_LIMIT = 4
 SAME_BATCH_SAVE_FAILURE_REASON = (
@@ -812,6 +815,10 @@ async def crawl_page_with_crawl4ai(
     if cached is not None:
         return cached
 
+    api_snapshot = await _crawl_known_profile_api(ctx, absolute_url, intent=intent)
+    if api_snapshot is not None:
+        return api_snapshot
+
     if ctx.is_http_blocked(absolute_url):
         return await browser_investigate(ctx, absolute_url, goal="", intent=intent)
 
@@ -827,6 +834,94 @@ async def crawl_page_with_crawl4ai(
         )
     ctx.remember_page_snapshot(http_snapshot)
     return http_snapshot
+
+
+async def _crawl_known_profile_api(
+    ctx: CrawlToolContext,
+    absolute_url: str,
+    *,
+    intent: CrawlPageIntent,
+) -> PageSnapshot | None:
+    if intent != "profile":
+        return None
+    return await _crawl_sim_jxufe_staff_profile_api(ctx, absolute_url)
+
+
+async def _crawl_sim_jxufe_staff_profile_api(
+    ctx: CrawlToolContext,
+    profile_url: str,
+) -> PageSnapshot | None:
+    api_url = _sim_jxufe_staff_profile_api_url(profile_url)
+    if api_url is None:
+        return None
+
+    try:
+        safe_url = _resolve_safe_public_crawl_url(api_url)
+        transport = _build_safe_crawl_transport(
+            hostname=safe_url.hostname,
+            resolved_ip=safe_url.resolved_ips[0],
+        )
+        async with httpx.AsyncClient(
+            follow_redirects=False,
+            timeout=20.0,
+            transport=transport,
+            trust_env=False,
+        ) as client:
+            response = await client.get(
+                api_url,
+                headers={"User-Agent": "AutoEmailSenderCrawler/0.1"},
+            )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception:
+        return None
+
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict) or payload.get("code") != 200:
+        return None
+
+    snapshot = _sim_jxufe_staff_api_data_to_snapshot(profile_url, data)
+    await record_page_snapshot(ctx, snapshot)
+    ctx.remember_page_snapshot(snapshot)
+    return snapshot
+
+
+def _sim_jxufe_staff_profile_api_url(profile_url: str) -> str | None:
+    parsed = urlparse(profile_url)
+    if (parsed.hostname or "").lower() != SIM_JXUFE_STAFF_HOST:
+        return None
+
+    match = SIM_JXUFE_STAFF_DETAIL_FRAGMENT_PATTERN.match(parsed.fragment)
+    if match is None:
+        return None
+
+    return urljoin(
+        parsed._replace(fragment="", path="/").geturl(),
+        f"/prod-api/website/staff/search/{match.group('staff_id')}",
+    )
+
+
+def _sim_jxufe_staff_api_data_to_snapshot(profile_url: str, data: dict[str, object]) -> PageSnapshot:
+    name = _clean_optional(data.get("name")) or "教师详情"
+    birthday = _clean_optional(data.get("birthday"))
+    research_direction = _clean_optional(data.get("researchDirection"))
+    content = _clean_optional(data.get("content")) or ""
+
+    fields = [f"<h1>{escape(name)}</h1>"]
+    if birthday:
+        fields.append(f"<p>出生年月：{escape(birthday)}</p>")
+    if research_direction:
+        fields.append(f"<p>研究方向：{escape(research_direction)}</p>")
+    fields.append(content)
+
+    html = (
+        "<!doctype html><html><head>"
+        f"<title>{escape(name)}</title>"
+        "</head><body>"
+        + "\n".join(fields)
+        + "</body></html>"
+    )
+    return html_to_snapshot(profile_url, html, "http")
 
 
 async def browser_investigate(
