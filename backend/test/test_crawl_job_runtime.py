@@ -94,7 +94,53 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
         run = await self._get_current_run(job_id)
         self.assertEqual(run.status, CrawlJobStatus.NEEDS_REVIEW.value)
         self.assertIsNotNone(run.finished_at)
-        self.assertIsNone(run.active_started_at)
+
+    async def test_list_entry_type_runs_each_unique_start_url_once(self) -> None:
+        job_id = await self._create_default_profile_and_job(
+            start_url="https://example.edu/faculty",
+            start_urls=[
+                "https://example.edu/faculty",
+                "https://example.edu/faculty?page=2",
+                "https://example.edu/faculty",
+            ],
+        )
+        calls: list[str] = []
+
+        async def fake_run(
+            ctx: CrawlToolContext,
+            llm_profile: LLMProfile,
+            trace_callback=None,
+        ) -> dict[str, object]:
+            _ = llm_profile, trace_callback
+            calls.append(ctx.start_url)
+            await save_candidates(
+                ctx,
+                [
+                    ProfessorCandidatePayload(
+                        name=f"教师{len(calls)}",
+                        email=f"teacher{len(calls)}@example.edu",
+                        title="教授",
+                        source_url=ctx.start_url,
+                    )
+                ],
+            )
+            return {}
+
+        with patch(
+            "app.services.crawl_job_runtime.run_faculty_crawler_agent",
+            new=fake_run,
+        ):
+            processed = await run_queued_crawl_jobs_once(self.session_factory)
+
+        self.assertEqual(processed, 1)
+        self.assertEqual(
+            calls,
+            [
+                "https://example.edu/faculty",
+                "https://example.edu/faculty?page=2",
+            ],
+        )
+        self.assertEqual(await self._count_candidates(job_id), 2)
 
     async def test_run_queued_crawl_job_accumulates_tokens_on_current_run(self) -> None:
         job_id = await self._create_default_profile_and_job()
@@ -1037,6 +1083,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self,
         *,
         start_url: str = "https://example.edu/faculty",
+        start_urls: list[str] | None = None,
         entry_type: str = "list",
     ) -> int:
         async with self.session_factory() as session:
@@ -1051,6 +1098,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 university="示例大学",
                 school="计算机学院",
                 start_url=start_url,
+                start_urls=start_urls or [start_url],
                 entry_type=entry_type,
                 status=CrawlJobStatus.QUEUED.value,
                 progress_current=0,

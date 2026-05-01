@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.services.crawler_tools import (
     UNSAFE_CRAWL_URL_MESSAGE,
@@ -28,6 +28,7 @@ class CrawlJobCreatePayload(BaseModel):
     university: str
     school: str
     start_url: str
+    start_urls: list[str] | None = None
     entry_type: CrawlJobEntryTypeDTO = "list"
     llm_profile_id: int | None = None
 
@@ -36,6 +37,15 @@ class CrawlJobCreatePayload(BaseModel):
     def _strip_required_text(cls, value: object) -> object:
         if isinstance(value, str):
             return value.strip()
+        return value
+
+    @field_validator("start_urls", mode="before")
+    @classmethod
+    def _strip_start_urls(cls, value: object) -> object:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [item.strip() if isinstance(item, str) else item for item in value]
         return value
 
     @field_validator("university", "school", "start_url")
@@ -56,6 +66,30 @@ class CrawlJobCreatePayload(BaseModel):
             raise ValueError(UNSAFE_CRAWL_URL_MESSAGE) from exc
         return value
 
+    @model_validator(mode="after")
+    def _normalize_start_urls(self) -> "CrawlJobCreatePayload":
+        urls = self.start_urls or [self.start_url]
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for url in urls:
+            if not isinstance(url, str) or not url:
+                raise ValueError("页面 URL 不能为空")
+            if not url.startswith(("http://", "https://")):
+                raise ValueError("页面 URL 必须以 http:// 或 https:// 开头")
+            try:
+                validate_safe_public_crawl_url(url)
+            except ValueError as exc:
+                raise ValueError(UNSAFE_CRAWL_URL_MESSAGE) from exc
+            if url in seen:
+                continue
+            seen.add(url)
+            normalized.append(url)
+        if not normalized:
+            raise ValueError("页面 URL 不能为空")
+        self.start_url = normalized[0]
+        self.start_urls = normalized
+        return self
+
 
 class CrawlJobRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -64,6 +98,7 @@ class CrawlJobRead(BaseModel):
     university: str
     school: str
     start_url: str
+    start_urls: list[str] | None = None
     entry_type: CrawlJobEntryTypeDTO = "list"
     llm_profile_id: int | None
     status: CrawlJobStatusDTO
@@ -72,6 +107,11 @@ class CrawlJobRead(BaseModel):
     error_message: str | None
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode="after")
+    def _normalize_read_start_urls(self) -> "CrawlJobRead":
+        self.start_urls = self.start_urls or [self.start_url]
+        return self
 
 
 class CrawlJobRetryPayload(BaseModel):

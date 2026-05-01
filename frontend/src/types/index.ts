@@ -314,6 +314,7 @@ export interface CrawlJobCreatePayloadDTO {
   university: string;
   school: string;
   start_url: string;
+  start_urls?: string[];
   entry_type: CrawlJobEntryTypeDTO;
   llm_profile_id: number | null;
 }
@@ -323,6 +324,7 @@ export interface CrawlJobDTO {
   university: string;
   school: string;
   start_url: string;
+  start_urls?: string[];
   entry_type: CrawlJobEntryTypeDTO;
   llm_profile_id: number | null;
   status: CrawlJobStatusDTO;

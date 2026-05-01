@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -105,9 +106,10 @@ async def run_queued_crawl_jobs_once(
         await session.commit()
 
         job_id = job.id
+        start_urls = _get_crawl_job_start_urls(job)
         ctx = CrawlToolContext(
             job_id=job.id,
-            start_url=job.start_url,
+            start_url=start_urls[0],
             university=job.university,
             school=job.school,
             session_factory=session_factory,
@@ -118,15 +120,37 @@ async def run_queued_crawl_jobs_once(
         await _append_agent_trace(session_factory, job_id, event)
 
     try:
-        if job.entry_type == "profile":
-            await _run_profile_crawl_job(
-                session_factory,
-                ctx,
-                llm_profile=llm_profile,
-                trace_callback=trace_callback,
-            )
-        else:
-            await run_faculty_crawler_agent(ctx, llm_profile, trace_callback=trace_callback)
+        for start_url in start_urls:
+            entry_ctx = replace(ctx, start_url=start_url)
+            try:
+                if job.entry_type == "profile":
+                    await _run_profile_crawl_job(
+                        session_factory,
+                        entry_ctx,
+                        llm_profile=llm_profile,
+                        trace_callback=trace_callback,
+                    )
+                else:
+                    await run_faculty_crawler_agent(
+                        entry_ctx,
+                        llm_profile,
+                        trace_callback=trace_callback,
+                    )
+            except (CrawlJobPaused, CrawlJobCanceled, CrawlJobSaveBudgetExceeded, asyncio.CancelledError):
+                raise
+            except Exception as exc:
+                if len(start_urls) == 1:
+                    raise
+                await _emit_trace_event(
+                    trace_callback,
+                    {
+                        "event_type": "start_url_failed",
+                        "message": f"入口 URL 抓取失败：{exc}",
+                        "created_at": datetime.now(UTC).isoformat(),
+                        "raw": {"url": start_url},
+                    },
+                )
+                continue
         await _complete_running_job(session_factory, job_id)
     except CrawlJobPaused:
         await _emit_trace_event(
@@ -170,6 +194,21 @@ async def run_queued_crawl_jobs_once(
         await _mark_job_failed(session_factory, job_id, str(exc))
 
     return 1
+
+
+def _get_crawl_job_start_urls(job: CrawlJob) -> list[str]:
+    urls = job.start_urls or [job.start_url]
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for url in urls:
+        if not isinstance(url, str):
+            continue
+        stripped = url.strip()
+        if not stripped or stripped in seen:
+            continue
+        seen.add(stripped)
+        normalized.append(stripped)
+    return normalized or [job.start_url]
 
 
 async def _resolve_llm_profile(

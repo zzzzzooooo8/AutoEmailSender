@@ -45,7 +45,7 @@ describe("ProfessorsPage crawler job entry", () => {
     listCrawlCandidates.mockReset();
   });
 
-  it("opens the crawler dialog and creates a crawl job with the form payload", async () => {
+  it("creates a crawl job with multiple unique list page urls", async () => {
     renderPage();
 
     await waitFor(() => {
@@ -64,6 +64,10 @@ describe("ProfessorsPage crawler job entry", () => {
     fireEvent.change(within(dialog).getByLabelText("页面 URL"), {
       target: { value: "https://example.edu/faculty" },
     });
+    fireEvent.click(within(dialog).getByRole("button", { name: "添加页面 URL" }));
+    fireEvent.change(within(dialog).getAllByLabelText("页面 URL")[1], {
+      target: { value: " https://example.edu/faculty/page/2 " },
+    });
 
     fireEvent.click(within(dialog).getByRole("button", { name: "开始抓取" }));
 
@@ -72,6 +76,10 @@ describe("ProfessorsPage crawler job entry", () => {
         university: "示例大学",
         school: "计算机学院",
         start_url: "https://example.edu/faculty",
+        start_urls: [
+          "https://example.edu/faculty",
+          "https://example.edu/faculty/page/2",
+        ],
         entry_type: "list",
         llm_profile_id: null,
       });
@@ -90,6 +98,10 @@ describe("ProfessorsPage crawler job entry", () => {
             university: "示例大学",
             school: "计算机学院",
             start_url: "https://example.edu/faculty",
+            start_urls: [
+              "https://example.edu/faculty",
+              "https://example.edu/faculty/page/2",
+            ],
             entry_type: "list",
           },
         }),
@@ -99,6 +111,23 @@ describe("ProfessorsPage crawler job entry", () => {
         }),
       ]),
     );
+  });
+
+  it("removes an added crawler url row", async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(listProfessorsForManagement).toHaveBeenCalledWith("active");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "智能抓取" }));
+
+    const dialog = screen.getByRole("dialog", { name: "创建抓取任务" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "添加页面 URL" }));
+    expect(within(dialog).getAllByLabelText("页面 URL")).toHaveLength(2);
+
+    fireEvent.click(within(dialog).getAllByRole("button", { name: "移除页面 URL" })[1]);
+    expect(within(dialog).getAllByLabelText("页面 URL")).toHaveLength(1);
   });
 
   it("creates a profile crawl job when profile entry type is selected", async () => {
@@ -129,6 +158,7 @@ describe("ProfessorsPage crawler job entry", () => {
         university: "示例大学",
         school: "计算机学院",
         start_url: "https://example.edu/faculty/zhang",
+        start_urls: ["https://example.edu/faculty/zhang"],
         entry_type: "profile",
         llm_profile_id: null,
       });

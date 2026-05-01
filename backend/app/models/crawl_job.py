@@ -48,6 +48,7 @@ class CrawlJob(Base):
     university: Mapped[str] = mapped_column(String(255), nullable=False)
     school: Mapped[str] = mapped_column(String(255), nullable=False)
     start_url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    start_urls: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     entry_type: Mapped[str] = mapped_column(
         String(32),
         nullable=False,

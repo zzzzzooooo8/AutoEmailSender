@@ -374,6 +374,35 @@ class CrawlerToolTests(unittest.TestCase):
 
 
 class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_crawl_page_reuses_cached_snapshot_for_duplicate_url(self) -> None:
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://example.edu/faculty",
+            university="示例大学",
+            school="计算机学院",
+            session_factory=_FakeSessionFactory(),  # type: ignore[arg-type]
+        )
+        snapshot = PageSnapshot(
+            url="https://example.edu/faculty",
+            title="faculty",
+            text="ok",
+            html="<html></html>",
+            links=[],
+            fetch_method="http",
+            status="succeeded",
+        )
+
+        with patch(
+            "app.services.crawler_tools.crawl_page_with_http",
+            new=AsyncMock(return_value=snapshot),
+        ) as crawl_http:
+            first = await crawl_page_with_crawl4ai(ctx, "https://example.edu/faculty")
+            second = await crawl_page_with_crawl4ai(ctx, "https://example.edu/faculty")
+
+        self.assertEqual(first, snapshot)
+        self.assertEqual(second, snapshot)
+        self.assertEqual(crawl_http.await_count, 1)
+
     async def test_crawl4ai_browser_fetch_offloads_to_thread_on_windows_selector_loop(self) -> None:
         ctx = CrawlToolContext(
             job_id=1,

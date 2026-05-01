@@ -16,6 +16,7 @@ import {
   Download,
   FileSpreadsheet,
   Loader2,
+  Minus,
   Plus,
   RefreshCcw,
   Search,
@@ -65,7 +66,7 @@ type ProfessorFormState = {
 type CrawlerJobFormState = {
   university: string;
   school: string;
-  start_url: string;
+  start_urls: string[];
   entry_type: CrawlJobEntryTypeDTO;
 };
 
@@ -96,9 +97,22 @@ const emptyProfessorForm = (): ProfessorFormState => ({
 const emptyCrawlerJobForm = (): CrawlerJobFormState => ({
   university: "",
   school: "",
-  start_url: "",
+  start_urls: [""],
   entry_type: "list",
 });
+
+const normalizeCrawlerStartUrls = (urls: string[]) => {
+  const seen = new Set<string>();
+  return urls
+    .map((url) => url.trim())
+    .filter((url) => {
+      if (!url || seen.has(url)) {
+        return false;
+      }
+      seen.add(url);
+      return true;
+    });
+};
 
 const toProfessorForm = (
   professor: ProfessorManagementItemDTO,
@@ -642,10 +656,12 @@ export const ProfessorsPage = () => {
   };
 
   const handleCreateCrawlJob = async () => {
+    const startUrls = normalizeCrawlerStartUrls(crawlerFormState.start_urls);
     const payload = {
       university: crawlerFormState.university.trim(),
       school: crawlerFormState.school.trim(),
-      start_url: crawlerFormState.start_url.trim(),
+      start_url: startUrls[0] ?? "",
+      start_urls: startUrls,
       entry_type: crawlerFormState.entry_type,
       llm_profile_id: null,
     };
@@ -653,6 +669,7 @@ export const ProfessorsPage = () => {
       university: payload.university,
       school: payload.school,
       start_url: payload.start_url,
+      start_urls: payload.start_urls,
       entry_type: payload.entry_type,
     };
     safeRecordUserAction({
@@ -689,7 +706,7 @@ export const ProfessorsPage = () => {
     creatingCrawlJob ||
     !crawlerFormState.university.trim() ||
     !crawlerFormState.school.trim() ||
-    !crawlerFormState.start_url.trim();
+    normalizeCrawlerStartUrls(crawlerFormState.start_urls).length === 0;
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-8">
@@ -1473,25 +1490,64 @@ export const ProfessorsPage = () => {
               ))}
             </div>
           </fieldset>
-          <label className="block">
-            {renderFieldLabel("页面 URL", true)}
-            <input
-              aria-label="页面 URL"
-              value={crawlerFormState.start_url}
-              onChange={(event) =>
-                setCrawlerFormState((previous) => ({
-                  ...previous,
-                  start_url: event.target.value,
-                }))
-              }
-              className={inputClassName}
-              placeholder={
-                crawlerFormState.entry_type === "profile"
-                  ? "示例：https://example.edu/faculty/zhang"
-                  : "示例：https://example.edu/faculty"
-              }
-            />
-          </label>
+          <div className="grid gap-2">
+            <div className="flex items-center justify-between gap-3">
+              {renderFieldLabel("页面 URL", true)}
+              <button
+                type="button"
+                aria-label="添加页面 URL"
+                onClick={() =>
+                  setCrawlerFormState((previous) => ({
+                    ...previous,
+                    start_urls: [...previous.start_urls, ""],
+                  }))
+                }
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-600 transition hover:border-primary/50 hover:text-primary"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            </div>
+            {crawlerFormState.start_urls.map((url, index) => (
+              <div key={index} className="flex items-center gap-2">
+                <input
+                  aria-label="页面 URL"
+                  value={url}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setCrawlerFormState((previous) => ({
+                      ...previous,
+                      start_urls: previous.start_urls.map((item, itemIndex) =>
+                        itemIndex === index ? nextValue : item,
+                      ),
+                    }));
+                  }}
+                  className={inputClassName}
+                  placeholder={
+                    crawlerFormState.entry_type === "profile"
+                      ? "示例：https://example.edu/faculty/zhang"
+                      : "示例：https://example.edu/faculty"
+                  }
+                />
+                <button
+                  type="button"
+                  aria-label="移除页面 URL"
+                  onClick={() =>
+                    setCrawlerFormState((previous) => ({
+                      ...previous,
+                      start_urls:
+                        previous.start_urls.length > 1
+                          ? previous.start_urls.filter((_, itemIndex) => itemIndex !== index)
+                          : [""],
+                    }))
+                  }
+                  disabled={crawlerFormState.start_urls.length === 1}
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 transition hover:border-red-200 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <Minus className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
         <div className="mt-6 flex flex-wrap justify-end gap-3">
           <button

@@ -96,6 +96,49 @@ class CrawlJobsApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201, msg=response.text)
         self.assertEqual(response.json()["entry_type"], "list")
 
+    def test_create_crawl_job_accepts_multiple_start_urls(self) -> None:
+        response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "start_urls": [
+                    " https://example.edu/faculty ",
+                    "https://example.edu/faculty?page=2",
+                    "https://example.edu/faculty",
+                ],
+                "llm_profile_id": None,
+            },
+        )
+
+        self.assertEqual(response.status_code, 201, msg=response.text)
+        self.assertEqual(response.json()["start_url"], "https://example.edu/faculty")
+        self.assertEqual(
+            response.json()["start_urls"],
+            [
+                "https://example.edu/faculty",
+                "https://example.edu/faculty?page=2",
+            ],
+        )
+
+    def test_create_crawl_job_rejects_unsafe_start_urls_item(self) -> None:
+        response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "start_urls": [
+                    "https://example.edu/faculty",
+                    "http://127.0.0.1/faculty",
+                ],
+                "llm_profile_id": None,
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+
     def test_create_crawl_job_accepts_profile_entry_type(self) -> None:
         response = self.client.post(
             "/api/crawl-jobs",

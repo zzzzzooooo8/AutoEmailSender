@@ -214,6 +214,11 @@ class SaveFailureBudgetState:
     last_save_failure_summary: str | None = None
 
 
+def _normalize_page_cache_url(url: str) -> str:
+    parsed = urlparse(url.strip())
+    return parsed._replace(fragment="").geturl()
+
+
 @dataclass(frozen=True)
 class CrawlToolContext:
     job_id: int
@@ -223,6 +228,7 @@ class CrawlToolContext:
     session_factory: async_sessionmaker[AsyncSession]
     http_blocked_hosts: set[str] = field(default_factory=set)
     save_failure_budget: SaveFailureBudgetState = field(default_factory=SaveFailureBudgetState)
+    page_snapshot_cache: dict[str, PageSnapshot] = field(default_factory=dict)
 
     def mark_http_blocked(self, url: str) -> None:
         host = (urlparse(url).hostname or "").lower()
@@ -232,6 +238,13 @@ class CrawlToolContext:
     def is_http_blocked(self, url: str) -> bool:
         host = (urlparse(url).hostname or "").lower()
         return bool(host and host in self.http_blocked_hosts)
+
+    def get_cached_page_snapshot(self, url: str) -> PageSnapshot | None:
+        return self.page_snapshot_cache.get(_normalize_page_cache_url(url))
+
+    def remember_page_snapshot(self, snapshot: PageSnapshot) -> None:
+        if snapshot.url:
+            self.page_snapshot_cache[_normalize_page_cache_url(snapshot.url)] = snapshot
 
 
 class CrawlJobPaused(RuntimeError):
@@ -781,6 +794,10 @@ async def crawl_page_with_crawl4ai(
     intent: CrawlPageIntent = "generic",
 ) -> PageSnapshot:
     absolute_url = urljoin(ctx.start_url, url)
+    cached = ctx.get_cached_page_snapshot(absolute_url)
+    if cached is not None:
+        return cached
+
     if ctx.is_http_blocked(absolute_url):
         return await browser_investigate(ctx, absolute_url, goal="", intent=intent)
 
@@ -794,6 +811,7 @@ async def crawl_page_with_crawl4ai(
             goal="",
             intent=intent,
         )
+    ctx.remember_page_snapshot(http_snapshot)
     return http_snapshot
 
 
@@ -804,6 +822,10 @@ async def browser_investigate(
     intent: CrawlPageIntent = "generic",
 ) -> PageSnapshot:
     absolute_url = urljoin(ctx.start_url, url)
+    cached = ctx.get_cached_page_snapshot(absolute_url)
+    if cached is not None:
+        return cached
+
     if _has_unsafe_public_crawl_url(ctx.start_url, absolute_url):
         snapshot = _failed_snapshot(
             url=absolute_url,
@@ -824,6 +846,7 @@ async def browser_investigate(
 
     snapshot = await _crawl_page_with_crawl4ai_browser(ctx, absolute_url, goal, intent)
     await record_page_snapshot(ctx, snapshot)
+    ctx.remember_page_snapshot(snapshot)
     return snapshot
 
 
