@@ -157,6 +157,11 @@ class CrawlerToolTests(unittest.TestCase):
         self.assertEqual(generic_config.wait_for, "css:body")
         self.assertEqual(directory_config.wait_for, "css:body")
 
+    def test_browser_config_disables_chromium_https_upgrades(self) -> None:
+        config = crawler_tools._browser_config_for_crawl4ai()
+
+        self.assertIn("--disable-features=HttpsUpgrades", config.extra_args)
+
     def test_is_allowed_crawl_url_allows_same_host(self) -> None:
         with patch(
             "app.services.crawler_tools.socket.getaddrinfo",
@@ -1589,6 +1594,54 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(snapshot, browser_snapshot)
         self.assertEqual(browser_path.call_count, 1)
 
+    async def test_crawl4ai_browser_fetch_disables_chromium_https_upgrades(self) -> None:
+        crawler_kwargs: list[dict[str, object]] = []
+
+        class _BrowserConfig:
+            def __init__(self, **kwargs: object) -> None:
+                self.extra_args = kwargs.get("extra_args", [])
+
+        class _Crawler:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                crawler_kwargs.append(kwargs)
+
+            async def __aenter__(self) -> "_Crawler":
+                return self
+
+            async def __aexit__(self, *args: object) -> None:
+                return None
+
+            async def arun(self, url: str, *, config: object) -> list[object]:
+                return [
+                    types.SimpleNamespace(
+                        success=True,
+                        url=url,
+                        error_message="",
+                        html="<html><body>周锋 电子邮箱：zfeng@bupt.edu.cn</body></html>",
+                        redirected_url=url,
+                    )
+                ]
+
+        crawl4ai_module = types.SimpleNamespace(
+            AsyncWebCrawler=_Crawler,
+            BrowserConfig=_BrowserConfig,
+            CrawlerRunConfig=crawler_tools._browser_run_config_for_intent("profile").__class__,
+        )
+
+        with patch.dict("sys.modules", {"crawl4ai": crawl4ai_module}):
+            snapshot = await crawler_tools._crawl_page_with_crawl4ai_browser_direct(
+                "http://teacher.example.edu/zhoufeng",
+                "",
+                "profile",
+            )
+
+        self.assertEqual(snapshot.status, "succeeded")
+        browser_config = crawler_kwargs[0]["config"]
+        self.assertIn(
+            "--disable-features=HttpsUpgrades",
+            getattr(browser_config, "extra_args", []),
+        )
+
     async def test_crawl4ai_browser_fetch_retries_without_wait_selector_after_wait_failure(self) -> None:
         calls: list[object] = []
 
@@ -1629,6 +1682,7 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
 
         crawl4ai_module = types.SimpleNamespace(
             AsyncWebCrawler=_WaitFailureCrawler,
+            BrowserConfig=types.SimpleNamespace,
             CrawlerRunConfig=crawler_tools._browser_run_config_for_intent("profile").__class__,
         )
 

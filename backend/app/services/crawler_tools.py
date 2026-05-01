@@ -40,6 +40,7 @@ JS_RENDER_TIMEOUT_MS = 30000
 CRAWL4AI_BROWSER_WAIT_TIMEOUT_MS = 15000
 CRAWL4AI_BROWSER_DELAY_SECONDS = 1.5
 CRAWL4AI_BROWSER_WAIT_SELECTOR = "css:body"
+CRAWL4AI_BROWSER_EXTRA_ARGS = ("--disable-features=HttpsUpgrades",)
 UNSAFE_CRAWL_URL_MESSAGE = "URL 不允许指向本机、内网或不可解析地址"
 MULTI_LABEL_PUBLIC_SUFFIXES = ("ac.cn", "com.cn", "edu.cn", "gov.cn", "net.cn", "org.cn")
 SIM_JXUFE_STAFF_HOST = "sim.jxufe.edu.cn"
@@ -1060,6 +1061,12 @@ def _browser_run_config_for_goal(goal: str) -> "CrawlerRunConfig":
     return _browser_run_config_for_intent("generic")
 
 
+def _browser_config_for_crawl4ai() -> "BrowserConfig":
+    from crawl4ai import BrowserConfig
+
+    return BrowserConfig(extra_args=list(CRAWL4AI_BROWSER_EXTRA_ARGS))
+
+
 async def _crawl_page_with_crawl4ai_browser(
     ctx: CrawlToolContext,
     absolute_url: str,
@@ -1100,7 +1107,10 @@ async def _crawl_page_with_crawl4ai_browser_direct(
     last_failure: PageSnapshot | None = None
     for index, config in enumerate(configs):
         try:
-            async with AsyncWebCrawler(verbose=False) as crawler:
+            async with AsyncWebCrawler(
+                config=_browser_config_for_crawl4ai(),
+                verbose=False,
+            ) as crawler:
                 crawl_result = await crawler.arun(absolute_url, config=config)
         except Exception as exc:
             failure = _failed_snapshot(
