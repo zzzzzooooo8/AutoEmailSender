@@ -154,6 +154,174 @@ type TaskListPaginationProps = {
   pageSize?: number;
 };
 
+type CrawlJobCardProps = {
+  job: CrawlJobSummaryDTO;
+  pausingCrawlJobId: number | null;
+  resumingCrawlJobId: number | null;
+  retryingCrawlJobId: number | null;
+  onOpenDetails: (job: CrawlJobSummaryDTO) => void;
+  onPause: (jobId: number) => void;
+  onResume: (jobId: number) => void;
+  onCancel: (jobId: number) => void;
+  onRetry: (jobId: number) => void;
+  formatUpdatedAt: (value: string) => string;
+};
+
+export const CrawlJobCard = ({
+  job,
+  pausingCrawlJobId,
+  resumingCrawlJobId,
+  retryingCrawlJobId,
+  onOpenDetails,
+  onPause,
+  onResume,
+  onCancel,
+  onRetry,
+  formatUpdatedAt,
+}: CrawlJobCardProps) => (
+  <article
+    className="rounded-2xl border border-stone-200 bg-white px-5 py-5 shadow-sm"
+  >
+    <div
+      data-testid="crawl-job-card-layout"
+      className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between"
+    >
+      <div className="min-w-0 flex-1">
+        <div
+          data-testid="crawl-job-card-info-grid"
+          className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_240px] xl:grid-cols-[minmax(320px,1.3fr)_240px_minmax(280px,0.95fr)] xl:items-center"
+        >
+          <div className="min-w-0 xl:min-w-[20rem]">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2 text-xs font-medium text-stone-500">
+                <Bot className="h-4 w-4 text-primary" />
+                智能抓取任务
+              </div>
+              <span
+                className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-medium ${CRAWL_JOB_STATUS_TONES[job.status]}`}
+              >
+                {CRAWL_JOB_STATUS_LABELS[job.status]}
+              </span>
+            </div>
+            <h2
+              className="mt-2 truncate text-base font-semibold text-stone-900"
+              title={`${job.university} / ${job.school}`}
+            >
+              {job.university} / {job.school}
+            </h2>
+            <p
+              className="mt-1 truncate text-sm text-stone-500"
+              title={job.start_url}
+            >
+              {job.start_url}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-2xl border border-stone-100 bg-stone-50/60 px-4 py-3">
+              <div className="text-xs font-medium text-stone-500">页面</div>
+              <div className="mt-2 text-sm font-semibold text-stone-900">
+                已抓页面 {job.page_count}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-stone-100 bg-stone-50/60 px-4 py-3">
+              <div className="text-xs font-medium text-stone-500">候选</div>
+              <div className="mt-2 text-sm font-semibold text-stone-900">
+                候选导师 {job.candidate_count}
+              </div>
+            </div>
+          </div>
+
+          <div className="min-w-0">
+            <div className="text-xs font-medium text-stone-500">
+              更新 {formatUpdatedAt(job.updated_at)}
+            </div>
+            {job.latest_event_message ? (
+              <div className="mt-2 flex items-start gap-2 rounded-2xl border border-primary/10 bg-primary/5 px-3 py-2 text-sm text-stone-700">
+                <Activity className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                <p
+                  data-testid="crawl-job-card-latest-event"
+                  className="min-w-0 break-all line-clamp-2"
+                  title={job.latest_event_message}
+                >
+                  {job.latest_event_message}
+                </p>
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-stone-500">暂无最新事件</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 xl:ml-4 xl:max-w-[18rem] xl:justify-end">
+        <button
+          type="button"
+          onClick={() => onOpenDetails(job)}
+          className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 transition hover:border-primary/30 hover:bg-primary/5 hover:text-primary"
+          aria-label="查看详情"
+          title="查看详情"
+        >
+          <FileSearch className="h-4 w-4" />
+        </button>
+        {job.status === "queued" || job.status === "running" ? (
+          <>
+            <button
+              type="button"
+              onClick={() => onPause(job.id)}
+              disabled={pausingCrawlJobId === job.id}
+              className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Pause className="h-4 w-4" />
+              {pausingCrawlJobId === job.id ? "暂停中..." : "暂停抓取"}
+            </button>
+            <button
+              type="button"
+              onClick={() => onCancel(job.id)}
+              className="ui-btn-danger"
+            >
+              <Square className="h-4 w-4" />
+              取消抓取
+            </button>
+          </>
+        ) : null}
+        {job.status === "paused" ? (
+          <>
+            <button
+              type="button"
+              onClick={() => onResume(job.id)}
+              disabled={resumingCrawlJobId === job.id}
+              className="ui-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Play className="h-4 w-4" />
+              {resumingCrawlJobId === job.id ? "继续中..." : "继续抓取"}
+            </button>
+            <button
+              type="button"
+              onClick={() => onCancel(job.id)}
+              className="ui-btn-danger"
+            >
+              <Square className="h-4 w-4" />
+              取消抓取
+            </button>
+          </>
+        ) : null}
+        {job.status === "failed" || job.status === "canceled" ? (
+          <button
+            type="button"
+            onClick={() => onRetry(job.id)}
+            disabled={retryingCrawlJobId === job.id}
+            className="ui-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Play className="h-4 w-4" />
+            {retryingCrawlJobId === job.id ? "重启中..." : "重启抓取"}
+          </button>
+        ) : null}
+      </div>
+    </div>
+  </article>
+);
+
 const TaskListPagination = ({
   page,
   totalCount,
@@ -1247,136 +1415,27 @@ export const TasksPage = () => {
         <>
           <div className="mt-6 grid gap-4">
             {visibleCrawlJobs.map((job) => (
-            <article
+            <CrawlJobCard
               key={job.id}
-              className="rounded-2xl border border-stone-200 bg-white px-5 py-5 shadow-sm"
-            >
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_240px_minmax(260px,auto)_auto] lg:items-center">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="flex items-center gap-2 text-xs font-medium text-stone-500">
-                      <Bot className="h-4 w-4 text-primary" />
-                      智能抓取任务
-                    </div>
-                    <span
-                      className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-medium ${CRAWL_JOB_STATUS_TONES[job.status]}`}
-                    >
-                      {CRAWL_JOB_STATUS_LABELS[job.status]}
-                    </span>
-                  </div>
-                  <h2 className="mt-2 truncate text-base font-semibold text-stone-900">
-                      {job.university} / {job.school}
-                    </h2>
-                  <p className="mt-1 truncate text-sm text-stone-500">
-                    {job.start_url}
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-2xl border border-stone-100 bg-stone-50/60 px-4 py-3">
-                    <div className="text-xs font-medium text-stone-500">
-                      页面
-                    </div>
-                    <div className="mt-2 text-sm font-semibold text-stone-900">
-                      已抓页面 {job.page_count}
-                    </div>
-                  </div>
-                  <div className="rounded-2xl border border-stone-100 bg-stone-50/60 px-4 py-3">
-                    <div className="text-xs font-medium text-stone-500">
-                      候选
-                    </div>
-                    <div className="mt-2 text-sm font-semibold text-stone-900">
-                      候选导师 {job.candidate_count}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="min-w-0">
-                  <div className="text-xs font-medium text-stone-500">
-                      更新 {formatDisplayTime(job.updated_at, { withSeconds: true })}
-                  </div>
-                  {job.latest_event_message ? (
-                    <div className="mt-2 flex items-start gap-2 rounded-2xl border border-primary/10 bg-primary/5 px-3 py-2 text-sm text-stone-700">
-                      <Activity className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                      <p className="line-clamp-2">{job.latest_event_message}</p>
-                    </div>
-                  ) : (
-                    <p className="mt-2 text-sm text-stone-500">暂无最新事件</p>
-                  )}
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      safeRecordUserAction({
-                        eventName: "tasks.crawl_job_detail_opened",
-                        data: { jobId: job.id, status: job.status },
-                      });
-                      setSelectedCrawlJob(job);
-                    }}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 transition hover:border-primary/30 hover:bg-primary/5 hover:text-primary"
-                    aria-label="查看详情"
-                    title="查看详情"
-                  >
-                    <FileSearch className="h-4 w-4" />
-                  </button>
-                  {job.status === "queued" || job.status === "running" ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => void handlePauseCrawlJob(job.id)}
-                        disabled={pausingCrawlJobId === job.id}
-                        className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        <Pause className="h-4 w-4" />
-                        {pausingCrawlJobId === job.id ? "暂停中..." : "暂停抓取"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void handleCancelCrawlJob(job.id)}
-                        className="ui-btn-danger"
-                      >
-                        <Square className="h-4 w-4" />
-                        取消抓取
-                      </button>
-                    </>
-                  ) : null}
-                  {job.status === "paused" ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => void handleResumeCrawlJob(job.id)}
-                        disabled={resumingCrawlJobId === job.id}
-                        className="ui-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        <Play className="h-4 w-4" />
-                        {resumingCrawlJobId === job.id ? "继续中..." : "继续抓取"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void handleCancelCrawlJob(job.id)}
-                        className="ui-btn-danger"
-                      >
-                        <Square className="h-4 w-4" />
-                        取消抓取
-                      </button>
-                    </>
-                  ) : null}
-                  {(job.status === "failed" || job.status === "canceled") ? (
-                    <button
-                      type="button"
-                      onClick={() => void handleRetryCrawlJob(job.id)}
-                      disabled={retryingCrawlJobId === job.id}
-                      className="ui-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      <Play className="h-4 w-4" />
-                      {retryingCrawlJobId === job.id ? "重启中..." : "重启抓取"}
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            </article>
+              job={job}
+              pausingCrawlJobId={pausingCrawlJobId}
+              resumingCrawlJobId={resumingCrawlJobId}
+              retryingCrawlJobId={retryingCrawlJobId}
+              onOpenDetails={(currentJob) => {
+                safeRecordUserAction({
+                  eventName: "tasks.crawl_job_detail_opened",
+                  data: { jobId: currentJob.id, status: currentJob.status },
+                });
+                setSelectedCrawlJob(currentJob);
+              }}
+              onPause={(jobId) => void handlePauseCrawlJob(jobId)}
+              onResume={(jobId) => void handleResumeCrawlJob(jobId)}
+              onCancel={(jobId) => void handleCancelCrawlJob(jobId)}
+              onRetry={(jobId) => void handleRetryCrawlJob(jobId)}
+              formatUpdatedAt={(value) =>
+                formatDisplayTime(value, { withSeconds: true })
+              }
+            />
             ))}
           </div>
           <TaskListPagination
