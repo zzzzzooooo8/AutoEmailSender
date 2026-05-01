@@ -11,7 +11,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.models import Base, CrawlCandidate, CrawlJob, CrawlJobRun, CrawlJobStatus, CrawlPage, LLMProfile
-from app.services.crawl_job_runtime import _enrich_saved_candidates, run_queued_crawl_jobs_once
+from app.services.crawl_job_runtime import (
+    _enrich_saved_candidates,
+    enrich_candidate_profile_with_llm,
+    extract_profile_candidate_with_llm,
+    run_queued_crawl_jobs_once,
+)
 from app.services.crawl_job_runs import create_initial_crawl_job_run
 from app.services.crawler_tools import (
     CandidateEnrichmentPayload,
@@ -483,6 +488,147 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run.input_tokens, 31)
         self.assertEqual(run.output_tokens, 17)
         self.assertEqual(run.total_tokens, 48)
+
+    async def test_extract_profile_candidate_with_llm_retries_after_invalid_json_response(self) -> None:
+        job_id = await self._create_default_profile_and_job(
+            start_url="https://example.edu/faculty/zhang",
+            entry_type="profile",
+        )
+        llm_profile = await self._get_default_llm_profile()
+        ctx = CrawlToolContext(
+            job_id=job_id,
+            start_url="https://example.edu/faculty/zhang",
+            university="example university",
+            school="computer school",
+            session_factory=self.session_factory,
+        )
+
+        class FakeModel:
+            def __init__(self) -> None:
+                self.responses = [
+                    '{"name":"zhangsan","confidence":"high"',
+                    """```json
+                    {
+                      "name": "zhangsan",
+                      "email": "zhang@example.edu",
+                      "confidence": 0.9
+                    }
+                    ```""",
+                ]
+                self.prompts: list[str] = []
+
+            async def ainvoke(self, prompt: str) -> str:
+                self.prompts.append(prompt)
+                return self.responses[len(self.prompts) - 1]
+
+        fake_model = FakeModel()
+
+        with patch(
+            "app.services.crawl_job_runtime.build_faculty_crawler_model",
+            return_value=fake_model,
+        ):
+            candidate = await extract_profile_candidate_with_llm(
+                ctx,
+                llm_profile,
+                "zhangsan\nemail: zhang@example.edu",
+            )
+
+        self.assertEqual(candidate.name, "zhangsan")
+        self.assertEqual(candidate.email, "zhang@example.edu")
+        self.assertEqual(candidate.confidence, 0.9)
+        self.assertEqual(len(fake_model.prompts), 2)
+
+    async def test_extract_profile_candidate_with_llm_parses_wrapped_json_and_semantic_confidence(self) -> None:
+        job_id = await self._create_default_profile_and_job(
+            start_url="https://example.edu/faculty/zhang",
+            entry_type="profile",
+        )
+        llm_profile = await self._get_default_llm_profile()
+        ctx = CrawlToolContext(
+            job_id=job_id,
+            start_url="https://example.edu/faculty/zhang",
+            university="example university",
+            school="computer school",
+            session_factory=self.session_factory,
+        )
+
+        class FakeModel:
+            async def ainvoke(self, prompt: str) -> str:
+                _ = prompt
+                return """The result is:
+```json
+{
+  "name": "zhangsan",
+  "email": "zhang@example.edu",
+  "confidence": "high"
+}
+```"""
+
+        with patch(
+            "app.services.crawl_job_runtime.build_faculty_crawler_model",
+            return_value=FakeModel(),
+        ):
+            candidate = await extract_profile_candidate_with_llm(
+                ctx,
+                llm_profile,
+                "zhangsan\nemail: zhang@example.edu",
+            )
+
+        self.assertEqual(candidate.name, "zhangsan")
+        self.assertEqual(candidate.email, "zhang@example.edu")
+        self.assertEqual(candidate.confidence, 0.9)
+
+    async def test_enrich_candidate_profile_with_llm_parses_wrapped_json_response(self) -> None:
+        job_id = await self._create_default_profile_and_job()
+        llm_profile = await self._get_default_llm_profile()
+        ctx = CrawlToolContext(
+            job_id=job_id,
+            start_url="https://example.edu/faculty",
+            university="example university",
+            school="computer school",
+            session_factory=self.session_factory,
+        )
+        candidate = CrawlCandidate(
+            id=1,
+            job_id=job_id,
+            name="zhangsan",
+            email=None,
+            title="professor",
+            university="example university",
+            school="computer school",
+            department=None,
+            research_direction=None,
+            recent_papers=[],
+            profile_url="https://example.edu/faculty/zhang",
+            source_url="https://example.edu/faculty/zhang",
+            confidence=0.0,
+        )
+
+        class FakeModel:
+            async def ainvoke(self, prompt: str) -> str:
+                _ = prompt
+                return """```json
+                {
+                  "email": "zhang@example.edu",
+                  "department": "AI Lab",
+                  "recent_papers": ["Paper A"]
+                }
+                ```"""
+
+        with patch(
+            "app.services.crawl_job_runtime.build_faculty_crawler_model",
+            return_value=FakeModel(),
+        ):
+            enrichment = await enrich_candidate_profile_with_llm(
+                ctx,
+                llm_profile,
+                candidate,
+                "email: zhang@example.edu\ndepartment: AI Lab",
+            )
+
+        self.assertEqual(enrichment.email, "zhang@example.edu")
+        self.assertEqual(enrichment.department, "AI Lab")
+        self.assertEqual(enrichment.recent_papers, ["Paper A"])
 
     async def test_profile_entry_type_fails_when_page_fetch_fails(self) -> None:
         job_id = await self._create_default_profile_and_job(

@@ -347,6 +347,16 @@ class CrawlerToolTests(unittest.TestCase):
         )
         self.assertEqual(candidate.evidence, {"summary": "从导师列表页提取"})
 
+    def test_professor_candidate_payload_normalizes_semantic_confidence_labels(self) -> None:
+        candidate = ProfessorCandidatePayload.model_validate(
+            {
+                "name": "zhangsan",
+                "confidence": "high",
+            }
+        )
+
+        self.assertEqual(candidate.confidence, 0.9)
+
     def test_build_candidate_enrichment_prompt_contains_saved_candidate_context(self) -> None:
         candidate = CrawlCandidate(
             id=1,

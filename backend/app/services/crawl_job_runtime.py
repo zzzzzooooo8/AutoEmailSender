@@ -20,6 +20,7 @@ from app.services.crawl_job_runs import (
     mark_crawl_job_run_paused,
     mark_crawl_job_run_running,
 )
+from app.services.llm_runtime import LLMRuntimeError, parse_structured_result
 from app.services.crawler_tools import (
     CrawlJobCanceled,
     CrawlJobPaused,
@@ -47,6 +48,7 @@ TRUNCATED_SAVE_TOOL_CALL_ERROR = (
     "抓取结果未成功保存：模型在调用 save_professor_candidates 时输出被截断"
 )
 MAX_AGENT_TRACE_EVENTS = 100
+DIRECT_LLM_STRUCTURED_MAX_ATTEMPTS = 2
 
 
 async def run_queued_crawl_jobs_once(
@@ -307,6 +309,60 @@ async def _complete_running_job(
             now=now,
         )
         await session.commit()
+
+
+def _build_structured_retry_prompt(
+    *,
+    original_prompt: str,
+    parse_error: str,
+) -> str:
+    return (
+        f"{original_prompt}\n\n"
+        "上一次回复未通过系统结构化校验，请立刻重试，并严格遵守以下要求：\n"
+        "- 只输出一个合法 JSON 对象，不要输出 Markdown、解释或前后缀文本\n"
+        "- 不要省略必填键\n"
+        "- confidence 必须是 0 到 1 的数字\n"
+        "- field_confidence 中每个值都必须是 0 到 1 的数字\n"
+        "- evidence 必须保持简短，只保留必要摘要\n"
+        f"- 上一次解析失败原因：{parse_error}"
+    )
+
+
+async def _invoke_direct_structured_llm(
+    ctx: CrawlToolContext,
+    *,
+    llm_profile: LLMProfile,
+    prompt: str,
+    result_model: type[Any],
+    empty_response_error: str,
+) -> Any:
+    model = build_faculty_crawler_model(llm_profile)
+    current_prompt = prompt
+    last_error: Exception | None = None
+
+    for attempt in range(DIRECT_LLM_STRUCTURED_MAX_ATTEMPTS):
+        response = await model.ainvoke(current_prompt)
+        await _accumulate_direct_llm_response_tokens(ctx.session_factory, ctx.job_id, response)
+        content = _extract_model_message_content(response)
+        if not content:
+            last_error = ValueError(empty_response_error)
+        else:
+            try:
+                return parse_structured_result(content, result_model)
+            except LLMRuntimeError as exc:
+                last_error = exc
+
+        if attempt + 1 >= DIRECT_LLM_STRUCTURED_MAX_ATTEMPTS:
+            break
+
+        current_prompt = _build_structured_retry_prompt(
+            original_prompt=prompt,
+            parse_error=str(last_error),
+        )
+
+    if last_error is None:
+        raise ValueError(empty_response_error)
+    raise ValueError(f"{empty_response_error}: {last_error}")
 
 
 async def _run_profile_crawl_job(
@@ -683,6 +739,14 @@ async def enrich_candidate_profile_with_llm(
     candidate: CrawlCandidate,
     page_text: str,
 ) -> CandidateEnrichmentPayload:
+    prompt = build_candidate_enrichment_prompt(candidate, page_text)
+    return await _invoke_direct_structured_llm(
+        ctx,
+        llm_profile=llm_profile,
+        prompt=prompt,
+        result_model=CandidateEnrichmentPayload,
+        empty_response_error="妯″瀷琛ュ叏杩斿洖绌哄搷搴?",
+    )
     _ = ctx
     model = build_faculty_crawler_model(llm_profile)
     prompt = build_candidate_enrichment_prompt(candidate, page_text)
@@ -699,6 +763,22 @@ async def extract_profile_candidate_with_llm(
     llm_profile: LLMProfile,
     page_text: str,
 ) -> ProfessorCandidatePayload:
+    prompt = build_profile_candidate_prompt(
+        university=ctx.university,
+        school=ctx.school,
+        profile_url=ctx.start_url,
+        page_text=page_text,
+    )
+    candidate = await _invoke_direct_structured_llm(
+        ctx,
+        llm_profile=llm_profile,
+        prompt=prompt,
+        result_model=ProfessorCandidatePayload,
+        empty_response_error=PROFILE_EXTRACTION_FAILED_ERROR,
+    )
+    if not candidate.name.strip():
+        raise ValueError(PROFILE_EXTRACTION_FAILED_ERROR)
+    return candidate
     model = build_faculty_crawler_model(llm_profile)
     prompt = build_profile_candidate_prompt(
         university=ctx.university,

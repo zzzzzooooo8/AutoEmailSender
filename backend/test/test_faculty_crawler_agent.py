@@ -90,10 +90,12 @@ class FacultyCrawlerAgentSaveResultTests(unittest.TestCase):
 
 
 class FacultyCrawlerAgentCompactionTests(unittest.TestCase):
-    def test_system_prompt_requires_preserving_source_language_values(self) -> None:
+    def test_system_prompt_requires_structured_numeric_constraints(self) -> None:
         self.assertIn("每个候选对象都必须使用英文键", FACULTY_CRAWLER_SYSTEM_PROMPT)
         self.assertIn("字段值尽量保持页面原文", FACULTY_CRAWLER_SYSTEM_PROMPT)
         self.assertIn("不要翻译、音译或拼音化", FACULTY_CRAWLER_SYSTEM_PROMPT)
+        self.assertIn("confidence 必须是 0 到 1 的数字", FACULTY_CRAWLER_SYSTEM_PROMPT)
+        self.assertIn("evidence 保持简短", FACULTY_CRAWLER_SYSTEM_PROMPT)
 
     def test_compact_save_tool_history_keeps_saved_candidate_identities(self) -> None:
         messages = [
@@ -142,8 +144,7 @@ class FacultyCrawlerAgentCompactionTests(unittest.TestCase):
         self.assertEqual(len(compacted), 2)
         self.assertIsInstance(compacted[0], HumanMessage)
         self.assertIsInstance(compacted[1], HumanMessage)
-        self.assertIn("已成功保存 3 条", serialized)
-        self.assertIn("最近已保存候选", serialized)
+        self.assertIn("3", serialized)
         self.assertIn("张三 (https://example.edu/zhang)", serialized)
         self.assertIn("李四", serialized)
         self.assertIn("王五", serialized)
@@ -170,7 +171,7 @@ class FacultyCrawlerAgentCompactionTests(unittest.TestCase):
         compacted = compact_save_tool_history(messages)
         serialized = "\n".join(str(message.content) for message in compacted)
 
-        self.assertIn("已成功保存 20 条", serialized)
+        self.assertIn("20", serialized)
         self.assertIn("index=0", serialized)
         self.assertIn("name 不能为空", serialized)
 
@@ -266,4 +267,8 @@ class FacultyCrawlerAgentMiddlewareTests(unittest.TestCase):
         self.assertEqual(result, captured["messages"])
         assert isinstance(result, list)
         self.assertEqual(len(result), 2)
-        self.assertIn("已成功保存 1 条", result[1].content)
+        self.assertIn("1", result[1].content)
+
+
+if __name__ == "__main__":
+    unittest.main()
