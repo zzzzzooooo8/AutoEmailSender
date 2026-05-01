@@ -700,6 +700,17 @@ export const TasksPage = () => {
     setCrawlCandidatePage(1);
   }, [selectedCrawlJobId]);
 
+  useEffect(() => {
+    if (!selectedCandidateDetail) {
+      return;
+    }
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [selectedCandidateDetail]);
+
   const handleAction = async (
     taskId: number,
     action: "pause" | "resume" | "stop",
@@ -1973,7 +1984,7 @@ export const TasksPage = () => {
           <section
             role="dialog"
             aria-label="候选导师详情"
-            className="w-full max-w-3xl rounded-3xl bg-white shadow-2xl"
+            className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4 border-b border-stone-200 px-6 py-5">
@@ -1998,7 +2009,10 @@ export const TasksPage = () => {
                 关闭
               </button>
             </div>
-            <div className="grid gap-4 px-6 py-5 md:grid-cols-2">
+            <div
+              data-testid="candidate-detail-scroll"
+              className="grid flex-1 gap-4 overflow-y-auto overscroll-contain px-6 py-5 md:grid-cols-2"
+            >
               <div className="rounded-2xl border border-stone-100 bg-stone-50/70 px-4 py-3">
                 <div className="text-xs font-medium text-stone-500">职称</div>
                 <div className="mt-2 text-sm text-stone-900">

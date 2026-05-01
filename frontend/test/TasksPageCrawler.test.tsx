@@ -211,6 +211,59 @@ describe("TasksPage crawler jobs tab", () => {
     });
   });
 
+  it("keeps long candidate detail content scrollable inside the dialog", async () => {
+    vi.mocked(listCrawlCandidates).mockResolvedValue([
+      {
+        id: 21,
+        job_id: 7,
+        professor_id: null,
+        name: "张教授",
+        email: "zhang@example.edu",
+        title: "教授",
+        university: "示例大学",
+        school: "计算机学院",
+        department: "计算机学院",
+        research_direction: "机器学习",
+        recent_papers: Array.from(
+          { length: 24 },
+          (_, index) => `近期论文 ${index + 1}`,
+        ),
+        profile_url: "https://example.edu/faculty/zhang",
+        source_url: "https://example.edu/faculty",
+        confidence: 0.86,
+        field_confidence: null,
+        evidence: null,
+        review_status: "pending",
+        created_at: "2026-04-26T10:02:00Z",
+        updated_at: "2026-04-26T10:02:00Z",
+      },
+    ]);
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "教师抓取" }));
+    fireEvent.click(await screen.findByRole("button", { name: "查看详情" }));
+
+    const crawlDialog = await screen.findByRole("dialog", { name: "抓取任务详情" });
+    fireEvent.click(within(crawlDialog).getByRole("button", { name: "查看详情" }));
+
+    const candidateDialog = await screen.findByRole("dialog", { name: "候选导师详情" });
+    const scrollRegion = candidateDialog.querySelector(
+      '[data-testid="candidate-detail-scroll"]',
+    );
+    expect(candidateDialog).toHaveClass("flex", "max-h-[90vh]", "overflow-hidden");
+    expect(scrollRegion).toHaveClass("flex-1", "overflow-y-auto", "overscroll-contain");
+    expect(document.body.style.overflow).toBe("hidden");
+
+    fireEvent.click(
+      within(candidateDialog).getByRole("button", { name: "关闭候选导师详情" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "候选导师详情" })).not.toBeInTheDocument();
+    });
+    expect(document.body.style.overflow).toBe("");
+  });
+
   it("keeps crawl log and crawled page pagination aligned in the detail dialog", async () => {
     vi.mocked(getCrawlJobEvents).mockResolvedValue(
       Array.from({ length: 6 }, (_, index) => ({
