@@ -22,6 +22,7 @@ from app.services.crawler_tools import (
     browser_investigate,
     count_saved_candidates,
     crawl_page_with_crawl4ai,
+    record_save_batch_failure,
     save_candidate_batch,
 )
 from app.services.llm_runtime import (
@@ -232,7 +233,7 @@ def _coerce_int(value: object, default: int) -> int:
 
 
 def _format_save_batch_result_for_model(result: CandidateBatchSaveResult) -> dict[str, Any]:
-    return {
+    formatted: dict[str, Any] = {
         "batch_status": result["batch_status"],
         "attempted_count": result["attempted_count"],
         "saved_count": result["saved_count"],
@@ -240,6 +241,16 @@ def _format_save_batch_result_for_model(result: CandidateBatchSaveResult) -> dic
         "failed_items": result["failed_items"],
         "total_saved_count": result["total_saved_count"],
     }
+    for key in (
+        "retry_allowed",
+        "failure_fingerprint",
+        "consecutive_same_batch_failures",
+        "total_save_failures",
+        "terminal_reason",
+    ):
+        if key in result:
+            formatted[key] = result[key]
+    return formatted
 
 
 def _validate_professor_candidate_batch(
@@ -352,6 +363,7 @@ def create_faculty_crawler_agent(ctx: CrawlToolContext, llm_profile: LLMProfile)
         """
         payloads, failed_items = _validate_professor_candidate_batch(candidates)
         if failed_items:
+            budget_fields = record_save_batch_failure(ctx, candidates, failed_items)
             return _format_save_batch_result_for_model(
                 {
                     "batch_status": "rejected",
@@ -360,6 +372,7 @@ def create_faculty_crawler_agent(ctx: CrawlToolContext, llm_profile: LLMProfile)
                     "failed_count": len(failed_items),
                     "failed_items": failed_items,
                     "total_saved_count": await count_saved_candidates(ctx),
+                    **budget_fields,
                 }
             )
 
