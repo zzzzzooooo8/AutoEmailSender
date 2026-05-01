@@ -420,6 +420,70 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(candidate.school, "计算机学院")
             self.assertEqual(candidate.profile_url, "https://example.edu/faculty/zhang")
 
+    async def test_profile_entry_type_records_direct_llm_token_usage(self) -> None:
+        job_id = await self._create_default_profile_and_job(
+            start_url="https://example.edu/faculty/zhang",
+            entry_type="profile",
+        )
+
+        class FakeLLMMessage:
+            content = json.dumps(
+                {
+                    "name": "张三",
+                    "email": "zhang@example.edu",
+                    "title": "教授",
+                    "research_direction": "机器学习",
+                    "profile_url": "https://example.edu/faculty/zhang",
+                    "source_url": "https://example.edu/faculty/zhang",
+                    "confidence": 0.9,
+                },
+                ensure_ascii=False,
+            )
+            response_metadata = {
+                "token_usage": {
+                    "prompt_tokens": 31,
+                    "completion_tokens": 17,
+                    "total_tokens": 48,
+                }
+            }
+
+        class FakeModel:
+            async def ainvoke(self, prompt: str) -> FakeLLMMessage:
+                _ = prompt
+                return FakeLLMMessage()
+
+        async def fake_crawl_page_with_crawl4ai(
+            ctx: CrawlToolContext,
+            url: str,
+            *,
+            intent: str = "generic",
+        ) -> PageSnapshot:
+            _ = ctx, url, intent
+            return PageSnapshot(
+                url="https://example.edu/faculty/zhang",
+                title="张三",
+                text="张三\n教授\n邮箱：zhang@example.edu\n研究方向：机器学习",
+                html="<html></html>",
+                links=[],
+                fetch_method="http",
+                status="succeeded",
+            )
+
+        with patch(
+            "app.services.crawl_job_runtime.crawl_page_with_crawl4ai",
+            new=fake_crawl_page_with_crawl4ai,
+        ), patch(
+            "app.services.crawl_job_runtime.build_faculty_crawler_model",
+            return_value=FakeModel(),
+        ):
+            processed = await run_queued_crawl_jobs_once(self.session_factory)
+
+        self.assertEqual(processed, 1)
+        run = await self._get_current_run(job_id)
+        self.assertEqual(run.input_tokens, 31)
+        self.assertEqual(run.output_tokens, 17)
+        self.assertEqual(run.total_tokens, 48)
+
     async def test_profile_entry_type_fails_when_page_fetch_fails(self) -> None:
         job_id = await self._create_default_profile_and_job(
             start_url="https://example.edu/faculty/zhang",

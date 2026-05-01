@@ -2,10 +2,34 @@ from __future__ import annotations
 
 import unittest
 
-from app.services.crawl_job_runs import extract_token_usage
+from app.services.crawl_job_runs import extract_token_usage, extract_token_usage_from_llm_response
+
+
+class _FakeLLMResponse:
+    def __init__(self) -> None:
+        self.response_metadata = {
+            "token_usage": {
+                "prompt_tokens": 11,
+                "completion_tokens": 7,
+                "total_tokens": 18,
+            },
+        }
 
 
 class CrawlJobRunTokenUsageTests(unittest.TestCase):
+    def test_extract_token_usage_from_llm_response_metadata(self) -> None:
+        usage = extract_token_usage_from_llm_response(_FakeLLMResponse())
+
+        self.assertEqual(
+            usage,
+            {
+                "input_tokens": 11,
+                "output_tokens": 7,
+                "total_tokens": 18,
+                "cached_tokens": None,
+            },
+        )
+
     def test_extracts_cached_tokens_from_usage_metadata(self) -> None:
         usage = extract_token_usage(
             {

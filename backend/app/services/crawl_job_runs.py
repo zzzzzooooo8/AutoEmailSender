@@ -185,6 +185,48 @@ def extract_token_usage(event: dict[str, object]) -> dict[str, int | None] | Non
     return None
 
 
+def extract_token_usage_from_llm_response(response: object) -> dict[str, int | None] | None:
+    metadata = getattr(response, "response_metadata", None)
+    usage_metadata = getattr(response, "usage_metadata", None)
+    raw_usage = usage_metadata if isinstance(usage_metadata, dict) else None
+    if raw_usage is None and isinstance(metadata, dict):
+        raw_usage = metadata.get("token_usage") or metadata.get("usage")
+    if not isinstance(raw_usage, dict):
+        return None
+
+    input_tokens = _coerce_token_count(raw_usage.get("prompt_tokens", raw_usage.get("input_tokens")))
+    output_tokens = _coerce_token_count(
+        raw_usage.get("completion_tokens", raw_usage.get("output_tokens")),
+    )
+    total_tokens = _coerce_token_count(raw_usage.get("total_tokens"))
+    if input_tokens is None and output_tokens is None and total_tokens is None:
+        return None
+
+    resolved_input_tokens = input_tokens or 0
+    resolved_output_tokens = output_tokens or 0
+    resolved_total_tokens = (
+        total_tokens
+        if total_tokens is not None
+        else resolved_input_tokens + resolved_output_tokens
+    )
+    return {
+        "input_tokens": resolved_input_tokens,
+        "output_tokens": resolved_output_tokens,
+        "total_tokens": resolved_total_tokens,
+        "cached_tokens": _extract_cached_tokens(str(raw_usage)),
+    }
+
+
+def _coerce_token_count(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return None
+
+
 def _extract_cached_tokens(haystack: str) -> int | None:
     for pattern in CACHED_TOKEN_PATTERNS:
         match = pattern.search(haystack)

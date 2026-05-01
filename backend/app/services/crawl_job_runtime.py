@@ -14,6 +14,8 @@ from app.services.crawler_debug import append_crawler_debug_event
 from app.services.crawl_job_events import normalize_agent_trace_event
 from app.services.crawl_job_runs import (
     accumulate_crawl_job_run_tokens,
+    extract_token_usage_from_llm_response,
+    get_or_create_current_crawl_job_run,
     mark_crawl_job_run_finished,
     mark_crawl_job_run_paused,
     mark_crawl_job_run_running,
@@ -245,6 +247,31 @@ async def _append_agent_trace(
         job.agent_trace = trace[-MAX_AGENT_TRACE_EVENTS:]
         job.updated_at = datetime.now(UTC)
         await accumulate_crawl_job_run_tokens(session, job_id, normalized_event)
+        await session.commit()
+
+
+async def _accumulate_direct_llm_response_tokens(
+    session_factory: async_sessionmaker[AsyncSession],
+    job_id: int,
+    response: object,
+) -> None:
+    usage = extract_token_usage_from_llm_response(response)
+    if usage is None:
+        return
+
+    async with session_factory() as session:
+        job = await session.get(CrawlJob, job_id)
+        if job is None:
+            return
+
+        run = await get_or_create_current_crawl_job_run(session, job)
+        run.input_tokens += usage["input_tokens"] or 0
+        run.output_tokens += usage["output_tokens"] or 0
+        run.total_tokens += usage["total_tokens"] or 0
+        cached_tokens = usage.get("cached_tokens")
+        if cached_tokens is not None:
+            run.cached_tokens = (run.cached_tokens or 0) + cached_tokens
+        run.updated_at = datetime.now(UTC)
         await session.commit()
 
 
@@ -660,6 +687,7 @@ async def enrich_candidate_profile_with_llm(
     model = build_faculty_crawler_model(llm_profile)
     prompt = build_candidate_enrichment_prompt(candidate, page_text)
     response = await model.ainvoke(prompt)
+    await _accumulate_direct_llm_response_tokens(ctx.session_factory, ctx.job_id, response)
     content = _extract_model_message_content(response)
     if not content:
         raise ValueError("模型补全返回空响应")
@@ -679,6 +707,7 @@ async def extract_profile_candidate_with_llm(
         page_text=page_text,
     )
     response = await model.ainvoke(prompt)
+    await _accumulate_direct_llm_response_tokens(ctx.session_factory, ctx.job_id, response)
     content = _extract_model_message_content(response)
     if not content:
         raise ValueError(PROFILE_EXTRACTION_FAILED_ERROR)
