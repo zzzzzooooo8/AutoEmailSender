@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.agents.faculty_crawler_agent import (
+    FACULTY_CRAWLER_SYSTEM_PROMPT,
     SaveHistoryCompactionMiddleware,
     compact_save_tool_history,
     _format_save_batch_result_for_model,
@@ -89,6 +90,11 @@ class FacultyCrawlerAgentSaveResultTests(unittest.TestCase):
 
 
 class FacultyCrawlerAgentCompactionTests(unittest.TestCase):
+    def test_system_prompt_requires_preserving_source_language_values(self) -> None:
+        self.assertIn("每个候选对象都必须使用英文键", FACULTY_CRAWLER_SYSTEM_PROMPT)
+        self.assertIn("字段值尽量保持页面原文", FACULTY_CRAWLER_SYSTEM_PROMPT)
+        self.assertIn("不要翻译、音译或拼音化", FACULTY_CRAWLER_SYSTEM_PROMPT)
+
     def test_compact_save_tool_history_keeps_saved_candidate_identities(self) -> None:
         messages = [
             HumanMessage(content="入口任务"),
