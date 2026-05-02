@@ -480,8 +480,14 @@ export const ProfessorsPage = () => {
     (safeCurrentPage - 1) * PROFESSORS_PER_PAGE,
     safeCurrentPage * PROFESSORS_PER_PAGE,
   );
+  const isProfessorSelectable = (professor: ProfessorManagementItemDTO) => {
+    if (archiveFilter === "archived") {
+      return Boolean(professor.archived_at);
+    }
+    return !professor.archived_at;
+  };
   const currentPageSelectableIds = paginatedProfessors
-    .filter((professor) => !professor.archived_at)
+    .filter(isProfessorSelectable)
     .map((professor) => professor.id);
   const allCurrentPageSelected =
     currentPageSelectableIds.length > 0 &&
@@ -590,6 +596,44 @@ export const ProfessorsPage = () => {
         getActionErrorMessage(archiveError, "批量移入回收站失败"),
       );
     }
+  };
+
+  const handleBulkRestore = async () => {
+    if (selectedIds.size === 0) {
+      return;
+    }
+    const confirmed = await confirm({
+      title: `恢复选中的 ${selectedIds.size} 位导师？`,
+      description: "恢复后会回到正常列表，可继续参与首页筛选和任务创建。",
+      confirmLabel: "确认恢复",
+      cancelLabel: "先不处理",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    const results = await Promise.allSettled(
+      [...selectedIds].map((id) => restoreProfessor(id)),
+    );
+    const failedCount = results.filter(
+      (item) => item.status === "rejected",
+    ).length;
+    const successCount = results.length - failedCount;
+
+    if (successCount > 0) {
+      notifySuccess("操作成功", `已恢复 ${successCount} 位导师。`);
+    }
+    if (failedCount > 0) {
+      notifyWarning(
+        "部分恢复失败",
+        `有 ${failedCount} 位导师恢复失败，请稍后重试。`,
+      );
+    }
+    if (successCount === 0) {
+      notifyError("批量恢复失败", "所选导师均未恢复成功，请稍后重试。");
+    }
+    setSelectedIds(new Set());
+    await loadProfessors();
   };
 
   const handleRestoreProfessor = async (
@@ -1006,7 +1050,7 @@ export const ProfessorsPage = () => {
         ) : (
           <div className="divide-y divide-stone-100">
             {paginatedProfessors.map((professor) => {
-              const selectable = !professor.archived_at;
+              const selectable = isProfessorSelectable(professor);
               const checked = selectedIds.has(professor.id);
               return (
                 <ManagementProfessorRow
@@ -1074,7 +1118,9 @@ export const ProfessorsPage = () => {
                 已选中 {selectedIds.size} 位导师
               </div>
               <div className="mt-1 text-xs text-stone-500">
-                这些导师会被移入回收站，但历史任务和通信不会删除。
+                {archiveFilter === "archived"
+                  ? "这些导师会被恢复到正常列表，可重新参与筛选与任务。"
+                  : "这些导师会被移入回收站，但历史任务和通信不会删除。"}
               </div>
             </div>
             <div className="flex flex-wrap gap-3">
@@ -1087,11 +1133,23 @@ export const ProfessorsPage = () => {
               </button>
               <button
                 type="button"
-                onClick={() => void handleBulkArchive()}
-                className="ui-btn-danger"
+                onClick={() =>
+                  archiveFilter === "archived"
+                    ? void handleBulkRestore()
+                    : void handleBulkArchive()
+                }
+                className={
+                  archiveFilter === "archived" ? "ui-btn-secondary" : "ui-btn-danger"
+                }
               >
-                <Archive className="h-4 w-4" />
-                批量移入回收站
+                {archiveFilter === "archived" ? (
+                  <RefreshCcw className="h-4 w-4" />
+                ) : (
+                  <Archive className="h-4 w-4" />
+                )}
+                {archiveFilter === "archived"
+                  ? "批量恢复"
+                  : "批量移入回收站"}
               </button>
             </div>
           </div>
