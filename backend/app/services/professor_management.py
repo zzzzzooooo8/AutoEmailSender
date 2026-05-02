@@ -12,6 +12,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils.exceptions import InvalidFileException
 
 from app.schemas.professor import ProfessorUpsertPayload
+from app.services.professor_field_normalization import normalize_recent_papers
 
 
 PROFESSOR_TEMPLATE_COLUMNS = [
@@ -38,7 +39,7 @@ PROFESSOR_TEMPLATE_HELP_LINES = [
     "# school：学院名称。示例：人工智能学院",
     "# department：院系或系所。示例：计算机科学系",
     "# research_direction：研究方向，多个方向用中文分号 ； 分隔。示例：大语言模型；智能体；信息抽取",
-    "# recent_papers：近期论文，多篇用 | 分隔。示例：Paper A|Paper B",
+    "# recent_papers：近期论文，多篇用 | 分隔；最多保留前 8 篇。示例：Paper A|Paper B",
     "# profile_url：导师主页链接。示例：https://example.edu/zhang",
     "# source_url：数据来源链接。示例：https://example.edu/faculty",
 ]
@@ -310,6 +311,4 @@ def _clean_cell_value(value: Any) -> str | None:
 
 
 def _parse_recent_papers(value: str | None) -> list[str]:
-    if not value:
-        return []
-    return [item.strip() for item in value.split("|") if item.strip()]
+    return normalize_recent_papers(value)

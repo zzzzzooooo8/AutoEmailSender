@@ -280,6 +280,18 @@ class CrawlerToolTests(unittest.TestCase):
         self.assertEqual(payload["confidence"], 1.0)
         self.assertEqual(payload["field_confidence"], {"email": 1.0})
 
+    def test_normalize_candidate_payload_caps_recent_papers_to_first_8(self) -> None:
+        payload = normalize_candidate_payload(
+            ProfessorCandidatePayload(
+                name="张三",
+                recent_papers=[f"Paper {index}" for index in range(1, 12)],
+            ),
+            university="示例大学",
+            school="计算机学院",
+        )
+
+        self.assertEqual(payload["recent_papers"], [f"Paper {index}" for index in range(1, 9)])
+
     def test_normalize_candidate_payload_keeps_first_valid_email(self) -> None:
         payload = normalize_candidate_payload(
             ProfessorCandidatePayload(
@@ -347,6 +359,12 @@ class CrawlerToolTests(unittest.TestCase):
         )
         self.assertEqual(candidate.evidence, {"summary": "从导师列表页提取"})
 
+    def test_professor_candidate_payload_normalizes_recent_papers_string_with_multi_separators(self) -> None:
+        candidate = ProfessorCandidatePayload.model_validate(
+            {"name": "张三", "recent_papers": "Paper A；Paper B|Paper C\nPaper D"}
+        )
+        self.assertEqual(candidate.recent_papers, ["Paper A", "Paper B", "Paper C", "Paper D"])
+
     def test_professor_candidate_payload_normalizes_semantic_confidence_labels(self) -> None:
         candidate = ProfessorCandidatePayload.model_validate(
             {
@@ -393,6 +411,7 @@ class CrawlerToolTests(unittest.TestCase):
         self.assertIn("必须使用英文键", prompt)
         self.assertIn("字段值尽量保持页面原文", prompt)
         self.assertIn("不要翻译、音译或拼音化", prompt)
+        self.assertIn("recent_papers 必须是 JSON 数组", prompt)
 
     def test_candidate_enrichment_payload_defaults(self) -> None:
         payload = CandidateEnrichmentPayload.model_validate({})
