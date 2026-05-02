@@ -119,6 +119,14 @@ class CrawlJobRun(Base):
     input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     cached_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    host_limited_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    failed_candidate_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    unchanged_candidate_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+    )
     total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

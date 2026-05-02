@@ -28,6 +28,16 @@ class RuntimeManager:
             return
         self._stopped.clear()
         settings = get_settings()
+        crawler_tasks = [
+            asyncio.create_task(
+                self._loop(
+                    f"crawler-worker-{index}",
+                    10,
+                    run_queued_crawl_jobs_once,
+                ),
+            )
+            for index in range(1, settings.crawler_worker_count + 1)
+        ]
         self._tasks = [
             asyncio.create_task(
                 self._loop(
@@ -43,13 +53,7 @@ class RuntimeManager:
                     poll_for_replies_once,
                 ),
             ),
-            asyncio.create_task(
-                self._loop(
-                    "crawler-worker",
-                    10,
-                    run_queued_crawl_jobs_once,
-                ),
-            ),
+            *crawler_tasks,
         ]
 
     async def stop(self) -> None:

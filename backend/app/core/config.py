@@ -24,6 +24,10 @@ class Settings:
     draft_worker_interval_seconds: int
     dispatcher_interval_seconds: int
     imap_poll_interval_seconds: int
+    crawler_worker_count: int
+    crawler_profile_enrichment_concurrency: int
+    crawler_host_concurrency: int
+    crawler_profile_fetch_max_retries: int
     llm_request_timeout_seconds: int
     smtp_send_timeout_seconds: int
     imap_lookback_hours: int
@@ -76,6 +80,16 @@ def get_settings() -> Settings:
         draft_worker_interval_seconds=_get_int_env("DRAFT_WORKER_INTERVAL_SECONDS", 10),
         dispatcher_interval_seconds=_get_int_env("DISPATCHER_INTERVAL_SECONDS", 30),
         imap_poll_interval_seconds=_get_int_env("IMAP_POLL_INTERVAL_SECONDS", 60),
+        crawler_worker_count=_get_int_env("CRAWLER_WORKER_COUNT", 2),
+        crawler_profile_enrichment_concurrency=_get_int_env(
+            "CRAWLER_PROFILE_ENRICHMENT_CONCURRENCY",
+            3,
+        ),
+        crawler_host_concurrency=_get_int_env("CRAWLER_HOST_CONCURRENCY", 1),
+        crawler_profile_fetch_max_retries=_get_int_env(
+            "CRAWLER_PROFILE_FETCH_MAX_RETRIES",
+            2,
+        ),
         llm_request_timeout_seconds=_get_int_env("LLM_REQUEST_TIMEOUT_SECONDS", 90),
         smtp_send_timeout_seconds=_get_int_env("SMTP_SEND_TIMEOUT_SECONDS", 30),
         imap_lookback_hours=_get_int_env("IMAP_LOOKBACK_HOURS", 72),

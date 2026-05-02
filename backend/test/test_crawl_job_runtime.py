@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import tempfile
@@ -7,6 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -1065,6 +1067,238 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             assert candidate is not None
             self.assertEqual(candidate.email, "wang5@example.edu")
 
+    async def test_enrich_saved_candidates_limits_concurrency(self) -> None:
+        job_id = await self._create_default_profile_and_job()
+        ctx = self._build_crawl_context(job_id)
+        await self._seed_candidates(job_id, count=5, host="example.edu")
+        llm_profile = await self._get_default_llm_profile()
+        active = 0
+        max_active = 0
+
+        async def fake_crawl_page_with_crawl4ai(
+            ctx: CrawlToolContext,
+            url: str,
+            *,
+            intent: str = "generic",
+        ) -> PageSnapshot:
+            nonlocal active, max_active
+            _ = ctx, intent
+            active += 1
+            max_active = max(max_active, active)
+            try:
+                await asyncio.sleep(0.01)
+                return PageSnapshot(
+                    url=url,
+                    title="Profile",
+                    text="research direction: embodied ai",
+                    html="<html></html>",
+                    links=[],
+                    fetch_method="http",
+                    status="succeeded",
+                )
+            finally:
+                active -= 1
+
+        async def fake_enrich_with_llm(
+            ctx: CrawlToolContext,
+            llm_profile: LLMProfile,
+            candidate: CrawlCandidate,
+            page_text: str,
+        ) -> CandidateEnrichmentPayload:
+            _ = ctx, llm_profile, candidate, page_text
+            return CandidateEnrichmentPayload(
+                department="AI Lab",
+                research_direction="Embodied AI",
+                recent_papers=["Paper A"],
+            )
+
+        settings_stub = type(
+            "SettingsStub",
+            (),
+            {
+                "crawler_profile_enrichment_concurrency": 3,
+                "crawler_host_concurrency": 5,
+                "crawler_profile_fetch_max_retries": 0,
+            },
+        )()
+
+        with patch(
+            "app.services.crawl_job_runtime.get_settings",
+            return_value=settings_stub,
+        ), patch(
+            "app.services.crawl_job_runtime.crawl_page_with_crawl4ai",
+            new=fake_crawl_page_with_crawl4ai,
+        ), patch(
+            "app.services.crawl_job_runtime.enrich_candidate_profile_with_llm",
+            new=fake_enrich_with_llm,
+        ):
+            enriched_count = await _enrich_saved_candidates(
+                self.session_factory,
+                ctx,
+                llm_profile=llm_profile,
+            )
+
+        self.assertEqual(enriched_count, 5)
+        self.assertLessEqual(max_active, 3)
+
+    async def test_enrich_saved_candidates_limits_same_host_to_one_request(self) -> None:
+        job_id = await self._create_default_profile_and_job()
+        ctx = self._build_crawl_context(job_id)
+        await self._seed_candidates(job_id, count=3, host="same.example.edu")
+        llm_profile = await self._get_default_llm_profile()
+        host_active = 0
+        max_host_active = 0
+
+        async def fake_crawl_page_with_crawl4ai(
+            ctx: CrawlToolContext,
+            url: str,
+            *,
+            intent: str = "generic",
+        ) -> PageSnapshot:
+            nonlocal host_active, max_host_active
+            _ = ctx, intent
+            host_active += 1
+            max_host_active = max(max_host_active, host_active)
+            try:
+                await asyncio.sleep(0.01)
+                return PageSnapshot(
+                    url=url,
+                    title="Profile",
+                    text="research direction: systems",
+                    html="<html></html>",
+                    links=[],
+                    fetch_method="http",
+                    status="succeeded",
+                )
+            finally:
+                host_active -= 1
+
+        async def fake_enrich_with_llm(
+            ctx: CrawlToolContext,
+            llm_profile: LLMProfile,
+            candidate: CrawlCandidate,
+            page_text: str,
+        ) -> CandidateEnrichmentPayload:
+            _ = ctx, llm_profile, candidate, page_text
+            return CandidateEnrichmentPayload(
+                department="Systems Lab",
+                research_direction="Distributed Systems",
+            )
+
+        settings_stub = type(
+            "SettingsStub",
+            (),
+            {
+                "crawler_profile_enrichment_concurrency": 3,
+                "crawler_host_concurrency": 1,
+                "crawler_profile_fetch_max_retries": 0,
+            },
+        )()
+
+        with patch(
+            "app.services.crawl_job_runtime.get_settings",
+            return_value=settings_stub,
+        ), patch(
+            "app.services.crawl_job_runtime.crawl_page_with_crawl4ai",
+            new=fake_crawl_page_with_crawl4ai,
+        ), patch(
+            "app.services.crawl_job_runtime.enrich_candidate_profile_with_llm",
+            new=fake_enrich_with_llm,
+        ):
+            enriched_count = await _enrich_saved_candidates(
+                self.session_factory,
+                ctx,
+                llm_profile=llm_profile,
+            )
+
+        self.assertEqual(enriched_count, 3)
+        self.assertLessEqual(max_host_active, 1)
+
+    async def test_enrich_saved_candidates_updates_run_metrics_for_retry_host_limit_and_failures(self) -> None:
+        job_id = await self._create_default_profile_and_job()
+        ctx = self._build_crawl_context(job_id)
+        await self._seed_candidates(job_id, count=3, host="metric.example.edu")
+        llm_profile = await self._get_default_llm_profile()
+        attempts: dict[str, int] = {}
+
+        async def fake_crawl_page_with_crawl4ai(
+            ctx: CrawlToolContext,
+            url: str,
+            *,
+            intent: str = "generic",
+        ) -> PageSnapshot:
+            _ = ctx, intent
+            attempts[url] = attempts.get(url, 0) + 1
+            if url.endswith("/0") and attempts[url] <= 2:
+                await asyncio.sleep(0.01)
+                raise httpx.TimeoutException("timeout")
+            if url.endswith("/1"):
+                await asyncio.sleep(0.01)
+                return PageSnapshot(
+                    url=url,
+                    title="Profile",
+                    text="",
+                    html="",
+                    links=[],
+                    fetch_method="http",
+                    status="failed",
+                    error_message="detail fetch failed",
+                )
+            await asyncio.sleep(0.01)
+            return PageSnapshot(
+                url=url,
+                title="Profile",
+                text="plain profile page",
+                html="<html></html>",
+                links=[],
+                fetch_method="http",
+                status="succeeded",
+            )
+
+        async def fake_enrich_with_llm(
+            ctx: CrawlToolContext,
+            llm_profile: LLMProfile,
+            candidate: CrawlCandidate,
+            page_text: str,
+        ) -> CandidateEnrichmentPayload:
+            _ = ctx, llm_profile, page_text
+            if (candidate.profile_url or "").endswith("/0"):
+                return CandidateEnrichmentPayload(email="teacher0@example.edu")
+            return CandidateEnrichmentPayload()
+
+        settings_stub = type(
+            "SettingsStub",
+            (),
+            {
+                "crawler_profile_enrichment_concurrency": 3,
+                "crawler_host_concurrency": 1,
+                "crawler_profile_fetch_max_retries": 2,
+            },
+        )()
+
+        with patch(
+            "app.services.crawl_job_runtime.get_settings",
+            return_value=settings_stub,
+        ), patch(
+            "app.services.crawl_job_runtime.crawl_page_with_crawl4ai",
+            new=fake_crawl_page_with_crawl4ai,
+        ), patch(
+            "app.services.crawl_job_runtime.enrich_candidate_profile_with_llm",
+            new=fake_enrich_with_llm,
+        ):
+            enriched_count = await _enrich_saved_candidates(
+                self.session_factory,
+                ctx,
+                llm_profile=llm_profile,
+            )
+
+        self.assertEqual(enriched_count, 1)
+        run = await self._get_current_run(job_id)
+        self.assertEqual(run.retry_count, 2)
+        self.assertGreaterEqual(run.host_limited_count, 1)
+        self.assertEqual(run.failed_candidate_count, 1)
+        self.assertEqual(run.unchanged_candidate_count, 1)
+
     async def test_run_queued_crawl_job_does_not_overwrite_existing_email(self) -> None:
         job_id = await self._create_default_profile_and_job(
             start_url="https://cai.jxufe.edu.cn/lists/26.html",
@@ -1350,12 +1584,42 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 raise AssertionError(f"crawl job {job_id} not found")
             return job
 
+    def _build_crawl_context(self, job_id: int) -> CrawlToolContext:
+        return CrawlToolContext(
+            job_id=job_id,
+            start_url="https://example.edu/faculty",
+            university="example university",
+            school="computer school",
+            session_factory=self.session_factory,
+        )
+
     async def _count_candidates(self, job_id: int) -> int:
         async with self.session_factory() as session:
             rows = await session.scalars(
                 select(CrawlCandidate).where(CrawlCandidate.job_id == job_id)
             )
             return len(list(rows))
+
+    async def _seed_candidates(self, job_id: int, *, count: int, host: str) -> None:
+        async with self.session_factory() as session:
+            for index in range(count):
+                session.add(
+                    CrawlCandidate(
+                        job_id=job_id,
+                        name=f"Teacher {index}",
+                        email=None,
+                        title="Professor",
+                        university="example university",
+                        school="computer school",
+                        department=None,
+                        research_direction=None,
+                        recent_papers=[],
+                        profile_url=f"https://{host}/teacher/{index}",
+                        source_url=f"https://{host}/faculty",
+                        confidence=0.0,
+                    )
+                )
+            await session.commit()
 
 
 if __name__ == "__main__":

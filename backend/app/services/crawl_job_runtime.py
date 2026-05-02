@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlparse
 
+import httpx
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.faculty_crawler_agent import build_faculty_crawler_model, run_faculty_crawler_agent
+from app.core.config import get_settings
 from app.models import CrawlCandidate, CrawlJob, CrawlJobStatus, CrawlPage, LLMProfile
 from app.services.crawler_debug import append_crawler_debug_event
 from app.services.crawl_job_events import normalize_agent_trace_event
@@ -49,6 +52,26 @@ TRUNCATED_SAVE_TOOL_CALL_ERROR = (
 )
 MAX_AGENT_TRACE_EVENTS = 100
 DIRECT_LLM_STRUCTURED_MAX_ATTEMPTS = 2
+
+
+@dataclass(slots=True)
+class CandidateEnrichmentWorkItem:
+    candidate_id: int
+    candidate_name: str
+    profile_url: str
+
+
+@dataclass(slots=True)
+class CandidateEnrichmentResult:
+    candidate_id: int
+    candidate_name: str
+    profile_url: str
+    status: str
+    enrichment: CandidateEnrichmentPayload | None = None
+    updated_fields: list[str] | None = None
+    error_message: str | None = None
+    retry_count: int = 0
+    host_limited: bool = False
 
 
 async def run_queued_crawl_jobs_once(
@@ -425,6 +448,21 @@ async def _enrich_saved_candidates(
     llm_profile: LLMProfile,
     trace_callback: Any | None = None,
 ) -> int:
+    return await _enrich_saved_candidates_concurrent(
+        session_factory,
+        ctx,
+        llm_profile=llm_profile,
+        trace_callback=trace_callback,
+    )
+
+
+async def _enrich_saved_candidates_concurrent(
+    session_factory: async_sessionmaker[AsyncSession],
+    ctx: CrawlToolContext,
+    *,
+    llm_profile: LLMProfile,
+    trace_callback: Any | None = None,
+) -> int:
     async with session_factory() as session:
         candidates = list(
             (
@@ -435,6 +473,80 @@ async def _enrich_saved_candidates(
                 )
             ).scalars()
         )
+
+    pending_candidates = [candidate for candidate in candidates if _needs_profile_enrichment(candidate)]
+    if not pending_candidates:
+        return 0
+
+    settings = get_settings()
+    await _emit_trace_event(
+        trace_callback,
+        {
+            "event_type": "enrichment",
+            "message": f"开始统一补全候选导师详情，共 {len(pending_candidates)} 位待补全",
+            "created_at": datetime.now(UTC).isoformat(),
+            "raw": {"candidate_count": len(pending_candidates)},
+        },
+    )
+
+    work_queue: asyncio.Queue[CandidateEnrichmentWorkItem | None] = asyncio.Queue()
+    result_queue: asyncio.Queue[CandidateEnrichmentResult] = asyncio.Queue()
+    host_limiters: dict[str, asyncio.Semaphore] = {}
+    for candidate in pending_candidates:
+        work_queue.put_nowait(
+            CandidateEnrichmentWorkItem(
+                candidate_id=candidate.id,
+                candidate_name=candidate.name,
+                profile_url=candidate.profile_url or "",
+            )
+        )
+
+    worker_count = max(1, settings.crawler_profile_enrichment_concurrency)
+    for _ in range(worker_count):
+        work_queue.put_nowait(None)
+
+    workers = [
+        asyncio.create_task(
+            _run_candidate_enrichment_worker(
+                session_factory,
+                ctx,
+                llm_profile,
+                work_queue,
+                result_queue,
+                host_limiters,
+                trace_callback=trace_callback,
+                host_concurrency=max(1, settings.crawler_host_concurrency),
+                max_retries=max(0, settings.crawler_profile_fetch_max_retries),
+            )
+        )
+        for _ in range(worker_count)
+    ]
+    try:
+        enriched, unchanged, failed = await _consume_candidate_enrichment_results(
+            session_factory,
+            ctx.job_id,
+            result_queue,
+            expected_count=len(pending_candidates),
+            trace_callback=trace_callback,
+        )
+    finally:
+        await asyncio.gather(*workers, return_exceptions=True)
+
+    await _emit_trace_event(
+        trace_callback,
+        {
+            "event_type": "enrichment",
+            "message": f"候选导师详情补全完成：成功 {enriched} 位，未变化 {unchanged} 位，失败 {failed} 位",
+            "created_at": datetime.now(UTC).isoformat(),
+            "raw": {
+                "candidate_count": len(pending_candidates),
+                "enriched_count": enriched,
+                "unchanged_count": unchanged,
+                "failed_count": failed,
+            },
+        },
+    )
+    return enriched
 
     pending_candidates = [candidate for candidate in candidates if _needs_profile_enrichment(candidate)]
     enriched = 0
@@ -554,6 +666,270 @@ async def _enrich_saved_candidates(
             },
         )
     return enriched
+
+
+async def _run_candidate_enrichment_worker(
+    session_factory: async_sessionmaker[AsyncSession],
+    ctx: CrawlToolContext,
+    llm_profile: LLMProfile,
+    work_queue: asyncio.Queue[CandidateEnrichmentWorkItem | None],
+    result_queue: asyncio.Queue[CandidateEnrichmentResult],
+    host_limiters: dict[str, asyncio.Semaphore],
+    *,
+    trace_callback: Any | None,
+    host_concurrency: int,
+    max_retries: int,
+) -> None:
+    while True:
+        item = await work_queue.get()
+        if item is None:
+            return
+        result = await _enrich_candidate_work_item(
+            session_factory,
+            ctx,
+            llm_profile,
+            item,
+            host_limiters,
+            trace_callback=trace_callback,
+            host_concurrency=host_concurrency,
+            max_retries=max_retries,
+        )
+        await result_queue.put(result)
+
+
+async def _enrich_candidate_work_item(
+    session_factory: async_sessionmaker[AsyncSession],
+    ctx: CrawlToolContext,
+    llm_profile: LLMProfile,
+    item: CandidateEnrichmentWorkItem,
+    host_limiters: dict[str, asyncio.Semaphore],
+    *,
+    trace_callback: Any | None,
+    host_concurrency: int,
+    max_retries: int,
+) -> CandidateEnrichmentResult:
+    async with session_factory() as session:
+        try:
+            await ensure_crawl_job_can_continue(session, ctx.job_id)
+        except (CrawlJobPaused, CrawlJobCanceled):
+            return CandidateEnrichmentResult(
+                candidate_id=item.candidate_id,
+                candidate_name=item.candidate_name,
+                profile_url=item.profile_url,
+                status="stopped",
+            )
+
+    await _emit_trace_event(
+        trace_callback,
+        {
+            "event_type": "enrichment",
+            "message": f"开始补全候选导师详情：{item.candidate_name}",
+            "created_at": datetime.now(UTC).isoformat(),
+            "raw": {
+                "candidate_id": item.candidate_id,
+                "profile_url": item.profile_url,
+            },
+        },
+    )
+
+    hostname = urlparse(item.profile_url).hostname or item.profile_url
+    limiter = host_limiters.setdefault(hostname, asyncio.Semaphore(host_concurrency))
+    host_limited = limiter.locked()
+
+    async with limiter:
+        snapshot, retry_count = await _crawl_candidate_profile_with_retries(
+            ctx,
+            item,
+            max_retries=max_retries,
+        )
+
+    if snapshot.status != "succeeded" or not snapshot.text.strip():
+        return CandidateEnrichmentResult(
+            candidate_id=item.candidate_id,
+            candidate_name=item.candidate_name,
+            profile_url=item.profile_url,
+            status="failed",
+            error_message=snapshot.error_message,
+            retry_count=retry_count,
+            host_limited=host_limited,
+        )
+
+    candidate = CrawlCandidate(
+        id=item.candidate_id,
+        job_id=ctx.job_id,
+        name=item.candidate_name,
+        profile_url=item.profile_url,
+    )
+    try:
+        enrichment = await enrich_candidate_profile_with_llm(
+            ctx,
+            llm_profile,
+            candidate,
+            snapshot.text,
+        )
+    except Exception:
+        enrichment = _extract_fallback_enrichment(snapshot.text)
+    if not _has_any_enrichment(enrichment):
+        fallback = extract_candidate_profile_enrichment(snapshot.text)
+        enrichment = CandidateEnrichmentPayload.model_validate(fallback)
+
+    changes = enrichment.model_dump()
+    changed_fields = [field for field, value in changes.items() if value]
+    return CandidateEnrichmentResult(
+        candidate_id=item.candidate_id,
+        candidate_name=item.candidate_name,
+        profile_url=item.profile_url,
+        status="succeeded",
+        enrichment=enrichment,
+        updated_fields=changed_fields,
+        retry_count=retry_count,
+        host_limited=host_limited,
+    )
+
+
+async def _crawl_candidate_profile_with_retries(
+    ctx: CrawlToolContext,
+    item: CandidateEnrichmentWorkItem,
+    *,
+    max_retries: int,
+) -> tuple[PageSnapshot, int]:
+    retry_count = 0
+    for attempt in range(max_retries + 1):
+        try:
+            snapshot = await crawl_page_with_crawl4ai(
+                ctx,
+                item.profile_url,
+                intent="profile",
+            )
+            return snapshot, retry_count
+        except httpx.TimeoutException:
+            if attempt >= max_retries:
+                return (
+                    PageSnapshot(
+                        url=item.profile_url,
+                        title=None,
+                        text="",
+                        html="",
+                        links=[],
+                        fetch_method="http",
+                        status="failed",
+                        error_message="详情页抓取超时",
+                    ),
+                    retry_count,
+                )
+            retry_count += 1
+            await asyncio.sleep(0)
+
+    return (
+        PageSnapshot(
+            url=item.profile_url,
+            title=None,
+            text="",
+            html="",
+            links=[],
+            fetch_method="http",
+            status="failed",
+            error_message="详情页抓取失败",
+        ),
+        retry_count,
+    )
+
+
+async def _consume_candidate_enrichment_results(
+    session_factory: async_sessionmaker[AsyncSession],
+    job_id: int,
+    result_queue: asyncio.Queue[CandidateEnrichmentResult],
+    *,
+    expected_count: int,
+    trace_callback: Any | None,
+) -> tuple[int, int, int]:
+    enriched = 0
+    unchanged = 0
+    failed = 0
+    retry_count = 0
+    host_limited_count = 0
+    stop_writes = False
+
+    for _ in range(expected_count):
+        result = await result_queue.get()
+        retry_count += result.retry_count
+        host_limited_count += 1 if result.host_limited else 0
+
+        if result.status == "stopped":
+            stop_writes = True
+            continue
+
+        if result.status == "failed":
+            failed += 1
+            await _emit_trace_event(
+                trace_callback,
+                {
+                    "event_type": "enrichment",
+                    "message": f"候选导师详情补全失败：{result.candidate_name}",
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "raw": {
+                        "candidate_id": result.candidate_id,
+                        "profile_url": result.profile_url,
+                        "status": result.status,
+                        "error_message": result.error_message,
+                    },
+                },
+            )
+            continue
+
+        if stop_writes or result.enrichment is None:
+            continue
+
+        try:
+            changed = await _apply_candidate_enrichment(
+                session_factory,
+                result.candidate_id,
+                result.enrichment,
+            )
+        except (CrawlJobPaused, CrawlJobCanceled):
+            stop_writes = True
+            continue
+
+        if changed:
+            enriched += 1
+            await _emit_trace_event(
+                trace_callback,
+                {
+                    "event_type": "enrichment",
+                    "message": f"候选导师详情补全成功：{result.candidate_name}（{_format_enrichment_fields(result.updated_fields or [])}）",
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "raw": {
+                        "candidate_id": result.candidate_id,
+                        "profile_url": result.profile_url,
+                        "updated_fields": result.updated_fields or [],
+                    },
+                },
+            )
+        else:
+            unchanged += 1
+            await _emit_trace_event(
+                trace_callback,
+                {
+                    "event_type": "enrichment",
+                    "message": f"候选导师详情无新增信息：{result.candidate_name}",
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "raw": {
+                        "candidate_id": result.candidate_id,
+                        "profile_url": result.profile_url,
+                        "detected_fields": result.updated_fields or [],
+                    },
+                },
+            )
+
+    await _update_crawl_job_run_enrichment_metrics(
+        session_factory,
+        job_id,
+        retry_count=retry_count,
+        host_limited_count=host_limited_count,
+        failed_candidate_count=failed,
+        unchanged_candidate_count=unchanged,
+    )
+    return enriched, unchanged, failed
 
 
 async def _mark_job_failed(
@@ -682,6 +1058,39 @@ async def _apply_candidate_enrichment(
         candidate.updated_at = datetime.now(UTC)
         await session.commit()
         return True
+
+
+async def _update_crawl_job_run_enrichment_metrics(
+    session_factory: async_sessionmaker[AsyncSession],
+    job_id: int,
+    *,
+    retry_count: int,
+    host_limited_count: int,
+    failed_candidate_count: int,
+    unchanged_candidate_count: int,
+) -> None:
+    if not any(
+        (
+            retry_count,
+            host_limited_count,
+            failed_candidate_count,
+            unchanged_candidate_count,
+        )
+    ):
+        return
+
+    async with session_factory() as session:
+        job = await session.get(CrawlJob, job_id)
+        if job is None or job.current_run_id is None:
+            return
+
+        run = await get_or_create_current_crawl_job_run(session, job)
+        run.retry_count += retry_count
+        run.host_limited_count += host_limited_count
+        run.failed_candidate_count += failed_candidate_count
+        run.unchanged_candidate_count += unchanged_candidate_count
+        run.updated_at = datetime.now(UTC)
+        await session.commit()
 
 
 async def _emit_trace_event(trace_callback: Any | None, event: dict[str, object]) -> None:
