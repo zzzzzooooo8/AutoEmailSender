@@ -1318,7 +1318,7 @@ export const ProfessorsPage = () => {
               </li>
               <li>
                 <span className="font-mono text-xs">recent_papers</span>{" "}
-                多篇论文用 | 分隔；同邮箱会覆盖更新。
+                多篇论文用 | 分隔；同邮箱会覆盖更新；最多保留前 8 篇。
               </li>
             </ul>
           </div>

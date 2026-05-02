@@ -9,6 +9,7 @@ from app.services.crawler_tools import (
     UNSAFE_CRAWL_URL_MESSAGE,
     validate_safe_public_crawl_url,
 )
+from app.services.professor_field_normalization import normalize_recent_papers
 
 
 CrawlJobStatusDTO = Literal[
@@ -179,11 +180,7 @@ class CrawlCandidateRead(BaseModel):
     @field_validator("recent_papers", mode="before")
     @classmethod
     def _normalize_recent_papers(cls, value: object) -> list[str]:
-        if value is None:
-            return []
-        if isinstance(value, list):
-            return [str(item).strip() for item in value if str(item).strip()]
-        return []
+        return normalize_recent_papers(value)
 
 
 class CrawlCandidateUpdatePayload(BaseModel):
@@ -228,13 +225,7 @@ class CrawlCandidateUpdatePayload(BaseModel):
     @field_validator("recent_papers", mode="before")
     @classmethod
     def _normalize_recent_papers(cls, value: object) -> list[str]:
-        if value is None:
-            return []
-        if isinstance(value, list):
-            return [str(item).strip() for item in value if str(item).strip()]
-        if isinstance(value, str):
-            return [item.strip() for item in value.split("|") if item.strip()]
-        return []
+        return normalize_recent_papers(value)
 
 
 class CrawlJobApprovePayload(BaseModel):

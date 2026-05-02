@@ -21,6 +21,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.crawl_job import CrawlCandidate, CrawlJob, CrawlJobStatus, CrawlPage
 from app.services.html_text import html_to_text
+from app.services.professor_field_normalization import (
+    RECENT_PAPERS_MAX_ITEMS,
+    normalize_recent_papers,
+    normalize_research_direction,
+)
 from app.services.professor_management import normalize_professor_title
 
 
@@ -125,20 +130,12 @@ class ProfessorCandidatePayload(BaseModel):
     @field_validator("research_direction", mode="before")
     @classmethod
     def _normalize_research_direction(cls, value: object) -> object:
-        if isinstance(value, list):
-            return "；".join(str(item).strip() for item in value if str(item).strip())
-        return value
+        return normalize_research_direction(value)
 
     @field_validator("recent_papers", mode="before")
     @classmethod
     def _normalize_recent_papers(cls, value: object) -> list[str]:
-        if value is None:
-            return []
-        if isinstance(value, list):
-            return [str(item).strip() for item in value if str(item).strip()]
-        if isinstance(value, str):
-            return [item.strip() for item in re.split(r"[|；;\n]+", value) if item.strip()]
-        return []
+        return normalize_recent_papers(value)
 
     @field_validator("confidence", mode="before")
     @classmethod
@@ -574,7 +571,7 @@ def normalize_candidate_payload(
     university: str,
     school: str,
 ) -> dict[str, Any]:
-    papers = [_clean_required(item) for item in candidate.recent_papers if _clean_optional(item)]
+    papers = normalize_recent_papers(candidate.recent_papers, max_items=RECENT_PAPERS_MAX_ITEMS)
     field_confidence = None
     if candidate.field_confidence is not None:
         field_confidence = {
@@ -615,6 +612,7 @@ def build_candidate_enrichment_prompt(
 要求：
 - 只补全缺失字段：email, department, research_direction, recent_papers
 - 只输出一个 JSON 对象，不要输出 Markdown、解释或前后缀文本
+- recent_papers 必须是 JSON 数组，例如 ["Paper A", "Paper B"]；不要输出拼接字符串
 - 不要改写已有基础字段
 - 字段值尽量保持页面原文：页面是中文就保留中文，页面是英文就保留英文；不要翻译、音译或拼音化已有内容
 - 没有证据就保持为空
@@ -656,6 +654,7 @@ def build_profile_candidate_prompt(
 - 只输出一个 JSON 对象，不要输出 Markdown、解释或前后缀文本
 - 必须使用英文键：name, email, title, university, school, department, research_direction, recent_papers, profile_url, source_url, confidence, field_confidence, evidence
 - confidence 必须是 0 到 1 的数字；field_confidence 中每个值也必须是 0 到 1 的数字
+- recent_papers 必须是 JSON 数组，例如 ["Paper A", "Paper B"]；不要输出拼接字符串
 - evidence 保持简短，只保留必要摘要，避免大段摘录页面原文
 - 字段值尽量保持页面原文：页面是中文就保留中文，页面是英文就保留英文；不要翻译、音译或拼音化姓名、院校、院系、研究方向等字段值
 - name 必须来自页面证据；无法确认姓名时返回空字符串

@@ -71,6 +71,7 @@ describe("ProfessorsPage notifications", () => {
     expect(screen.getByText(/recent_papers/)).toBeInTheDocument();
     expect(screen.getByText(/research_direction/)).toBeInTheDocument();
     expect(screen.getByText(/中文分号/)).toBeInTheDocument();
+    expect(screen.getByText(/最多保留前 8 篇/)).toBeInTheDocument();
   });
 
   it("keeps the import result detail card while showing a success notification after import", async () => {

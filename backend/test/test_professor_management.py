@@ -109,6 +109,23 @@ class ProfessorManagementServiceTests(unittest.TestCase):
             },
         )
 
+    def test_parse_csv_import_caps_recent_papers_to_first_8(self) -> None:
+        csv_content = (
+            ",".join(PROFESSOR_TEMPLATE_COLUMNS)
+            + "\n"
+            + (
+                "张三,zhang@example.edu,教授,示例大学,人工智能学院,计算机科学系,大语言模型,"
+                "Paper1|Paper2|Paper3|Paper4|Paper5|Paper6|Paper7|Paper8|Paper9|Paper10,,\n"
+            )
+        ).encode("utf-8-sig")
+
+        parsed = parse_professor_import_file("professors.csv", csv_content)
+
+        self.assertEqual(
+            parsed.data["zhang@example.edu"]["recent_papers"],
+            ["Paper1", "Paper2", "Paper3", "Paper4", "Paper5", "Paper6", "Paper7", "Paper8"],
+        )
+
     def test_parse_xlsx_import_finds_header_after_help_rows_and_reads_sparse_rows(self) -> None:
         workbook = Workbook()
         sheet = workbook.active

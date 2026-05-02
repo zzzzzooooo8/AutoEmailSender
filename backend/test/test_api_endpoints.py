@@ -576,6 +576,7 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertIn("# school：学院名称。示例：人工智能学院", csv_template.text)
         self.assertIn("# department：院系或系所。示例：计算机科学系", csv_template.text)
         self.assertIn("# research_direction：研究方向，多个方向用中文分号 ； 分隔。示例：大语言模型；智能体；信息抽取", csv_template.text)
+        self.assertIn("# recent_papers：近期论文，多篇用 | 分隔；最多保留前 8 篇。示例：Paper A|Paper B", csv_template.text)
         self.assertIn("name,email,title", csv_template.text)
         self.assertIn("示例：张明远,zhang@example.edu,教授,示例大学,人工智能学院,计算机科学系,大语言模型；智能体；信息抽取", csv_template.text)
         self.assertEqual(xlsx_template.status_code, 200)
@@ -633,7 +634,7 @@ class ApiEndpointTests(unittest.TestCase):
             "# 必填字段：name, email\n"
             "name,email,title,university,school,department,research_direction,recent_papers,profile_url,source_url\n"
             "示例：张明远,zhang@example.edu,教授,示例大学,人工智能学院,计算机科学系,大语言模型；智能体；信息抽取,Paper A|Paper B,https://example.edu/zhang,https://example.edu/faculty\n"
-            "李教授,li@example.edu,Associate Professor,New University,School of AI,AI,Updated direction,Paper 1|Paper 2,https://example.edu/li,https://example.edu/faculty\n"
+            "李教授,li@example.edu,Associate Professor,New University,School of AI,AI,Updated direction,Paper 1|Paper 2|Paper 3|Paper 4|Paper 5|Paper 6|Paper 7|Paper 8|Paper 9|Paper 10,https://example.edu/li,https://example.edu/faculty\n"
             "王老师,wang@example.edu,Assistant Professor,Another University,School,Dept,Direction,Paper 3,,\n"
             "坏数据,not-an-email,Professor,Bad University,School,Dept,Direction,Paper X,,\n"
         ).encode("utf-8-sig")
@@ -650,7 +651,10 @@ class ApiEndpointTests(unittest.TestCase):
         refreshed = self.client.get("/api/professors/management", params={"archived": "active"}).json()
         li_professor = next(item for item in refreshed if item["email"] == "li@example.edu")
         self.assertEqual(li_professor["title"], "Associate Professor")
-        self.assertEqual(li_professor["recent_papers"], ["Paper 1", "Paper 2"])
+        self.assertEqual(
+            li_professor["recent_papers"],
+            ["Paper 1", "Paper 2", "Paper 3", "Paper 4", "Paper 5", "Paper 6", "Paper 7", "Paper 8"],
+        )
         self.assertIsNone(li_professor["archived_at"])
 
         workbook = Workbook()
