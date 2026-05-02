@@ -1333,8 +1333,8 @@ class ApiEndpointTests(unittest.TestCase):
             )
 
         self.assertEqual(match_workspace.status_code, 200)
-        self.assertEqual(match_workspace.json()["current_task"]["status"], "matched")
-        self.assertEqual(match_workspace.json()["current_task"]["match_score"], 93)
+        self.assertEqual(match_workspace.json()["thread"]["current_task"]["status"], "matched")
+        self.assertEqual(match_workspace.json()["thread"]["current_task"]["match_score"], 93)
         self.assertEqual(generated_workspace.status_code, 200)
         self.assertEqual(generated_workspace.json()["current_task"]["status"], "review_required")
         self.assertEqual(generated_workspace.json()["current_task"]["generated_subject"], "更新后的套磁申请")
@@ -1544,8 +1544,8 @@ class ApiEndpointTests(unittest.TestCase):
             response = self.client.post(f"/api/email-tasks/{task_id}/calculate-match")
 
         self.assertEqual(response.status_code, 200, msg=response.text)
-        self.assertEqual(response.json()["current_task"]["match_score"], 18)
-        self.assertEqual(response.json()["current_task"]["status"], "matched")
+        self.assertEqual(response.json()["thread"]["current_task"]["match_score"], 18)
+        self.assertEqual(response.json()["thread"]["current_task"]["status"], "matched")
 
     def test_calculate_match_requires_professor_research_evidence(self) -> None:
         identity_id = self._create_identity(with_imap=False)
@@ -1592,6 +1592,18 @@ class ApiEndpointTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["detail"], "缺少研究方向或近期论文，暂不能分析匹配度")
+
+    def test_calculate_match_returns_409_when_run_is_already_running(self) -> None:
+        from app.services.task_runtime import MatchAnalysisAlreadyRunningError
+
+        with patch(
+            "app.api.email_tasks.calculate_task_match_once",
+            AsyncMock(side_effect=MatchAnalysisAlreadyRunningError("该任务正在分析中")),
+        ):
+            response = self.client.post("/api/email-tasks/1/calculate-match")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"], "该任务正在分析中")
 
     def test_workspace_thread_includes_professor_recent_papers(self) -> None:
         identity_id = self._create_identity(with_imap=False)

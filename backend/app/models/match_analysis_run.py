@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -17,6 +17,14 @@ if TYPE_CHECKING:
 
 class MatchAnalysisRun(Base):
     __tablename__ = "match_analysis_runs"
+    __table_args__ = (
+        Index(
+            "uq_match_analysis_runs_running_per_task",
+            "email_task_id",
+            unique=True,
+            sqlite_where=text("status = 'running'"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     email_task_id: Mapped[int] = mapped_column(
@@ -39,6 +47,7 @@ class MatchAnalysisRun(Base):
         index=True,
         nullable=False,
     )
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'failed'"))
     success: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))
     match_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -50,7 +59,10 @@ class MatchAnalysisRun(Base):
     status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     prompt_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     stable_prefix_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         index=True,

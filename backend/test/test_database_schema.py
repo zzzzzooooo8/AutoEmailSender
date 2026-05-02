@@ -13,7 +13,7 @@ from app.services.outreach_templates import import_outreach_template_file
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "c3d4e5f6a7b8"
+HEAD_REVISION = "d4c3b2a190ef"
 LEGACY_RUNTIME_REVISION = "7a1d5e42c9bd"
 
 
@@ -124,6 +124,10 @@ class DatabaseSchemaTests(unittest.TestCase):
                 "status_code",
                 "prompt_hash",
                 "stable_prefix_hash",
+                "status",
+                "started_at",
+                "finished_at",
+                "error_kind",
                 "error_message",
                 "created_at",
             }.issubset(match_run_columns),
@@ -156,6 +160,7 @@ class DatabaseSchemaTests(unittest.TestCase):
                 "ix_match_analysis_runs_email_task_id",
                 "ix_match_analysis_runs_professor_id",
                 "ix_match_analysis_runs_created_at",
+                "uq_match_analysis_runs_running_per_task",
             }.issubset(match_run_indexes),
         )
 

@@ -80,6 +80,10 @@ class MatchCalculationActionResult:
     run_id: int | None = None
 
 
+class MatchAnalysisAlreadyRunningError(RuntimeError):
+    pass
+
+
 async def process_pending_drafts_once(
     session_factory: async_sessionmaker[AsyncSession],
     limit: int = 5,
@@ -419,6 +423,7 @@ async def calculate_task_match(
         }:
             return _match_action_result(task)
 
+        run = await _create_running_match_analysis_run(session, task)
         try:
             generation = await llm_runtime.generate_match_evaluation(
                 identity=task.identity,
@@ -428,44 +433,45 @@ async def calculate_task_match(
                 available_materials=list(task.identity.materials),
             )
         except llm_runtime.LLMRuntimeError as exc:
-            run = MatchAnalysisRun(
-                email_task_id=task.id,
-                professor_id=task.professor_id,
-                identity_id=task.identity_id,
-                llm_profile_id=task.llm_profile_id,
-                success=False,
+            _mark_match_analysis_run_failed(
+                run,
+                error_kind="llm_runtime",
+                error_message=str(exc),
                 duration_ms=exc.duration_ms,
                 endpoint_kind=exc.endpoint_kind,
                 status_code=exc.status_code,
-                error_message=str(exc),
             )
-            session.add(run)
-            await session.flush()
             task.last_error = str(exc)
             task.updated_at = datetime.now(UTC)
             await session.commit()
             return _match_action_result(task, run_id=run.id)
+        except Exception as exc:
+            _mark_match_analysis_run_failed(
+                run,
+                error_kind="unexpected",
+                error_message=str(exc),
+            )
+            task.last_error = str(exc)
+            task.updated_at = datetime.now(UTC)
+            await session.commit()
+            raise
 
         result = generation.result
-        run = MatchAnalysisRun(
-            email_task_id=task.id,
-            professor_id=task.professor_id,
-            identity_id=task.identity_id,
-            llm_profile_id=task.llm_profile_id,
-            success=True,
-            match_score=result.match_score,
-            prompt_tokens=generation.usage.prompt_tokens if generation.usage else None,
-            completion_tokens=generation.usage.completion_tokens if generation.usage else None,
-            total_tokens=generation.usage.total_tokens if generation.usage else None,
-            cached_tokens=generation.usage.cached_tokens if generation.usage else None,
-            duration_ms=generation.duration_ms,
-            endpoint_kind=generation.endpoint_kind,
-            status_code=generation.status_code,
-            prompt_hash=generation.prompt_hash,
-            stable_prefix_hash=generation.stable_prefix_hash,
-        )
-        session.add(run)
-        await session.flush()
+        run.status = "succeeded"
+        run.success = True
+        run.match_score = result.match_score
+        run.prompt_tokens = generation.usage.prompt_tokens if generation.usage else None
+        run.completion_tokens = generation.usage.completion_tokens if generation.usage else None
+        run.total_tokens = generation.usage.total_tokens if generation.usage else None
+        run.cached_tokens = generation.usage.cached_tokens if generation.usage else None
+        run.duration_ms = generation.duration_ms
+        run.endpoint_kind = generation.endpoint_kind
+        run.status_code = generation.status_code
+        run.prompt_hash = generation.prompt_hash
+        run.stable_prefix_hash = generation.stable_prefix_hash
+        run.error_kind = None
+        run.error_message = None
+        run.finished_at = datetime.now(UTC)
         task.match_score = result.match_score
         task.match_reason = result.match_reason
         task.fit_points = result.fit_points
@@ -515,6 +521,47 @@ def _match_action_result(
         usage=usage or MatchUsageSummary(),
         run_id=run_id,
     )
+
+
+async def _create_running_match_analysis_run(
+    session: AsyncSession,
+    task: EmailTask,
+) -> MatchAnalysisRun:
+    run = MatchAnalysisRun(
+        email_task_id=task.id,
+        professor_id=task.professor_id,
+        identity_id=task.identity_id,
+        llm_profile_id=task.llm_profile_id,
+        status="running",
+        success=False,
+        started_at=datetime.now(UTC),
+    )
+    session.add(run)
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise MatchAnalysisAlreadyRunningError("该任务正在分析中") from exc
+    return run
+
+
+def _mark_match_analysis_run_failed(
+    run: MatchAnalysisRun,
+    *,
+    error_kind: str,
+    error_message: str,
+    duration_ms: int | None = None,
+    endpoint_kind: str | None = None,
+    status_code: int | None = None,
+) -> None:
+    run.status = "failed"
+    run.success = False
+    run.error_kind = error_kind
+    run.error_message = error_message
+    run.duration_ms = duration_ms
+    run.endpoint_kind = endpoint_kind
+    run.status_code = status_code
+    run.finished_at = datetime.now(UTC)
 
 
 async def calculate_task_match_once(

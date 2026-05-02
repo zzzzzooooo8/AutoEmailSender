@@ -20,6 +20,7 @@ from app.services.task_runtime import (
     calculate_task_match_once,
     cancel_scheduled_task,
     continue_task_manually,
+    MatchAnalysisAlreadyRunningError,
     regenerate_task_draft,
     start_follow_up_task,
     update_task_outreach_config,
@@ -48,6 +49,8 @@ async def calculate_match(
 ) -> MatchCalculationResultRead:
     try:
         result = await calculate_task_match_once(get_session_factory(), task_id)
+    except MatchAnalysisAlreadyRunningError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         detail = str(exc)
         status_code = 404 if "不存在" in detail else 400

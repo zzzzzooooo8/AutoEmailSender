@@ -19,7 +19,7 @@ from app.models import (
     Professor,
 )
 from app.services import llm_runtime
-from app.services.task_runtime import calculate_task_match_once
+from app.services.task_runtime import MatchAnalysisAlreadyRunningError, calculate_task_match_once
 
 
 class MatchAnalysisRuntimeTests(unittest.TestCase):
@@ -144,8 +144,11 @@ class MatchAnalysisRuntimeTests(unittest.TestCase):
         runs = self._run_async(self._list_runs())
         self.assertEqual(len(runs), 1)
         self.assertTrue(runs[0].success)
+        self.assertEqual(runs[0].status, "succeeded")
         self.assertEqual(runs[0].match_score, 91)
         self.assertEqual(runs[0].cached_tokens, 64)
+        self.assertIsNotNone(runs[0].started_at)
+        self.assertIsNotNone(runs[0].finished_at)
 
     def test_calculate_match_persists_failed_token_audit(self) -> None:
         with patch(
@@ -172,12 +175,38 @@ class MatchAnalysisRuntimeTests(unittest.TestCase):
         runs = self._run_async(self._list_runs())
         self.assertEqual(len(runs), 1)
         self.assertFalse(runs[0].success)
+        self.assertEqual(runs[0].status, "failed")
+        self.assertEqual(runs[0].error_kind, "llm_runtime")
         self.assertEqual(runs[0].status_code, 500)
         self.assertIn("模型请求失败", runs[0].error_message)
+        self.assertIsNotNone(runs[0].started_at)
+        self.assertIsNotNone(runs[0].finished_at)
+
+    def test_calculate_match_rejects_when_another_run_is_running(self) -> None:
+        self._run_async(self._insert_running_run())
+
+        with self.assertRaisesRegex(MatchAnalysisAlreadyRunningError, "该任务正在分析中"):
+            self._run_async(calculate_task_match_once(self.session_factory, self.email_task_id))
 
     async def _list_runs(self) -> list[MatchAnalysisRun]:
         async with self.session_factory() as session:
             return list(await session.scalars(select(MatchAnalysisRun)))
+
+    async def _insert_running_run(self) -> None:
+        async with self.session_factory() as session:
+            task = await session.get(EmailTask, self.email_task_id)
+            assert task is not None
+            session.add(
+                MatchAnalysisRun(
+                    email_task_id=task.id,
+                    professor_id=task.professor_id,
+                    identity_id=task.identity_id,
+                    llm_profile_id=task.llm_profile_id,
+                    status="running",
+                    success=False,
+                )
+            )
+            await session.commit()
 
 
 if __name__ == "__main__":

@@ -30,6 +30,7 @@ import {
   sumTokenUsage,
   type TokenUsage,
 } from '@/features/match-analysis/client/tokenUsage';
+import { ApiError } from '@/lib/api/client';
 import { calculateMatch } from '@/lib/api/emailTasksApi';
 import { useConfirmDialog } from '@/lib/useConfirmDialog';
 import { listProfessors } from '@/lib/api/professorsApi';
@@ -41,6 +42,9 @@ const SESSION_KEY = 'selected_professor_ids';
 const hasMatchEvidence = (professor: ProfessorDashboardItemDTO) =>
   Boolean(professor.research_direction?.trim()) ||
   professor.recent_papers.some((paper) => paper.trim());
+
+const isMatchConflictError = (error: unknown): error is ApiError =>
+  error instanceof ApiError && error.status === 409;
 
 export const HomePage = () => {
   const navigate = useNavigate();
@@ -297,6 +301,10 @@ export const HomePage = () => {
       await loadProfessors();
       notifySuccess('匹配分析完成', formatTokenUsageDescription(usage));
     } catch (actionError) {
+      if (isMatchConflictError(actionError)) {
+        notifyWarning('匹配分析进行中', '该任务正在分析中，请稍后刷新结果。');
+        return;
+      }
       const message = actionError instanceof Error ? actionError.message : '计算匹配失败';
       notifyError('计算匹配失败', message);
     } finally {
@@ -348,7 +356,9 @@ export const HomePage = () => {
             return await runCalculateMatchForProfessor(professor.id);
           } catch (actionError) {
             failedNames.push(
-              actionError instanceof Error
+              isMatchConflictError(actionError)
+                ? `${professor.name}：正在分析中`
+                : actionError instanceof Error
                 ? `${professor.name}：${actionError.message}`
                 : `${professor.name}：计算匹配失败`,
             );
