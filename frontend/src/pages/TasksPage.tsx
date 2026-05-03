@@ -12,6 +12,7 @@ import {
   Mail,
   Pause,
   Play,
+  Sparkles,
   Square,
   X,
 } from "lucide-react";
@@ -26,6 +27,12 @@ import {
   resumeBatchTask,
   stopBatchTask,
 } from "@/lib/api/batchTasksApi";
+import {
+  cancelMatchAnalysisJob,
+  listMatchAnalysisJobItems,
+  listMatchAnalysisJobs,
+  retryFailedMatchAnalysisJob,
+} from "@/lib/api/matchAnalysisJobsApi";
 import {
   cancelCrawlJob,
   approveCrawlCandidates,
@@ -46,6 +53,7 @@ import { formatApiDateTime } from "@/lib/dateTime";
 import { getPageItems, getTotalPages } from "@/lib/pagination";
 import {
   BATCH_TASK_STATUS_LABELS,
+  MATCH_ANALYSIS_JOB_STATUS_LABELS,
   PROFESSOR_STATUS_LABELS,
   type BatchTaskCardDTO,
   type BatchTaskItemDTO,
@@ -55,10 +63,13 @@ import {
   type CrawlJobStatusDTO,
   type CrawlJobSummaryDTO,
   type CrawlPageDTO,
+  type MatchAnalysisJobDTO,
+  type MatchAnalysisJobItemDTO,
+  type MatchAnalysisJobStatus,
   type WorkspaceTaskStatus,
 } from "@/types";
 
-type TasksTab = "batch" | "crawl";
+type TasksTab = "batch" | "crawl" | "match";
 
 const CRAWL_JOB_STATUS_LABELS: Record<CrawlJobStatusDTO, string> = {
   queued: "排队中",
@@ -110,6 +121,18 @@ const BATCH_ITEM_STATUS_TONES: Record<WorkspaceTaskStatus, string> = {
   send_failed: "bg-red-50 text-red-700",
   reply_detected: "bg-emerald-100 text-emerald-800",
   canceled: "bg-stone-100 text-stone-500",
+};
+
+const MATCH_ANALYSIS_JOB_STATUS_TONES: Record<
+  MatchAnalysisJobStatus,
+  string
+> = {
+  queued: "border-sky-200 bg-sky-50 text-sky-700",
+  running: "border-primary/20 bg-primary/10 text-primary",
+  completed: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  partial_failed: "border-amber-200 bg-amber-50 text-amber-700",
+  failed: "border-red-200 bg-red-50 text-red-700",
+  canceled: "border-stone-200 bg-stone-100 text-stone-600",
 };
 
 const CRAWL_REFRESH_INTERVAL_MS = 5000;
@@ -446,9 +469,20 @@ export const TasksPage = () => {
   >([]);
   const [batchTaskDetailsLoading, setBatchTaskDetailsLoading] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [matchAnalysisJobs, setMatchAnalysisJobs] = useState<
+    MatchAnalysisJobDTO[]
+  >([]);
+  const [matchJobsLoading, setMatchJobsLoading] = useState(false);
+  const [selectedMatchJob, setSelectedMatchJob] =
+    useState<MatchAnalysisJobDTO | null>(null);
+  const [selectedMatchJobItems, setSelectedMatchJobItems] = useState<
+    MatchAnalysisJobItemDTO[]
+  >([]);
+  const [matchJobDetailsLoading, setMatchJobDetailsLoading] = useState(false);
   const [crawlJobs, setCrawlJobs] = useState<CrawlJobSummaryDTO[]>([]);
   const [crawlJobsLoading, setCrawlJobsLoading] = useState(false);
   const [batchPage, setBatchPage] = useState(1);
+  const [matchPage, setMatchPage] = useState(1);
   const [crawlPage, setCrawlPage] = useState(1);
   const [crawlEventPage, setCrawlEventPage] = useState(1);
   const [crawlDetailPagePage, setCrawlDetailPagePage] = useState(1);
@@ -468,6 +502,12 @@ export const TasksPage = () => {
   const [retryingCrawlJobId, setRetryingCrawlJobId] = useState<number | null>(
     null,
   );
+  const [cancelingMatchJobId, setCancelingMatchJobId] = useState<number | null>(
+    null,
+  );
+  const [retryingMatchJobId, setRetryingMatchJobId] = useState<number | null>(
+    null,
+  );
   const [pausingCrawlJobId, setPausingCrawlJobId] = useState<number | null>(
     null,
   );
@@ -478,6 +518,8 @@ export const TasksPage = () => {
     useState<CrawlCandidateDTO | null>(null);
   const lastLoadErrorRef = useRef<string | null>(null);
   const lastBatchTaskDetailsLoadErrorRef = useRef<string | null>(null);
+  const lastMatchJobsLoadErrorRef = useRef<string | null>(null);
+  const lastMatchJobDetailsLoadErrorRef = useRef<string | null>(null);
   const lastCrawlJobsLoadErrorRef = useRef<string | null>(null);
   const lastCrawlJobDetailsLoadErrorRef = useRef<string | null>(null);
   const loadedTasksKeyRef = useRef<string | null>(null);
@@ -485,6 +527,8 @@ export const TasksPage = () => {
   const activeTasksRequestKeyRef = useRef<string | null>(null);
   const latestTasksRequestIdRef = useRef(0);
   const latestBatchTaskDetailsRequestIdRef = useRef(0);
+  const latestMatchJobsRequestIdRef = useRef(0);
+  const latestMatchJobDetailsRequestIdRef = useRef(0);
   const latestCrawlJobsRequestIdRef = useRef(0);
   const latestCrawlJobDetailsRequestIdRef = useRef(0);
   const tasksRequestKey =
@@ -514,8 +558,24 @@ export const TasksPage = () => {
     () => crawlJobs.filter((job) => job.status === "needs_review").length,
     [crawlJobs],
   );
-  const totalRunningCount = batchRunningCount + crawlRunningCount;
-  const totalAttentionCount = batchAttentionCount + crawlReviewCount;
+  const matchRunningCount = useMemo(
+    () =>
+      matchAnalysisJobs.filter(
+        (job) => job.status === "queued" || job.status === "running",
+      ).length,
+    [matchAnalysisJobs],
+  );
+  const matchAttentionCount = useMemo(
+    () =>
+      matchAnalysisJobs.filter(
+        (job) => job.status === "partial_failed" || job.status === "failed",
+      ).length,
+    [matchAnalysisJobs],
+  );
+  const totalRunningCount =
+    batchRunningCount + crawlRunningCount + matchRunningCount;
+  const totalAttentionCount =
+    batchAttentionCount + crawlReviewCount + matchAttentionCount;
   const sentBatchTaskItems = useMemo(
     () =>
       selectedBatchTaskItems.filter(
@@ -546,6 +606,10 @@ export const TasksPage = () => {
   const visibleCrawlJobs = useMemo(
     () => getPageItems(crawlJobs, crawlPage, TASKS_PAGE_SIZE),
     [crawlJobs, crawlPage],
+  );
+  const visibleMatchJobs = useMemo(
+    () => getPageItems(matchAnalysisJobs, matchPage, TASKS_PAGE_SIZE),
+    [matchAnalysisJobs, matchPage],
   );
   const visibleCrawlJobEvents = useMemo(
     () =>
@@ -679,6 +743,82 @@ export const TasksPage = () => {
           (options?.showLoading ?? true)
         ) {
           setCrawlJobsLoading(false);
+        }
+      }
+    },
+    [notifyError],
+  );
+
+  const loadMatchAnalysisJobs = useCallback(async () => {
+    if (!selectedIdentityId || !selectedLlmProfileId) {
+      setMatchAnalysisJobs([]);
+      lastMatchJobsLoadErrorRef.current = null;
+      setMatchJobsLoading(false);
+      return;
+    }
+    const requestId = latestMatchJobsRequestIdRef.current + 1;
+    latestMatchJobsRequestIdRef.current = requestId;
+    setMatchJobsLoading(true);
+    try {
+      const data = await listMatchAnalysisJobs({
+        identityId: selectedIdentityId,
+        llmProfileId: selectedLlmProfileId,
+      });
+      if (latestMatchJobsRequestIdRef.current !== requestId) {
+        return;
+      }
+      setMatchAnalysisJobs(data);
+      setSelectedMatchJob((currentJob) => {
+        if (!currentJob) {
+          return currentJob;
+        }
+        return data.find((job) => job.id === currentJob.id) ?? currentJob;
+      });
+      lastMatchJobsLoadErrorRef.current = null;
+    } catch (loadError) {
+      if (latestMatchJobsRequestIdRef.current !== requestId) {
+        return;
+      }
+      const message =
+        loadError instanceof Error ? loadError.message : "加载匹配分析任务失败";
+      if (lastMatchJobsLoadErrorRef.current !== message) {
+        notifyError("加载匹配分析任务失败", message);
+        lastMatchJobsLoadErrorRef.current = message;
+      }
+    } finally {
+      if (latestMatchJobsRequestIdRef.current === requestId) {
+        setMatchJobsLoading(false);
+      }
+    }
+  }, [notifyError, selectedIdentityId, selectedLlmProfileId]);
+
+  const loadMatchJobDetails = useCallback(
+    async (jobId: number) => {
+      const requestId = latestMatchJobDetailsRequestIdRef.current + 1;
+      latestMatchJobDetailsRequestIdRef.current = requestId;
+      setMatchJobDetailsLoading(true);
+      try {
+        const data = await listMatchAnalysisJobItems(jobId);
+        if (latestMatchJobDetailsRequestIdRef.current !== requestId) {
+          return;
+        }
+        setSelectedMatchJobItems(data);
+        lastMatchJobDetailsLoadErrorRef.current = null;
+      } catch (loadError) {
+        if (latestMatchJobDetailsRequestIdRef.current !== requestId) {
+          return;
+        }
+        const message =
+          loadError instanceof Error
+            ? loadError.message
+            : "加载匹配分析任务详情失败";
+        if (lastMatchJobDetailsLoadErrorRef.current !== message) {
+          notifyError("加载匹配分析任务详情失败", message);
+          lastMatchJobDetailsLoadErrorRef.current = message;
+        }
+      } finally {
+        if (latestMatchJobDetailsRequestIdRef.current === requestId) {
+          setMatchJobDetailsLoading(false);
         }
       }
     },
@@ -834,6 +974,17 @@ export const TasksPage = () => {
   }, [activeTab, crawlJobs.length, loadCrawlJobs]);
 
   useEffect(() => {
+    if (activeTab !== "match") {
+      return undefined;
+    }
+    void loadMatchAnalysisJobs();
+    const timer = window.setInterval(() => {
+      void loadMatchAnalysisJobs();
+    }, CRAWL_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [activeTab, loadMatchAnalysisJobs]);
+
+  useEffect(() => {
     if (!selectedBatchTask) {
       return undefined;
     }
@@ -847,6 +998,21 @@ export const TasksPage = () => {
       window.clearInterval(timer);
     };
   }, [loadBatchTaskDetails, selectedBatchTask]);
+
+  useEffect(() => {
+    if (!selectedMatchJob) {
+      return undefined;
+    }
+    lastMatchJobDetailsLoadErrorRef.current = null;
+    void loadMatchJobDetails(selectedMatchJob.id);
+    const timer = window.setInterval(() => {
+      void loadMatchJobDetails(selectedMatchJob.id);
+    }, CRAWL_DETAILS_REFRESH_INTERVAL_MS);
+    return () => {
+      latestMatchJobDetailsRequestIdRef.current += 1;
+      window.clearInterval(timer);
+    };
+  }, [loadMatchJobDetails, selectedMatchJob]);
 
   useEffect(() => {
     if (!selectedCrawlJobId) {
@@ -1100,6 +1266,56 @@ export const TasksPage = () => {
     }
   };
 
+  const handleCancelMatchJob = async (jobId: number) => {
+    const confirmed = await confirm({
+      title: "确认取消这个匹配分析任务？",
+      description: "已开始的单项分析会在安全点结束，未开始的导师会被取消。",
+      confirmLabel: "取消任务",
+      cancelLabel: "先保留",
+      tone: "danger",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    setCancelingMatchJobId(jobId);
+    try {
+      const result = await cancelMatchAnalysisJob(jobId);
+      setMatchAnalysisJobs((currentJobs) =>
+        currentJobs.map((job) => (job.id === jobId ? result.job : job)),
+      );
+      notifySuccess("已请求取消", "匹配分析任务会在安全点停止。");
+      if (selectedMatchJob?.id === jobId) {
+        setSelectedMatchJob(result.job);
+      }
+    } catch (actionError) {
+      const message =
+        actionError instanceof Error ? actionError.message : "取消匹配分析任务失败";
+      notifyError("取消匹配分析任务失败", message);
+    } finally {
+      setCancelingMatchJobId((currentJobId) =>
+        currentJobId === jobId ? null : currentJobId,
+      );
+    }
+  };
+
+  const handleRetryMatchJob = async (jobId: number) => {
+    setRetryingMatchJobId(jobId);
+    try {
+      const job = await retryFailedMatchAnalysisJob(jobId);
+      setMatchAnalysisJobs((currentJobs) => [job, ...currentJobs]);
+      notifySuccess("已创建重试任务", "失败项已重新加入后台匹配分析队列。");
+    } catch (actionError) {
+      const message =
+        actionError instanceof Error ? actionError.message : "重试匹配分析任务失败";
+      notifyError("重试匹配分析任务失败", message);
+    } finally {
+      setRetryingMatchJobId((currentJobId) =>
+        currentJobId === jobId ? null : currentJobId,
+      );
+    }
+  };
+
   const handleToggleCrawlCandidateSelection = (candidateId: number) => {
     if (!reviewableCrawlCandidateIds.includes(candidateId)) {
       return;
@@ -1175,6 +1391,14 @@ export const TasksPage = () => {
     setSelectedBatchTaskItems([]);
     setBatchTaskDetailsLoading(false);
     lastBatchTaskDetailsLoadErrorRef.current = null;
+  };
+
+  const closeMatchJobDetails = () => {
+    latestMatchJobDetailsRequestIdRef.current += 1;
+    setSelectedMatchJob(null);
+    setSelectedMatchJobItems([]);
+    setMatchJobDetailsLoading(false);
+    lastMatchJobDetailsLoadErrorRef.current = null;
   };
 
   if (!selectedIdentityId || !selectedLlmProfileId) {
@@ -1281,6 +1505,26 @@ export const TasksPage = () => {
             }
           >
             {crawlJobs.length}
+          </span>
+        </button>
+        <button
+          type="button"
+          aria-label="匹配分析"
+          onClick={() => setActiveTab("match")}
+          className={
+            activeTab === "match"
+              ? "inline-flex min-h-10 items-center gap-2 rounded-xl bg-primary px-5 text-sm font-medium text-white"
+              : "inline-flex min-h-10 items-center gap-2 rounded-xl px-5 text-sm font-medium text-stone-600 hover:bg-stone-50"
+          }
+        >
+          <Sparkles className="h-4 w-4" />
+          匹配分析
+          <span
+            className={
+              activeTab === "match" ? "text-white/80" : "text-stone-400"
+            }
+          >
+            {matchAnalysisJobs.length}
           </span>
         </button>
       </div>
@@ -1412,6 +1656,98 @@ export const TasksPage = () => {
             page={batchPage}
             totalCount={tasks.length}
             onPageChange={setBatchPage}
+          />
+        </>
+      ) : activeTab === "match" && matchJobsLoading && matchAnalysisJobs.length === 0 ? (
+        <div className="mt-6 flex items-center justify-center gap-2 rounded-3xl border border-stone-200 bg-white px-6 py-14 text-sm text-stone-500 shadow-sm">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          正在加载匹配分析任务列表...
+        </div>
+      ) : activeTab === "match" && matchAnalysisJobs.length === 0 ? (
+        <div className="mt-6 rounded-3xl border border-dashed border-stone-300 bg-white px-6 py-14 text-center text-sm text-stone-500 shadow-sm">
+          暂无匹配分析任务。可从首页创建。
+        </div>
+      ) : activeTab === "match" ? (
+        <>
+          <div className="mt-6 grid gap-4">
+            {visibleMatchJobs.map((job) => (
+              <article
+                key={job.id}
+                className="rounded-2xl border border-stone-200 bg-white px-5 py-5 shadow-sm"
+              >
+                <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px_auto] lg:items-center">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 text-xs font-medium text-stone-500">
+                      <Sparkles className="h-4 w-4 text-primary" />
+                      匹配分析任务
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <h2 className="truncate text-base font-semibold text-stone-900">
+                        {job.name}
+                      </h2>
+                      <span
+                        className={`rounded-full border px-2.5 py-1 text-xs font-medium ${MATCH_ANALYSIS_JOB_STATUS_TONES[job.status]}`}
+                      >
+                        {MATCH_ANALYSIS_JOB_STATUS_LABELS[job.status]}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm text-stone-500">
+                      成功 {job.succeeded_count} / 失败 {job.failed_count} / 跳过 {job.skipped_count} / 共 {job.target_count}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                    <span className="rounded-full bg-stone-50 px-2.5 py-1 text-xs text-stone-600">
+                      Token {job.total_tokens.toLocaleString("zh-CN")}
+                    </span>
+                    <span className="rounded-full bg-stone-50 px-2.5 py-1 text-xs text-stone-600">
+                      更新 {formatDisplayTime(job.updated_at, { withSeconds: true })}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                    {(job.status === "queued" || job.status === "running") ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleCancelMatchJob(job.id)}
+                        className="ui-btn-danger"
+                        disabled={cancelingMatchJobId === job.id}
+                      >
+                        <Square className="h-4 w-4" />
+                        取消
+                      </button>
+                    ) : null}
+                    {(
+                      job.status === "partial_failed" ||
+                      job.status === "failed" ||
+                      job.status === "canceled"
+                    ) ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleRetryMatchJob(job.id)}
+                        className="ui-btn-secondary"
+                        disabled={retryingMatchJobId === job.id}
+                      >
+                        <Play className="h-4 w-4" />
+                        重试失败项
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedMatchJob(job)}
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 transition hover:border-primary/30 hover:bg-primary/5 hover:text-primary"
+                      aria-label="查看详情"
+                      title="查看详情"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+          <TaskListPagination
+            page={matchPage}
+            totalCount={matchAnalysisJobs.length}
+            onPageChange={setMatchPage}
           />
         </>
       ) : crawlJobsLoading && crawlJobs.length === 0 ? (
@@ -1729,6 +2065,147 @@ export const TasksPage = () => {
                     </dd>
                   </div>
                 </dl>
+              </section>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {selectedMatchJob ? (
+        <div
+          className="fixed inset-0 z-50 flex items-stretch justify-end bg-stone-950/30 p-0 sm:p-6"
+          onClick={closeMatchJobDetails}
+        >
+          <section
+            role="dialog"
+            aria-label="匹配分析任务详情"
+            className="flex h-full w-full flex-col overflow-hidden bg-white shadow-xl sm:max-w-4xl sm:rounded-3xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-stone-200 bg-[#fcfbf8] px-6 py-5">
+              <div>
+                <div className="flex items-center gap-2 text-xs font-medium text-stone-500">
+                  <Sparkles className="h-4 w-4 text-primary" />
+                  匹配分析任务
+                </div>
+                <h2 className="mt-2 text-xl font-semibold text-stone-900">
+                  {selectedMatchJob.name}
+                </h2>
+                <p className="mt-2 text-sm text-stone-500">
+                  创建于 {formatDisplayTime(selectedMatchJob.created_at)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeMatchJobDetails}
+                className="ui-btn-secondary shrink-0"
+                aria-label="关闭"
+              >
+                <X className="h-4 w-4" />
+                关闭
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-6 py-5">
+              <div className="grid gap-3 sm:grid-cols-4">
+                <div className="rounded-2xl border border-stone-100 bg-white px-4 py-3">
+                  <div className="text-xs font-medium text-stone-500">成功</div>
+                  <div className="mt-2 text-sm font-semibold text-stone-900">
+                    {selectedMatchJob.succeeded_count}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-stone-100 bg-white px-4 py-3">
+                  <div className="text-xs font-medium text-stone-500">失败</div>
+                  <div className="mt-2 text-sm font-semibold text-stone-900">
+                    {selectedMatchJob.failed_count}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-stone-100 bg-white px-4 py-3">
+                  <div className="text-xs font-medium text-stone-500">跳过</div>
+                  <div className="mt-2 text-sm font-semibold text-stone-900">
+                    {selectedMatchJob.skipped_count}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-stone-100 bg-white px-4 py-3">
+                  <div className="text-xs font-medium text-stone-500">总 Token</div>
+                  <div className="mt-2 text-sm font-semibold text-stone-900">
+                    {selectedMatchJob.total_tokens.toLocaleString("zh-CN")}
+                  </div>
+                </div>
+              </div>
+
+              <section className="mt-6">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold text-stone-900">
+                    导师明细
+                  </h3>
+                  {matchJobDetailsLoading ? (
+                    <span className="inline-flex items-center gap-2 text-xs text-stone-500">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      正在刷新
+                    </span>
+                  ) : null}
+                </div>
+
+                <div className="mt-3 overflow-hidden rounded-2xl border border-stone-200">
+                  <table className="min-w-full divide-y divide-stone-200 text-sm">
+                    <thead className="bg-stone-50 text-left text-xs font-medium text-stone-500">
+                      <tr>
+                        <th className="px-4 py-3">导师</th>
+                        <th className="px-4 py-3">状态</th>
+                        <th className="px-4 py-3">匹配分</th>
+                        <th className="px-4 py-3">说明</th>
+                        <th className="px-4 py-3">Token</th>
+                        <th className="px-4 py-3">更新时间</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100 bg-white text-stone-700">
+                      {selectedMatchJobItems.length > 0 ? (
+                        selectedMatchJobItems.map((item) => (
+                          <tr key={item.id}>
+                            <td className="px-4 py-3 align-top">
+                              <div className="font-medium text-stone-900">
+                                {item.professor_name}
+                              </div>
+                              <div className="mt-1 text-xs text-stone-500">
+                                {[item.professor_title, item.professor_school]
+                                  .filter(Boolean)
+                                  .join(" / ") || "暂无补充信息"}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 align-top">
+                              <span
+                                className={`rounded-full border px-2.5 py-1 text-xs font-medium ${MATCH_ANALYSIS_JOB_STATUS_TONES[item.status === "succeeded" ? "completed" : item.status === "skipped" ? "canceled" : item.status === "running" ? "running" : item.status === "queued" ? "queued" : "failed"]}`}
+                              >
+                                {item.status}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 align-top">
+                              {item.match_score ?? "未生成"}
+                            </td>
+                            <td className="px-4 py-3 align-top">
+                              {item.error_message || item.skip_reason || "已完成"}
+                            </td>
+                            <td className="px-4 py-3 align-top">
+                              {item.total_tokens.toLocaleString("zh-CN")}
+                            </td>
+                            <td className="px-4 py-3 align-top">
+                              {formatDisplayTime(item.updated_at, { withSeconds: true })}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td
+                            colSpan={6}
+                            className="px-4 py-6 text-center text-sm text-stone-500"
+                          >
+                            暂无任务明细。
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </section>
             </div>
           </section>

@@ -14,6 +14,7 @@ from app.api import (
     identities_router,
     llm_profiles_router,
     materials_router,
+    match_analysis_jobs_router,
     professors_router,
     test_compose_router,
     token_usage_router,
@@ -65,6 +66,7 @@ def create_app() -> FastAPI:
 
     app.include_router(identities_router)
     app.include_router(materials_router)
+    app.include_router(match_analysis_jobs_router)
     app.include_router(llm_profiles_router)
     app.include_router(professors_router)
     app.include_router(test_compose_router)

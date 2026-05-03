@@ -35,12 +35,11 @@ import {
 } from "@/features/professor-status/dashboardStatus";
 import {
   formatTokenUsageDescription,
-  runWarmupThenConcurrent,
-  sumTokenUsage,
   type TokenUsage,
 } from "@/features/match-analysis/client/tokenUsage";
 import { ApiError } from "@/lib/api/client";
 import { calculateMatch } from "@/lib/api/emailTasksApi";
+import { createMatchAnalysisJob } from "@/lib/api/matchAnalysisJobsApi";
 import { useConfirmDialog } from "@/lib/useConfirmDialog";
 import { listProfessors } from "@/lib/api/professorsApi";
 import { ensureWorkspaceTask } from "@/lib/api/workspacesApi";
@@ -391,15 +390,16 @@ export const HomePage = () => {
       notifyWarning("缺少默认材料", "请到个人中心设置默认材料。");
       return;
     }
+    if (!selectedIdentityId || !selectedLlmProfileId) {
+      notifyWarning("缺少运行配置", "请先选择身份和模型。");
+      return;
+    }
 
     setBulkScoring(true);
-    const failedNames: string[] = [];
     const selectedProfessors = professors.filter((item) =>
       selectedIds.has(item.id),
     );
     const analyzableProfessors = selectedProfessors.filter(hasMatchEvidence);
-    const skippedCount =
-      selectedProfessors.length - analyzableProfessors.length;
 
     if (analyzableProfessors.length === 0) {
       notifyWarning(
@@ -411,40 +411,17 @@ export const HomePage = () => {
     }
 
     try {
-      const usageResults = await runWarmupThenConcurrent(
-        analyzableProfessors,
-        3,
-        async (professor): Promise<TokenUsage | null> => {
-          toggleScoringProfessor(professor.id, true);
-          try {
-            return await runCalculateMatchForProfessor(professor.id);
-          } catch (actionError) {
-            failedNames.push(
-              isMatchConflictError(actionError)
-                ? `${professor.name}：正在分析中`
-                : actionError instanceof Error
-                  ? `${professor.name}：${actionError.message}`
-                  : `${professor.name}：计算匹配失败`,
-            );
-            return null;
-          } finally {
-            toggleScoringProfessor(professor.id, false);
-          }
-        },
+      const job = await createMatchAnalysisJob({
+        identity_id: selectedIdentityId,
+        llm_profile_id: selectedLlmProfileId,
+        professor_ids: Array.from(selectedIds),
+        name: null,
+      });
+      notifySuccess(
+        "已创建批量匹配分析任务",
+        `任务中心会继续后台分析 ${job.target_count} 位导师。`,
       );
-      await loadProfessors();
-      const successfulUsages = usageResults.filter(
-        (usage): usage is TokenUsage => usage !== null,
-      );
-      const summary = `成功 ${successfulUsages.length} 位 / 失败 ${failedNames.length} 位 / 跳过 ${skippedCount} 位；${formatTokenUsageDescription(sumTokenUsage(successfulUsages))}`;
-      if (failedNames.length > 0) {
-        notifyError(
-          "部分导师计算失败",
-          `${summary}；${failedNames.slice(0, 2).join("；")}`,
-        );
-      } else {
-        notifySuccess("批量匹配分析完成", summary);
-      }
+      setSelectedIds(new Set());
     } finally {
       setBulkScoring(false);
     }
