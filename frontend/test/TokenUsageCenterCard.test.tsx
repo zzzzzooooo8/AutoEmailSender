@@ -94,6 +94,31 @@ describe("TokenUsageCenterCard", () => {
     expect(screen.getByText("缓存 80")).toBeInTheDocument();
   });
 
+  it("animates content while opening and closing", async () => {
+    mockedListTokenUsageRecords.mockResolvedValue(createRecordListResult());
+    render(<TokenUsageCenterCard />);
+
+    const toggle = screen.getByRole("button", { name: /Token 消耗记录中心/ });
+    await waitFor(() => expect(screen.getByText("共 1 条")).toBeInTheDocument());
+
+    fireEvent.click(toggle);
+
+    const content = await screen.findByText("李老师 - 匹配分析").then(() =>
+      document.getElementById("token-usage-center-content"),
+    );
+
+    expect(content).toHaveClass("collapsible-card-content");
+    expect(content).toHaveAttribute("data-state", "open");
+
+    fireEvent.click(toggle);
+
+    expect(content).toHaveAttribute("data-state", "closed");
+
+    fireEvent.transitionEnd(content!, { propertyName: "grid-template-rows" });
+
+    expect(document.getElementById("token-usage-center-content")).not.toBeInTheDocument();
+  });
+
   it("filters records and chart by feature type", async () => {
     mockedListTokenUsageRecords.mockResolvedValue(createRecordListResult());
     const { container } = render(<TokenUsageCenterCard />);

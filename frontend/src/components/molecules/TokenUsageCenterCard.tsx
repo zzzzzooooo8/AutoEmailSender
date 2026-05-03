@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { MouseEvent as ReactMouseEvent } from 'react';
+import type {
+  MouseEvent as ReactMouseEvent,
+  TransitionEvent as ReactTransitionEvent,
+} from 'react';
 import clsx from 'clsx';
 import { ChevronDown, Loader2, RefreshCw, RotateCcw, Search } from 'lucide-react';
 import { NativeSelectField } from '@/components/atoms/NativeSelectField';
@@ -64,6 +67,7 @@ const emptyResult: TokenUsageRecordListDTO = {
 
 export function TokenUsageCenterCard() {
   const [open, setOpen] = useState(false);
+  const [renderContent, setRenderContent] = useState(false);
   const [result, setResult] = useState<TokenUsageRecordListDTO>(emptyResult);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -206,13 +210,32 @@ export function TokenUsageCenterCard() {
     void loadChart(nextPreset);
   };
 
+  const toggleOpen = () => {
+    setOpen((previous) => {
+      const nextOpen = !previous;
+      if (nextOpen) {
+        setRenderContent(true);
+      }
+      return nextOpen;
+    });
+  };
+
+  const handleContentTransitionEnd = (
+    event: ReactTransitionEvent<HTMLDivElement>,
+  ) => {
+    if (open || event.propertyName !== 'grid-template-rows') {
+      return;
+    }
+    setRenderContent(false);
+  };
+
   return (
     <section className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
       <button
         type="button"
         aria-expanded={open}
         aria-controls="token-usage-center-content"
-        onClick={() => setOpen((previous) => !previous)}
+        onClick={toggleOpen}
         className="collapsible-card-toggle flex w-full items-center justify-between gap-4 px-6 py-5 text-left transition hover:bg-stone-50 active:bg-stone-50"
       >
         <div className="min-w-0">
@@ -236,81 +259,88 @@ export function TokenUsageCenterCard() {
         />
       </button>
 
-      {open ? (
-        <div id="token-usage-center-content" className="space-y-5 px-6 pb-6">
-          <TokenUsageFilters
-            featureType={featureType}
-            modelName={modelName}
-            modelOptions={result.model_options}
-            startAt={startAt}
-            endAt={endAt}
-            onFeatureTypeChange={setFeatureType}
-            onModelNameChange={setModelName}
-            onStartAtChange={setStartAt}
-            onEndAtChange={setEndAt}
-            onSubmit={handleSearch}
-            onReset={handleReset}
-          />
+      {renderContent ? (
+        <div
+          id="token-usage-center-content"
+          data-state={open ? 'open' : 'closed'}
+          onTransitionEnd={handleContentTransitionEnd}
+          className="collapsible-card-content"
+        >
+          <div className="min-h-0 space-y-5 px-6 pb-6">
+            <TokenUsageFilters
+              featureType={featureType}
+              modelName={modelName}
+              modelOptions={result.model_options}
+              startAt={startAt}
+              endAt={endAt}
+              onFeatureTypeChange={setFeatureType}
+              onModelNameChange={setModelName}
+              onStartAtChange={setStartAt}
+              onEndAtChange={setEndAt}
+              onSubmit={handleSearch}
+              onReset={handleReset}
+            />
 
-          {showInitialRecordLoading ? (
-            <div className="flex items-center justify-center gap-2 rounded-2xl border border-stone-200 bg-stone-50 px-4 py-8 text-sm text-stone-500">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              正在加载 token 消耗记录...
-            </div>
-          ) : error ? (
-            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">
-              <div>{error}</div>
-              <button
-                type="button"
-                onClick={() => void loadRecords(page)}
-                className="ui-btn-secondary mt-3 border-red-200 bg-white px-3 py-2 text-xs text-red-700 transition hover:bg-red-50"
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-                重试
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-5">
-              {showRecordRefreshing ? (
-                <div
-                  role="status"
-                  className="flex items-center gap-2 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-2.5 text-sm text-blue-700"
+            {showInitialRecordLoading ? (
+              <div className="flex items-center justify-center gap-2 rounded-2xl border border-stone-200 bg-stone-50 px-4 py-8 text-sm text-stone-500">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                正在加载 token 消耗记录...
+              </div>
+            ) : error ? (
+              <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">
+                <div>{error}</div>
+                <button
+                  type="button"
+                  onClick={() => void loadRecords(page)}
+                  className="ui-btn-secondary mt-3 border-red-200 bg-white px-3 py-2 text-xs text-red-700 transition hover:bg-red-50"
                 >
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  正在更新 token 消耗记录...
-                </div>
-              ) : null}
-              <TokenUsageSummaryGrid result={result} />
-              {result.records.length === 0 ? (
-                <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-8 text-center text-sm text-stone-500">
-                  暂无 token 消耗记录
-                </div>
-              ) : (
-                <div className="overflow-hidden rounded-2xl border border-stone-200">
-                  {result.records.map((record) => (
-                    <TokenUsageRecordRow key={record.id} record={record} />
-                  ))}
-                </div>
-              )}
-              <TokenUsagePagination
-                page={page}
-                totalPages={result.pagination.total_pages}
-                pageInput={pageInput}
-                onPageInputChange={setPageInput}
-                onPageChange={handlePageChange}
-                onJump={handlePageJump}
-                disabled={loading}
-              />
-              <TokenUsageTrendChart
-                chart={chart}
-                preset={chartPreset}
-                loading={chartLoading}
-                error={chartError}
-                onPresetChange={handlePresetChange}
-                onRetry={() => void loadChart(chartPreset)}
-              />
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  重试
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {showRecordRefreshing ? (
+                  <div
+                    role="status"
+                    className="flex items-center gap-2 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-2.5 text-sm text-blue-700"
+                  >
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    正在更新 token 消耗记录...
+                  </div>
+                ) : null}
+                <TokenUsageSummaryGrid result={result} />
+                {result.records.length === 0 ? (
+                  <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-8 text-center text-sm text-stone-500">
+                    暂无 token 消耗记录
+                  </div>
+                ) : (
+                  <div className="overflow-hidden rounded-2xl border border-stone-200">
+                    {result.records.map((record) => (
+                      <TokenUsageRecordRow key={record.id} record={record} />
+                    ))}
+                  </div>
+                )}
+                <TokenUsagePagination
+                  page={page}
+                  totalPages={result.pagination.total_pages}
+                  pageInput={pageInput}
+                  onPageInputChange={setPageInput}
+                  onPageChange={handlePageChange}
+                  onJump={handlePageJump}
+                  disabled={loading}
+                />
+                <TokenUsageTrendChart
+                  chart={chart}
+                  preset={chartPreset}
+                  loading={chartLoading}
+                  error={chartError}
+                  onPresetChange={handlePresetChange}
+                  onRetry={() => void loadChart(chartPreset)}
+                />
+              </div>
+            )}
             </div>
-          )}
         </div>
       ) : null}
     </section>
