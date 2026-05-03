@@ -435,6 +435,84 @@ export interface CreateBatchTaskRequestDTO {
   outreach_template_body_html: string | null;
 }
 
+export type MatchAnalysisJobStatus =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'partial_failed'
+  | 'failed'
+  | 'canceled';
+
+export type MatchAnalysisJobItemStatus =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'skipped'
+  | 'canceled';
+
+export interface CreateMatchAnalysisJobRequestDTO {
+  identity_id: number;
+  llm_profile_id: number;
+  professor_ids: number[];
+  name?: string | null;
+}
+
+export interface MatchAnalysisJobDTO {
+  id: number;
+  name: string;
+  status: MatchAnalysisJobStatus;
+  target_count: number;
+  succeeded_count: number;
+  failed_count: number;
+  skipped_count: number;
+  total_prompt_tokens: number;
+  total_completion_tokens: number;
+  total_tokens: number;
+  identity_id: number;
+  llm_profile_id: number;
+  cancel_requested_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  updated_at: string;
+  last_error: string | null;
+}
+
+export interface MatchAnalysisJobItemDTO {
+  id: number;
+  job_id: number;
+  professor_id: number;
+  professor_name: string;
+  professor_email: string | null;
+  professor_title: string | null;
+  professor_school: string | null;
+  email_task_id: number | null;
+  status: MatchAnalysisJobItemStatus;
+  match_score: number | null;
+  match_analysis_run_id: number | null;
+  error_message: string | null;
+  skip_reason: string | null;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  started_at: string | null;
+  finished_at: string | null;
+  updated_at: string;
+}
+
+export const MATCH_ANALYSIS_JOB_STATUS_LABELS: Record<
+  MatchAnalysisJobStatus,
+  string
+> = {
+  queued: '排队中',
+  running: '运行中',
+  completed: '已完成',
+  partial_failed: '部分失败',
+  failed: '失败',
+  canceled: '已取消',
+};
+
 export type BatchTaskRuntimeStatus = 'running' | 'paused' | 'stopped' | 'completed';
 
 export type WorkspaceTaskStatus =

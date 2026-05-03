@@ -102,7 +102,46 @@ LLM 配置表。
 - `batch_tasks` 只负责聚合与调度，不代表单封邮件
 - 创建子任务时会把 `primary_material_id` 和 `selected_material_ids` 快照到 `email_tasks`
 
-## 7. `email_tasks`
+## 7. `match_analysis_jobs`
+后台批量匹配分析任务聚合表。
+
+关键字段：
+- `identity_id`
+- `llm_profile_id`
+- `name`
+- `status`
+- `target_count`
+- `succeeded_count` / `failed_count` / `skipped_count`
+- `total_prompt_tokens` / `total_completion_tokens` / `total_tokens`
+- `cancel_requested_at`
+- `started_at` / `finished_at`
+- `last_error`
+
+说明：
+- `match_analysis_jobs` 只表示一次后台批量匹配分析运行，不代表邮件发送批次
+- 任务中心使用它展示匹配分析任务进度、状态和 token 汇总
+- 实际单次模型调用审计仍以 `match_analysis_runs` 为准
+
+## 8. `match_analysis_job_items`
+后台批量匹配分析明细表。
+
+关键字段：
+- `job_id`
+- `professor_id`
+- `email_task_id`
+- `status`
+- `match_analysis_run_id`
+- `error_message`
+- `skip_reason`
+- `prompt_tokens` / `completion_tokens` / `total_tokens`
+- `started_at` / `finished_at`
+
+说明：
+- 每条记录对应一个导师的一次批量分析项
+- `email_task_id` 复用或创建对应导师任务，用于把匹配结果写回现有任务流
+- `match_analysis_run_id` 关联实际模型调用审计，便于任务中心与 token 记录中心互相追踪
+
+## 9. `email_tasks`
 单导师执行单元。
 
 关键字段：
@@ -139,7 +178,7 @@ LLM 配置表。
 - `canceled` 是显式取消态，不再把 `skipped` 当作当前执行状态
 - `match_score` 只用于筛选、排序和解释，不参与是否继续执行的自动裁决
 
-## 8. `email_logs`
+## 10. `email_logs`
 工作区双向消息流水。
 
 关键字段：
@@ -163,7 +202,7 @@ LLM 配置表。
 - `received` 日志仅来自 IMAP 回复检测
 - 草稿日志的 `provider_payload.usage` 会记录 `prompt_tokens / completion_tokens / total_tokens`
 
-## 9. `test_compose_sessions`
+## 11. `test_compose_sessions`
 测试写信页的当前草稿会话。
 
 关键字段：
@@ -179,7 +218,7 @@ LLM 配置表。
 - 每套“身份 + 模型”组合会维护一份测试写信草稿
 - 这套数据不进入导师任务流
 
-## 10. `test_compose_messages`
+## 12. `test_compose_messages`
 测试写信页的发送历史。
 
 关键字段：
@@ -199,7 +238,7 @@ LLM 配置表。
 - 测试邮件固定发给当前身份自己的邮箱
 - 历史与 `email_logs` 分离保存，不污染导师通信记录
 
-## 11. 导师导入与归档规则
+## 13. 导师导入与归档规则
 - 模板字段固定为：
   - `name`
   - `email`
