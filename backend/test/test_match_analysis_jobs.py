@@ -18,6 +18,8 @@ from app.models import (
     LLMProfile,
     MatchAnalysisJob,
     MatchAnalysisJobItem,
+    MatchAnalysisJobItemStatus,
+    MatchAnalysisJobStatus,
     Professor,
 )
 from app.services.match_analysis_job_runtime import (
@@ -164,6 +166,64 @@ class MatchAnalysisJobRuntimeTests(unittest.TestCase):
         items = self._run_async(self._get_job_items(job.id))
         self.assertEqual(items[0].status, "canceled")
 
+    def test_cancel_requested_job_with_success_and_canceled_items_stays_canceled(self) -> None:
+        identity_id, llm_profile_id, professor_ids = self._run_async(
+            self._seed_create_job_data(extra_analyzable_professor=True),
+        )
+        job = self._run_async(
+            create_match_analysis_job(
+                self.session_factory,
+                identity_id=identity_id,
+                llm_profile_id=llm_profile_id,
+                professor_ids=[professor_ids[0], professor_ids[2]],
+                name=None,
+            ),
+        )
+        self._run_async(self._mark_job_partially_canceled(job.id))
+
+        processed = self._run_async(
+            run_queued_match_analysis_jobs_once(
+                self.session_factory,
+                item_concurrency=1,
+            ),
+        )
+
+        self.assertEqual(processed, 0)
+        stored = self._run_async(self._get_job(job.id))
+        self.assertEqual(stored.status, "canceled")
+        self.assertEqual(stored.succeeded_count, 1)
+
+    def test_running_job_is_recovered_and_processed_after_worker_restart(self) -> None:
+        identity_id, llm_profile_id, professor_ids = self._run_async(
+            self._seed_create_job_data(),
+        )
+        job = self._run_async(
+            create_match_analysis_job(
+                self.session_factory,
+                identity_id=identity_id,
+                llm_profile_id=llm_profile_id,
+                professor_ids=[professor_ids[0]],
+                name=None,
+            ),
+        )
+        self._run_async(self._mark_job_running_after_interrupted_worker(job.id))
+
+        with patch(
+            "app.services.task_runtime.llm_runtime.generate_match_evaluation",
+            AsyncMock(return_value=self._build_match_evaluation_result(match_score=88)),
+        ):
+            processed = self._run_async(
+                run_queued_match_analysis_jobs_once(
+                    self.session_factory,
+                    item_concurrency=1,
+                ),
+            )
+
+        self.assertEqual(processed, 1)
+        stored = self._run_async(self._get_job(job.id))
+        self.assertEqual(stored.status, "completed")
+        self.assertEqual(stored.succeeded_count, 1)
+
     async def _create_schema(self) -> None:
         async with self.engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
@@ -257,6 +317,33 @@ class MatchAnalysisJobRuntimeTests(unittest.TestCase):
                     .order_by(MatchAnalysisJobItem.id.asc()),
                 ),
             )
+
+    async def _mark_job_partially_canceled(self, job_id: int) -> None:
+        async with self.session_factory() as session:
+            job = await session.get(MatchAnalysisJob, job_id)
+            assert job is not None
+            items = list(
+                await session.scalars(
+                    select(MatchAnalysisJobItem)
+                    .where(MatchAnalysisJobItem.job_id == job_id)
+                    .order_by(MatchAnalysisJobItem.id.asc()),
+                ),
+            )
+            job.status = MatchAnalysisJobStatus.RUNNING.value
+            job.cancel_requested_at = job.updated_at
+            items[0].status = MatchAnalysisJobItemStatus.SUCCEEDED.value
+            items[0].prompt_tokens = 60
+            items[0].completion_tokens = 40
+            items[0].total_tokens = 100
+            items[1].status = MatchAnalysisJobItemStatus.CANCELED.value
+            await session.commit()
+
+    async def _mark_job_running_after_interrupted_worker(self, job_id: int) -> None:
+        async with self.session_factory() as session:
+            job = await session.get(MatchAnalysisJob, job_id)
+            assert job is not None
+            job.status = MatchAnalysisJobStatus.RUNNING.value
+            await session.commit()
 
     @staticmethod
     def _run_async(awaitable):
