@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "c3d4e5f6a7b8"
+HEAD_REVISION = "a9c8e7d6f5b4"
 
 
 class ApiEndpointTests(unittest.TestCase):
@@ -1163,6 +1163,134 @@ class ApiEndpointTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("发送日期", response.json()["detail"])
+
+    def test_create_and_list_match_analysis_jobs(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        self._upload_material(
+            identity_id,
+            filename="resume.txt",
+            content=b"AI systems",
+            material_type="resume",
+        )
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "王老师",
+                "email": "wang-match@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "AI agents",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        created = self.client.post(
+            "/api/match-analysis-jobs",
+            json={
+                "identity_id": identity_id,
+                "llm_profile_id": llm_id,
+                "professor_ids": [professor_id],
+            },
+        )
+        self.assertEqual(created.status_code, 201, msg=created.text)
+        self.assertEqual(created.json()["target_count"], 1)
+
+        listed = self.client.get(
+            "/api/match-analysis-jobs",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(len(listed.json()), 1)
+
+    def test_cancel_match_analysis_job(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        self._upload_material(
+            identity_id,
+            filename="resume.txt",
+            content=b"AI systems",
+            material_type="resume",
+        )
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "取消任务导师",
+                "email": "cancel-job@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "AI agents",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+        created = self.client.post(
+            "/api/match-analysis-jobs",
+            json={
+                "identity_id": identity_id,
+                "llm_profile_id": llm_id,
+                "professor_ids": [professor_id],
+            },
+        )
+        self.assertEqual(created.status_code, 201, msg=created.text)
+        job_id = created.json()["id"]
+
+        canceled = self.client.post(f"/api/match-analysis-jobs/{job_id}/cancel")
+        self.assertEqual(canceled.status_code, 200, msg=canceled.text)
+        self.assertTrue(canceled.json()["ok"])
+        self.assertEqual(canceled.json()["job"]["status"], "canceled")
+
+    def test_retry_failed_match_analysis_job_returns_400_when_no_failed_items(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        self._upload_material(
+            identity_id,
+            filename="resume.txt",
+            content=b"AI systems",
+            material_type="resume",
+        )
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "重试任务导师",
+                "email": "retry-job@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "AI agents",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+        created = self.client.post(
+            "/api/match-analysis-jobs",
+            json={
+                "identity_id": identity_id,
+                "llm_profile_id": llm_id,
+                "professor_ids": [professor_id],
+            },
+        )
+        self.assertEqual(created.status_code, 201, msg=created.text)
+        job_id = created.json()["id"]
+
+        retried = self.client.post(f"/api/match-analysis-jobs/{job_id}/retry-failed")
+        self.assertEqual(retried.status_code, 400)
+        self.assertIn("没有可重试的失败项", retried.json()["detail"])
 
     def test_create_scheduled_batch_task_returns_normalized_scheduled_dates(self) -> None:
         identity_id = self._create_identity(with_imap=False)

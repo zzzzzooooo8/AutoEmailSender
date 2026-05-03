@@ -24,6 +24,9 @@ class Settings:
     draft_worker_interval_seconds: int
     dispatcher_interval_seconds: int
     imap_poll_interval_seconds: int
+    match_analysis_job_worker_count: int
+    match_analysis_job_interval_seconds: int
+    match_analysis_job_item_concurrency: int
     crawler_worker_count: int
     crawler_profile_enrichment_concurrency: int
     crawler_host_concurrency: int
@@ -80,6 +83,9 @@ def get_settings() -> Settings:
         draft_worker_interval_seconds=_get_int_env("DRAFT_WORKER_INTERVAL_SECONDS", 10),
         dispatcher_interval_seconds=_get_int_env("DISPATCHER_INTERVAL_SECONDS", 30),
         imap_poll_interval_seconds=_get_int_env("IMAP_POLL_INTERVAL_SECONDS", 60),
+        match_analysis_job_worker_count=_get_int_env("MATCH_ANALYSIS_JOB_WORKER_COUNT", 1),
+        match_analysis_job_interval_seconds=_get_int_env("MATCH_ANALYSIS_JOB_INTERVAL_SECONDS", 10),
+        match_analysis_job_item_concurrency=_get_int_env("MATCH_ANALYSIS_JOB_ITEM_CONCURRENCY", 3),
         crawler_worker_count=_get_int_env("CRAWLER_WORKER_COUNT", 2),
         crawler_profile_enrichment_concurrency=_get_int_env(
             "CRAWLER_PROFILE_ENRICHMENT_CONCURRENCY",

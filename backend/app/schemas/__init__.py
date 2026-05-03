@@ -28,6 +28,12 @@ from app.schemas.llm_profile import (
     LLMProfileTestResult,
     LLMProfileUpdate,
 )
+from app.schemas.match_analysis_job import (
+    CreateMatchAnalysisJobRequest,
+    MatchAnalysisJobActionResponse,
+    MatchAnalysisJobItemRead,
+    MatchAnalysisJobRead,
+)
 from app.schemas.professor import (
     ProfessorDashboardItemRead,
     ProfessorImportResult,
@@ -45,6 +51,7 @@ __all__ = [
     "BatchTaskItemRead",
     "ConnectionTestResult",
     "CreateBatchTaskRequest",
+    "CreateMatchAnalysisJobRequest",
     "EmailTaskApprovalRequest",
     "EmailTaskPrimaryMaterialRequest",
     "EmailTaskScheduleRequest",
@@ -60,6 +67,9 @@ __all__ = [
     "LLMProfileRead",
     "LLMProfileTestResult",
     "LLMProfileUpdate",
+    "MatchAnalysisJobActionResponse",
+    "MatchAnalysisJobItemRead",
+    "MatchAnalysisJobRead",
     "ProfessorDashboardItemRead",
     "ProfessorImportResult",
     "ProfessorRead",
