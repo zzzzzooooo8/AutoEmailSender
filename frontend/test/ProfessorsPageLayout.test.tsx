@@ -4,7 +4,12 @@ import { NotificationProvider } from "@/context/NotificationContext";
 import { ProfessorsPage } from "@/pages/ProfessorsPage";
 import type { ProfessorManagementItemDTO } from "@/types";
 
+const mockedUseSelectionContext = vi.hoisted(() => vi.fn());
 const listProfessorsForManagement = vi.hoisted(() => vi.fn());
+
+vi.mock("@/context/SelectionContext", () => ({
+  useSelectionContext: mockedUseSelectionContext,
+}));
 
 vi.mock("@/lib/api/professorsApi", () => ({
   listProfessorsForManagement,
@@ -65,6 +70,19 @@ const renderPage = () =>
 
 describe("ProfessorsPage layout", () => {
   beforeEach(() => {
+    mockedUseSelectionContext.mockReset();
+    mockedUseSelectionContext.mockReturnValue({
+      identities: [],
+      llmProfiles: [],
+      selectedIdentityId: 1,
+      selectedLlmProfileId: 7,
+      selectedIdentity: null,
+      selectedLlmProfile: null,
+      loading: false,
+      setSelectedIdentityId: vi.fn(),
+      setSelectedLlmProfileId: vi.fn(),
+      refreshSelections: vi.fn(),
+    });
     listProfessorsForManagement.mockReset();
     listProfessorsForManagement.mockResolvedValue([professor]);
   });

@@ -4,10 +4,15 @@ import { NotificationProvider } from "@/context/NotificationContext";
 import { clearDiagnosticEvents, getDiagnosticEvents } from "@/lib/diagnostics";
 import { ProfessorsPage } from "@/pages/ProfessorsPage";
 
+const mockedUseSelectionContext = vi.hoisted(() => vi.fn());
 const listProfessorsForManagement = vi.hoisted(() => vi.fn());
 const createCrawlJob = vi.hoisted(() => vi.fn());
 const listCrawlJobs = vi.hoisted(() => vi.fn());
 const listCrawlCandidates = vi.hoisted(() => vi.fn());
+
+vi.mock("@/context/SelectionContext", () => ({
+  useSelectionContext: mockedUseSelectionContext,
+}));
 
 vi.mock("@/lib/api/professorsApi", () => ({
   listProfessorsForManagement,
@@ -43,6 +48,19 @@ describe("ProfessorsPage crawler job entry", () => {
     createCrawlJob.mockResolvedValue({ id: 1 });
     listCrawlJobs.mockReset();
     listCrawlCandidates.mockReset();
+    mockedUseSelectionContext.mockReset();
+    mockedUseSelectionContext.mockReturnValue({
+      identities: [],
+      llmProfiles: [],
+      selectedIdentityId: 1,
+      selectedLlmProfileId: 7,
+      selectedIdentity: null,
+      selectedLlmProfile: null,
+      loading: false,
+      setSelectedIdentityId: vi.fn(),
+      setSelectedLlmProfileId: vi.fn(),
+      refreshSelections: vi.fn(),
+    });
   });
 
   it("creates a crawl job with multiple unique list page urls", async () => {
@@ -81,7 +99,7 @@ describe("ProfessorsPage crawler job entry", () => {
           "https://example.edu/faculty/page/2",
         ],
         entry_type: "list",
-        llm_profile_id: null,
+        llm_profile_id: 7,
       });
     });
 
@@ -160,9 +178,48 @@ describe("ProfessorsPage crawler job entry", () => {
         start_url: "https://example.edu/faculty/zhang",
         start_urls: ["https://example.edu/faculty/zhang"],
         entry_type: "profile",
-        llm_profile_id: null,
+        llm_profile_id: 7,
       });
     });
+  });
+
+  it("does not create a crawl job without a selected llm profile", async () => {
+    mockedUseSelectionContext.mockReturnValue({
+      identities: [],
+      llmProfiles: [],
+      selectedIdentityId: 1,
+      selectedLlmProfileId: null,
+      selectedIdentity: null,
+      selectedLlmProfile: null,
+      loading: false,
+      setSelectedIdentityId: vi.fn(),
+      setSelectedLlmProfileId: vi.fn(),
+      refreshSelections: vi.fn(),
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(listProfessorsForManagement).toHaveBeenCalledWith("active");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "智能抓取" }));
+
+    const dialog = screen.getByRole("dialog", { name: "创建抓取任务" });
+    fireEvent.change(within(dialog).getByLabelText("学校"), {
+      target: { value: "示例大学" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("学院"), {
+      target: { value: "计算机学院" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("页面 URL"), {
+      target: { value: "https://example.edu/faculty" },
+    });
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "开始抓取" }));
+
+    expect(createCrawlJob).not.toHaveBeenCalled();
+    expect(screen.getByText("请先选择模型")).toBeInTheDocument();
   });
 
   it("records a failed crawler job creation as a user action", async () => {

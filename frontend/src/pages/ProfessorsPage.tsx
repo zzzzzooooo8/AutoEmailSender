@@ -20,12 +20,16 @@ import {
   Plus,
   RefreshCcw,
   Search,
+  Square,
+  SquareCheck,
+  SquareMinus,
   Upload,
   Users,
 } from "lucide-react";
 import { NativeSelectField } from "@/components/atoms/NativeSelectField";
 import { ManagementProfessorRow } from "@/components/molecules/ManagementProfessorRow";
 import { useNotification } from "@/context/NotificationContext";
+import { useSelectionContext } from "@/context/SelectionContext";
 import { safeRecordUserAction } from "@/lib/diagnosticUserActions";
 import {
   extractProfessorTitleTags,
@@ -327,6 +331,7 @@ const ModalShell = ({
 
 export const ProfessorsPage = () => {
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
+  const { selectedLlmProfileId } = useSelectionContext();
   const { notifyError, notifySuccess, notifyWarning } = useNotification();
   const [archiveFilter, setArchiveFilter] = useState<ArchiveFilter>("active");
   const [professors, setProfessors] = useState<ProfessorManagementItemDTO[]>(
@@ -489,9 +494,13 @@ export const ProfessorsPage = () => {
   const currentPageSelectableIds = paginatedProfessors
     .filter(isProfessorSelectable)
     .map((professor) => professor.id);
+  const currentPageSelectedCount = currentPageSelectableIds.filter((id) =>
+    selectedIds.has(id),
+  ).length;
+  const someCurrentPageSelected = currentPageSelectedCount > 0;
   const allCurrentPageSelected =
     currentPageSelectableIds.length > 0 &&
-    currentPageSelectableIds.every((id) => selectedIds.has(id));
+    currentPageSelectedCount === currentPageSelectableIds.length;
   const openCreateModal = () => {
     setEditingProfessor(null);
     setFormState(emptyProfessorForm());
@@ -700,6 +709,10 @@ export const ProfessorsPage = () => {
   };
 
   const handleCreateCrawlJob = async () => {
+    if (!selectedLlmProfileId) {
+      notifyWarning("请先选择模型", "智能爬取会使用当前顶部栏选择的模型。");
+      return;
+    }
     const startUrls = normalizeCrawlerStartUrls(crawlerFormState.start_urls);
     const payload = {
       university: crawlerFormState.university.trim(),
@@ -707,7 +720,7 @@ export const ProfessorsPage = () => {
       start_url: startUrls[0] ?? "",
       start_urls: startUrls,
       entry_type: crawlerFormState.entry_type,
-      llm_profile_id: null,
+      llm_profile_id: selectedLlmProfileId,
     };
     const diagnosticData = {
       university: payload.university,
@@ -937,29 +950,35 @@ export const ProfessorsPage = () => {
       </section>
 
       <section className="mt-6 overflow-hidden rounded-[32px] border border-stone-200 bg-white shadow-sm">
-        <div className="flex flex-col gap-3 border-b border-stone-100 px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-col gap-3 border-b border-stone-100 px-6 py-4">
           <div className="text-sm text-stone-600">
             共 {filteredProfessors.length} 位导师，第 {safeCurrentPage} /{" "}
             {totalPages} 页，每页最多 {PROFESSORS_PER_PAGE} 位
           </div>
-          <div className="flex flex-wrap gap-2">
+          {currentPageSelectableIds.length > 0 ? (
             <button
               type="button"
+              aria-label={
+                allCurrentPageSelected
+                  ? "取消选择当前页筛选结果"
+                  : "选择当前页筛选结果"
+              }
+              aria-pressed={allCurrentPageSelected}
               onClick={handleToggleSelectCurrentPage}
-              disabled={currentPageSelectableIds.length === 0}
-              className="ui-btn-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex min-h-10 w-fit items-center gap-2 rounded-2xl border border-stone-200 bg-stone-50 px-3 text-sm font-medium text-stone-700 transition hover:border-primary/40 hover:bg-white hover:text-primary lg:hidden"
             >
-              {allCurrentPageSelected ? "取消全选当前页" : "全选当前页筛选结果"}
+              {allCurrentPageSelected ? (
+                <SquareCheck className="h-4 w-4" />
+              ) : someCurrentPageSelected ? (
+                <SquareMinus className="h-4 w-4" />
+              ) : (
+                <Square className="h-4 w-4" />
+              )}
+              {allCurrentPageSelected
+                ? "取消选择当前页"
+                : "选择当前页筛选结果"}
             </button>
-            <button
-              type="button"
-              onClick={() => setSelectedIds(new Set())}
-              disabled={selectedIds.size === 0}
-              className="ui-btn-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              清空选择
-            </button>
-          </div>
+          ) : null}
         </div>
 
         <div
@@ -969,7 +988,36 @@ export const ProfessorsPage = () => {
             managementTableColumns,
           )}
         >
-          <div className="flex justify-center text-center">选择</div>
+          <div className="flex justify-center text-center">
+            <span aria-hidden="true" className="sr-only justify-center text-center">
+              选择
+            </span>
+            <button
+              type="button"
+              aria-label={
+                allCurrentPageSelected
+                  ? "取消选择当前页筛选结果"
+                  : "选择当前页筛选结果"
+              }
+              aria-pressed={allCurrentPageSelected}
+              onClick={handleToggleSelectCurrentPage}
+              disabled={currentPageSelectableIds.length === 0}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 transition hover:border-primary/40 hover:text-primary disabled:cursor-not-allowed disabled:opacity-45"
+              title={
+                allCurrentPageSelected
+                  ? "取消选择当前页筛选结果"
+                  : "选择当前页筛选结果"
+              }
+            >
+              {allCurrentPageSelected ? (
+                <SquareCheck className="h-4 w-4" />
+              ) : someCurrentPageSelected ? (
+                <SquareMinus className="h-4 w-4" />
+              ) : (
+                <Square className="h-4 w-4" />
+              )}
+            </button>
+          </div>
           <div className="flex justify-center text-center">导师</div>
           <div className="flex justify-center text-center">职称</div>
           <div className="flex justify-center text-center">邮箱</div>

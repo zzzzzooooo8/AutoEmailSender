@@ -32,6 +32,35 @@ describe("TokenUsageCenterCard", () => {
     });
   });
 
+  it("loads the header record count before expanding", async () => {
+    mockedListTokenUsageRecords.mockResolvedValue(
+      createRecordListResult({
+        summary: {
+          input_tokens: 500,
+          output_tokens: 80,
+          cached_tokens: 80,
+          total_tokens: 580,
+          record_count: 12,
+        },
+        pagination: {
+          page: 1,
+          page_size: 5,
+          total_records: 12,
+          total_pages: 3,
+        },
+      }),
+    );
+
+    render(<TokenUsageCenterCard />);
+
+    const toggle = screen.getByRole("button", { name: /Token 消耗记录中心/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    await waitFor(() => expect(screen.getByText("共 12 条")).toBeInTheDocument());
+    expect(mockedGetTokenUsageChart).not.toHaveBeenCalled();
+    expect(screen.queryByText("李老师 - 匹配分析")).not.toBeInTheDocument();
+  });
+
   it("loads recent token records after expanding", async () => {
     mockedListTokenUsageRecords.mockResolvedValue(createRecordListResult());
 
@@ -163,6 +192,71 @@ describe("TokenUsageCenterCard", () => {
     );
   });
 
+  it("keeps the current records visible while loading another page", async () => {
+    const nextPageResult = createRecordListResult({
+      records: [
+        {
+          id: "match_analysis:2",
+          feature_type: "match_analysis",
+          feature_label: "匹配分析",
+          title: "王老师 - 匹配分析",
+          input_tokens: 300,
+          output_tokens: 50,
+          cached_tokens: 0,
+          total_tokens: 350,
+          model_name: "gpt-test",
+          identity_name: "博士申请邮箱",
+          created_at: "2026-04-29T11:00:00Z",
+          status: "success",
+        },
+      ],
+      summary: {
+        input_tokens: 500,
+        output_tokens: 80,
+        cached_tokens: 80,
+        total_tokens: 580,
+        record_count: 2,
+      },
+      pagination: {
+        page: 2,
+        page_size: 5,
+        total_records: 10,
+        total_pages: 2,
+      },
+    });
+    const deferredNextPage = createDeferred<TokenUsageRecordListDTO>();
+    mockedListTokenUsageRecords
+      .mockResolvedValueOnce(
+        createRecordListResult({
+          pagination: {
+            page: 1,
+            page_size: 5,
+            total_records: 10,
+            total_pages: 2,
+          },
+        }),
+      )
+      .mockReturnValueOnce(deferredNextPage.promise);
+
+    render(<TokenUsageCenterCard />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Token 消耗记录中心/ }));
+    await waitFor(() => expect(screen.getByText("李老师 - 匹配分析")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("正在更新 token 消耗记录...")).toBeInTheDocument(),
+    );
+    expect(screen.getByText("李老师 - 匹配分析")).toBeInTheDocument();
+    expect(screen.queryByText("正在加载 token 消耗记录...")).not.toBeInTheDocument();
+
+    deferredNextPage.resolve(nextPageResult);
+
+    await waitFor(() => expect(screen.getByText("王老师 - 匹配分析")).toBeInTheDocument());
+    expect(screen.queryByText("正在更新 token 消耗记录...")).not.toBeInTheDocument();
+  });
+
   it("renders stacked chart buckets", async () => {
     mockedListTokenUsageRecords.mockResolvedValue(createRecordListResult());
     render(<TokenUsageCenterCard />);
@@ -229,4 +323,14 @@ function createRecordListResult(
     model_options: ["gpt-test"],
     ...overrides,
   };
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
 }

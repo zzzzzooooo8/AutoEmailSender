@@ -81,6 +81,8 @@ export function TokenUsageCenterCard() {
   const [chartLoading, setChartLoading] = useState(false);
   const [chartLoaded, setChartLoaded] = useState(false);
   const [chartError, setChartError] = useState<string | null>(null);
+  const showInitialRecordLoading = loading && !loaded;
+  const showRecordRefreshing = loading && loaded;
 
   const currentFilters = useMemo(
     () => ({ featureType, modelName, startAt, endAt }),
@@ -141,11 +143,14 @@ export function TokenUsageCenterCard() {
   );
 
   useEffect(() => {
-    if (!open) {
-      return;
-    }
     if (!loading && !loaded && !error) {
       void loadRecords(1);
+    }
+  }, [error, loadRecords, loaded, loading]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
     }
     if (!chartLoading && !chartLoaded && !chartError) {
       void loadChart(defaultChartPreset);
@@ -154,11 +159,7 @@ export function TokenUsageCenterCard() {
     chartError,
     chartLoaded,
     chartLoading,
-    error,
     loadChart,
-    loadRecords,
-    loaded,
-    loading,
     open,
   ]);
 
@@ -251,7 +252,7 @@ export function TokenUsageCenterCard() {
             onReset={handleReset}
           />
 
-          {loading ? (
+          {showInitialRecordLoading ? (
             <div className="flex items-center justify-center gap-2 rounded-2xl border border-stone-200 bg-stone-50 px-4 py-8 text-sm text-stone-500">
               <Loader2 className="h-4 w-4 animate-spin" />
               正在加载 token 消耗记录...
@@ -270,6 +271,15 @@ export function TokenUsageCenterCard() {
             </div>
           ) : (
             <div className="space-y-5">
+              {showRecordRefreshing ? (
+                <div
+                  role="status"
+                  className="flex items-center gap-2 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-2.5 text-sm text-blue-700"
+                >
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  正在更新 token 消耗记录...
+                </div>
+              ) : null}
               <TokenUsageSummaryGrid result={result} />
               {result.records.length === 0 ? (
                 <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-8 text-center text-sm text-stone-500">
@@ -289,6 +299,7 @@ export function TokenUsageCenterCard() {
                 onPageInputChange={setPageInput}
                 onPageChange={handlePageChange}
                 onJump={handlePageJump}
+                disabled={loading}
               />
               <TokenUsageTrendChart
                 chart={chart}
@@ -474,6 +485,7 @@ function TokenUsagePagination({
   onPageInputChange,
   onPageChange,
   onJump,
+  disabled = false,
 }: {
   page: number;
   totalPages: number;
@@ -481,6 +493,7 @@ function TokenUsagePagination({
   onPageInputChange: (value: string) => void;
   onPageChange: (page: number) => void;
   onJump: () => void;
+  disabled?: boolean;
 }) {
   if (totalPages <= 0) {
     return null;
@@ -490,7 +503,7 @@ function TokenUsagePagination({
       <button
         type="button"
         className="ui-btn-secondary px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-        disabled={page <= 1}
+        disabled={disabled || page <= 1}
         onClick={() => onPageChange(page - 1)}
       >
         上一页
@@ -503,15 +516,21 @@ function TokenUsagePagination({
         max={totalPages}
         value={pageInput}
         onChange={(event) => onPageInputChange(event.target.value)}
+        disabled={disabled}
         className="h-9 w-20 rounded-xl border border-stone-200 px-3 text-sm"
       />
-      <button type="button" className="ui-btn-primary px-3 py-1.5 text-sm" onClick={onJump}>
+      <button
+        type="button"
+        className="ui-btn-primary px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+        disabled={disabled}
+        onClick={onJump}
+      >
         跳转
       </button>
       <button
         type="button"
         className="ui-btn-secondary px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-        disabled={page >= totalPages}
+        disabled={disabled || page >= totalPages}
         onClick={() => onPageChange(page + 1)}
       >
         下一页

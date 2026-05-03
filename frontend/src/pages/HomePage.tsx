@@ -7,6 +7,8 @@ import {
   RefreshCcw,
   Search,
   Sparkles,
+  Square,
+  SquareCheck,
 } from "lucide-react";
 import { NativeSelectField } from "@/components/atoms/NativeSelectField";
 import { DashboardProfessorRow } from "@/components/molecules/DashboardProfessorRow";
@@ -235,6 +237,30 @@ export const HomePage = () => {
     filteredProfessors,
     sortKey,
   );
+  const visibleProfessorIds = visibleProfessors.map((item) => item.id);
+  const visibleSelectedCount = visibleProfessorIds.filter((id) =>
+    selectedIds.has(id),
+  ).length;
+  const allVisibleProfessorsSelected =
+    visibleProfessorIds.length > 0 &&
+    visibleSelectedCount === visibleProfessorIds.length;
+
+  const handleToggleVisibleProfessors = () => {
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      const allVisibleSelected =
+        visibleProfessorIds.length > 0 &&
+        visibleProfessorIds.every((id) => previous.has(id));
+
+      if (allVisibleSelected) {
+        visibleProfessorIds.forEach((id) => next.delete(id));
+      } else {
+        visibleProfessorIds.forEach((id) => next.add(id));
+      }
+
+      return next;
+    });
+  };
 
   const toggleSelection = (professorId: number) => {
     setSelectedIds((previous) => {
@@ -641,29 +667,35 @@ export const HomePage = () => {
         </section>
 
         <section className="mt-6 rounded-3xl border border-stone-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-stone-100 px-6 py-4">
+          <div className="flex flex-wrap items-center gap-3 border-b border-stone-100 px-6 py-4">
+            {visibleProfessors.length > 0 ? (
+              <button
+                type="button"
+                aria-label={
+                  allVisibleProfessorsSelected
+                    ? "取消选择当前结果"
+                    : "选择当前结果"
+                }
+                aria-pressed={allVisibleProfessorsSelected}
+                onClick={handleToggleVisibleProfessors}
+                className={`inline-flex min-h-10 items-center gap-2 rounded-2xl border px-3 text-sm font-medium transition hover:border-primary/40 hover:bg-white hover:text-primary ${
+                  allVisibleProfessorsSelected
+                    ? "border-primary/30 bg-primary/5 text-primary"
+                    : "border-stone-200 bg-stone-50 text-stone-700"
+                }`}
+              >
+                {allVisibleProfessorsSelected ? (
+                  <SquareCheck className="h-4 w-4" />
+                ) : (
+                  <Square className="h-4 w-4" />
+                )}
+                {allVisibleProfessorsSelected
+                  ? "取消选择当前结果"
+                  : "选择当前结果"}
+              </button>
+            ) : null}
             <div className="text-sm text-stone-600">
               共 {visibleProfessors.length} 位导师，已选择 {selectedIds.size} 位
-            </div>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() =>
-                  setSelectedIds(
-                    new Set(visibleProfessors.map((item) => item.id)),
-                  )
-                }
-                className="ui-btn-secondary px-3 py-1.5 text-sm"
-              >
-                全选当前结果
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedIds(new Set())}
-                className="ui-btn-secondary px-3 py-1.5 text-sm"
-              >
-                清空选择
-              </button>
             </div>
           </div>
 
