@@ -5,14 +5,12 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import clsx from "clsx";
 import {
   Archive,
   Bot,
-  ChevronDown,
   Download,
   FileSpreadsheet,
   Loader2,
@@ -73,6 +71,7 @@ type CrawlerJobFormState = {
   start_urls: string[];
   entry_type: CrawlJobEntryTypeDTO;
 };
+type IntakeActionTone = "primary" | "amber" | "stone";
 
 const PROFESSORS_PER_PAGE = 20;
 const ALL_PROFESSOR_FILTER_VALUE = "__all__";
@@ -186,82 +185,55 @@ const getSchoolPairValue = (professor: ProfessorManagementItemDTO) =>
 const getSchoolPairLabel = (professor: ProfessorManagementItemDTO) =>
   [professor.university, professor.school].filter(Boolean).join(" / ");
 
-const ToolbarMenu = ({
-  disabled,
-  onDownload,
-}: {
-  disabled?: boolean;
-  onDownload: (format: "xlsx" | "csv") => void;
-}) => {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    const handlePointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-    window.addEventListener("pointerdown", handlePointerDown);
-    return () => window.removeEventListener("pointerdown", handlePointerDown);
-  }, [open]);
-
-  return (
-    <div ref={rootRef} className="relative">
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => setOpen((previous) => !previous)}
-        className="ui-btn-secondary h-10 rounded-2xl disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        <Download className="h-4 w-4" />
-        下载模板
-        <ChevronDown
-          className={clsx("h-4 w-4 transition", open && "rotate-180")}
-        />
-      </button>
-      {open ? (
-        <div className="absolute left-0 top-[calc(100%+0.5rem)] z-30 min-w-56 overflow-hidden rounded-3xl border border-stone-200 bg-[linear-gradient(180deg,rgba(255,255,255,0.99),rgba(252,250,246,0.96))] p-2 shadow-[0_24px_44px_-28px_rgba(41,37,36,0.42)]">
-          <button
-            type="button"
-            onClick={() => {
-              onDownload("xlsx");
-              setOpen(false);
-            }}
-            className="flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm text-stone-700 transition hover:bg-stone-100/90 hover:text-stone-900"
-          >
-            <FileSpreadsheet className="h-4 w-4 text-primary" />
-            <span>
-              下载 XLSX 模板
-              <span className="mt-1 block text-xs text-stone-500">
-                适合直接在 Excel 中填写
-              </span>
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              onDownload("csv");
-              setOpen(false);
-            }}
-            className="flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm text-stone-700 transition hover:bg-stone-100/90 hover:text-stone-900"
-          >
-            <Download className="h-4 w-4 text-primary" />
-            <span>
-              下载 CSV 模板
-              <span className="mt-1 block text-xs text-stone-500">
-                适合脚本生成或轻量编辑
-              </span>
-            </span>
-          </button>
-        </div>
-      ) : null}
-    </div>
-  );
+const intakeActionToneClassNames: Record<IntakeActionTone, string> = {
+  primary:
+    "border-primary/25 bg-[linear-gradient(135deg,#fff7ed,#fff1f2)] shadow-[0_18px_40px_-28px_rgba(153,27,27,0.55)]",
+  amber:
+    "border-amber-200 bg-[linear-gradient(135deg,#fffbeb,#ffffff)] shadow-[0_18px_40px_-30px_rgba(180,83,9,0.45)]",
+  stone: "border-stone-200 bg-white shadow-sm",
 };
+
+const intakeActionIconClassNames: Record<IntakeActionTone, string> = {
+  primary:
+    "border-primary/15 bg-primary text-white shadow-sm shadow-primary/20",
+  amber: "border-amber-200 bg-amber-100 text-amber-700",
+  stone: "border-stone-200 bg-stone-100 text-stone-700",
+};
+
+const IntakeActionCard = ({
+  label,
+  icon,
+  tone,
+  children,
+}: {
+  label: string;
+  icon: ReactNode;
+  tone: IntakeActionTone;
+  children: ReactNode;
+}) => (
+  <article
+    data-testid={`professor-intake-${label}`}
+    className={clsx(
+      "flex min-h-0 flex-col justify-between gap-3 rounded-[28px] border py-3 px-4 transition hover:-translate-y-0.5 hover:shadow-md sm:flex-row sm:items-center",
+      intakeActionToneClassNames[tone],
+    )}
+  >
+    <div className="flex items-center gap-3">
+      <div
+        className={clsx(
+          "flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border",
+          intakeActionIconClassNames[tone],
+        )}
+      >
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <h2 className="text-base font-semibold text-stone-900">{label}</h2>
+      </div>
+    </div>
+    <div className="flex flex-wrap gap-2 sm:justify-end">{children}</div>
+  </article>
+);
 
 const ModalShell = ({
   open,
@@ -783,6 +755,78 @@ export const ProfessorsPage = () => {
             </div>
           </div>
 
+          <section
+            data-testid="professor-intake-panel"
+            aria-labelledby="professor-intake-title"
+            className="rounded-[30px] border border-stone-200 bg-white/86 p-3 shadow-sm"
+          >
+            <div className="mb-3 mt-1 pl-1 flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2
+                  id="professor-intake-title"
+                  className="text-lg font-semibold text-stone-900"
+                >
+                  导师录入方式
+                </h2>
+              </div>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-3">
+              <IntakeActionCard
+                label="智能抓取"
+                icon={<Bot className="h-5 w-5" />}
+                tone="primary"
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    safeRecordUserAction({
+                      eventName: "professors.crawler_dialog_opened",
+                    });
+                    setCrawlerModalOpen(true);
+                  }}
+                  className="ui-btn-primary h-10 rounded-2xl px-4"
+                >
+                  <Bot className="h-4 w-4" />
+                  智能抓取
+                </button>
+              </IntakeActionCard>
+
+              <IntakeActionCard
+                label="模板批量新增"
+                icon={<FileSpreadsheet className="h-5 w-5" />}
+                tone="amber"
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImportFile(null);
+                    setImportResult(null);
+                    setImportModalOpen(true);
+                  }}
+                  className="ui-btn-secondary h-10 rounded-2xl"
+                >
+                  <Upload className="h-4 w-4" />
+                  模板导入
+                </button>
+              </IntakeActionCard>
+
+              <IntakeActionCard
+                label="单个新增"
+                icon={<Plus className="h-5 w-5" />}
+                tone="stone"
+              >
+                <button
+                  type="button"
+                  onClick={openCreateModal}
+                  className="ui-btn-secondary h-10 rounded-2xl"
+                >
+                  <Plus className="h-4 w-4" />
+                  新增导师
+                </button>
+              </IntakeActionCard>
+            </div>
+          </section>
+
           <div className="flex flex-wrap items-center gap-2 rounded-3xl border border-stone-200/80 bg-white/92 p-1.5 shadow-sm">
             {(Object.keys(archiveFilterLabels) as ArchiveFilter[]).map(
               (item) => (
@@ -900,40 +944,6 @@ export const ProfessorsPage = () => {
                   className={filterFieldLabelClassName}
                 />
                 <div className="flex flex-wrap items-center gap-3 lg:justify-end">
-                  <ToolbarMenu onDownload={handleDownloadTemplate} />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setImportFile(null);
-                      setImportResult(null);
-                      setImportModalOpen(true);
-                    }}
-                    className="ui-btn-secondary h-10 rounded-2xl"
-                  >
-                    <Upload className="h-4 w-4" />
-                    导入文件
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      safeRecordUserAction({
-                        eventName: "professors.crawler_dialog_opened",
-                      });
-                      setCrawlerModalOpen(true);
-                    }}
-                    className="ui-btn-secondary h-10 rounded-2xl"
-                  >
-                    <Bot className="h-4 w-4" />
-                    智能抓取
-                  </button>
-                  <button
-                    type="button"
-                    onClick={openCreateModal}
-                    className="ui-btn-primary h-10 rounded-2xl"
-                  >
-                    <Plus className="h-4 w-4" />
-                    新增导师
-                  </button>
                   <button
                     type="button"
                     onClick={() => void loadProfessors()}
@@ -974,9 +984,7 @@ export const ProfessorsPage = () => {
               ) : (
                 <Square className="h-4 w-4" />
               )}
-              {allCurrentPageSelected
-                ? "取消选择当前页"
-                : "选择当前页筛选结果"}
+              {allCurrentPageSelected ? "取消选择当前页" : "选择当前页筛选结果"}
             </button>
           ) : null}
         </div>
@@ -989,7 +997,10 @@ export const ProfessorsPage = () => {
           )}
         >
           <div className="flex justify-center text-center">
-            <span aria-hidden="true" className="sr-only justify-center text-center">
+            <span
+              aria-hidden="true"
+              className="sr-only justify-center text-center"
+            >
               选择
             </span>
             <button
@@ -1041,7 +1052,7 @@ export const ProfessorsPage = () => {
               暂无导师
             </h2>
             <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-stone-500">
-              可下载模板批量导入，也可手动新增。
+              可通过模板导入批量新增，也可手动新增。
             </p>
             <div className="mt-6 flex flex-wrap justify-center gap-3">
               <button
@@ -1054,7 +1065,7 @@ export const ProfessorsPage = () => {
                 className="ui-btn-secondary"
               >
                 <Upload className="h-4 w-4" />
-                导入文件
+                模板导入
               </button>
               <button
                 type="button"

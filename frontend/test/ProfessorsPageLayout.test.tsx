@@ -68,6 +68,12 @@ const renderPage = () =>
     </NotificationProvider>,
   );
 
+const expectToAppearBefore = (first: HTMLElement, second: HTMLElement) => {
+  expect(first.compareDocumentPosition(second)).toBe(
+    Node.DOCUMENT_POSITION_FOLLOWING,
+  );
+};
+
 describe("ProfessorsPage layout", () => {
   beforeEach(() => {
     mockedUseSelectionContext.mockReset();
@@ -230,12 +236,48 @@ describe("ProfessorsPage layout", () => {
 
     const resetButton = screen.getByRole("button", { name: "重置筛选" });
     expect(resetButton).toHaveClass("ui-select-shell", "rounded-3xl");
-    ["下载模板", "导入文件", "智能抓取", "新增导师", "刷新"].forEach((name) => {
-      expect(screen.getByRole("button", { name })).toHaveClass(
-        "h-10",
-        "rounded-2xl",
+    const intakePanel = screen.getByTestId("professor-intake-panel");
+    expect(within(intakePanel).getByText("导师录入方式")).toBeInTheDocument();
+    expect(
+      within(intakePanel).getByRole("heading", { name: "智能抓取" }),
+    ).toBeInTheDocument();
+    expect(
+      within(intakePanel).getByRole("heading", { name: "模板批量新增" }),
+    ).toBeInTheDocument();
+    expect(
+      within(intakePanel).getByRole("heading", { name: "单个新增" }),
+    ).toBeInTheDocument();
+    expect(
+      within(intakePanel).queryByText("按数据来源选择入口，系统会统一沉淀到导师档案库。"),
+    ).not.toBeInTheDocument();
+    [
+      "从学院页面自动发现导师，抓取结果进入候选审核。",
+      "下载模板后批量导入导师信息，适合已有名单或表格。",
+      "手动创建一条导师档案，适合临时补充或精修记录。",
+    ].forEach((description) => {
+      expect(within(intakePanel).queryByText(description)).not.toBeInTheDocument();
+    });
+    ["智能抓取", "模板批量新增", "单个新增"].forEach((label) => {
+      expect(within(intakePanel).getByTestId(`professor-intake-${label}`)).toHaveClass(
+        "rounded-[28px]",
+        "border",
+        "min-h-0",
       );
     });
+    ["模板导入", "智能抓取", "新增导师"].forEach((name) => {
+      expect(within(intakePanel).getByRole("button", { name })).toBeInTheDocument();
+    });
+    expect(within(intakePanel).queryByRole("button", { name: "下载模板" })).not.toBeInTheDocument();
+    expect(within(intakePanel).queryByRole("button", { name: "导入文件" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "刷新" })).toHaveClass("h-10", "rounded-2xl");
+    expectToAppearBefore(
+      intakePanel,
+      screen.getByRole("button", { name: "正常" }),
+    );
+    expectToAppearBefore(
+      screen.getByRole("heading", { name: "导师档案管理" }),
+      intakePanel,
+    );
     expect(screen.queryByText("样例导入与智能抓取")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "导入样例导师" })).not.toBeInTheDocument();
     expect(screen.getByTestId("professor-toolbar-spacer")).toHaveClass("h-5", "leading-5");

@@ -62,7 +62,7 @@ describe("ProfessorsPage notifications", () => {
 
     fireEvent.click(
       within(getWorkbenchRegion()).getByRole("button", {
-        name: "导入文件",
+        name: "模板导入",
       }),
     );
     fireEvent.click(screen.getByRole("button", { name: "开始导入" }));
@@ -80,7 +80,7 @@ describe("ProfessorsPage notifications", () => {
 
     fireEvent.click(
       within(getWorkbenchRegion()).getByRole("button", {
-        name: "导入文件",
+        name: "模板导入",
       }),
     );
 
@@ -108,7 +108,7 @@ describe("ProfessorsPage notifications", () => {
 
     fireEvent.click(
       within(getWorkbenchRegion()).getByRole("button", {
-        name: "导入文件",
+        name: "模板导入",
       }),
     );
 
