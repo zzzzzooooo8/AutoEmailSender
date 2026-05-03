@@ -26,7 +26,7 @@ const renderPage = () =>
   );
 
 const getWorkbenchRegion = () =>
-  screen.getByRole("region", { name: "导师档案工作台" });
+  screen.getByRole("region", { name: "导师档案管理" });
 
 describe("ProfessorsPage notifications", () => {
   beforeEach(() => {

@@ -122,7 +122,7 @@ describe("DiagnosticLogPanel", () => {
       "aria-expanded",
       "false",
     );
-    expect(screen.getByText("本地 2")).toBeInTheDocument();
+    expect(screen.getByText(/本地\s*2\s*条/)).toBeInTheDocument();
     expect(screen.queryByText("本地事件")).not.toBeInTheDocument();
     expect(screen.queryByText("api.request_failed")).not.toBeInTheDocument();
     expect(screen.queryByText("crawl_job.create_failed")).not.toBeInTheDocument();
@@ -276,7 +276,7 @@ describe("DiagnosticLogPanel", () => {
     render(<DiagnosticLogPanel />);
     await expandPanel();
 
-    expect(screen.getByText("本地 2")).toBeInTheDocument();
+    expect(screen.getByText(/本地\s*2\s*条/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "清空本地日志" }));
 
     expect(getDiagnosticEvents()).toEqual([
@@ -285,7 +285,7 @@ describe("DiagnosticLogPanel", () => {
         eventName: "diagnostics.local_logs_cleared",
       }),
     ]);
-    expect(screen.getByText("本地 1")).toBeInTheDocument();
+    expect(screen.getByText(/本地\s*1\s*条/)).toBeInTheDocument();
     expect(notificationApi.notifySuccess).toHaveBeenCalledWith("本地诊断日志已清空");
   });
 });

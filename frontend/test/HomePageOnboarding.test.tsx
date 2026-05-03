@@ -270,7 +270,8 @@ describe("HomePage onboarding", () => {
       await screen.findByRole("heading", { name: "导师看板" }),
     ).toBeInTheDocument();
     expect(screen.getByText("待写信")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "状态" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "高级筛选" }));
+    expect(screen.getByRole("button", { name: "状态：全部状态" })).toBeInTheDocument();
   });
 
   it("renders professors as a compact contact queue on the dashboard", async () => {
@@ -298,7 +299,7 @@ describe("HomePage onboarding", () => {
       "aria-pressed",
       "false",
     );
-    expect(selectButton).toHaveClass("h-8", "w-8");
+    expect(selectButton).toHaveClass("h-6", "w-6");
     expect(
       screen.queryByRole("checkbox", { name: "选择 王教授" }),
     ).not.toBeInTheDocument();
@@ -335,7 +336,8 @@ describe("HomePage onboarding", () => {
     ).toBeInTheDocument();
     expect(await screen.findByText("未开始导师")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "状态" }));
+    fireEvent.click(screen.getByRole("button", { name: "高级筛选" }));
+    fireEvent.click(screen.getByRole("button", { name: "状态：全部状态" }));
 
     expect(screen.getByRole("option", { name: "未开始" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "待写信" })).toBeInTheDocument();

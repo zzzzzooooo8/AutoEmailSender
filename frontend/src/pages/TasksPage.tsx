@@ -179,9 +179,7 @@ export const CrawlJobCard = ({
   onRetry,
   formatUpdatedAt,
 }: CrawlJobCardProps) => (
-  <article
-    className="rounded-2xl border border-stone-200 bg-white px-5 py-5 shadow-sm"
-  >
+  <article className="rounded-2xl border border-stone-200 bg-white px-5 py-5 shadow-sm">
     <div
       data-testid="crawl-job-card-layout"
       className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between"
@@ -414,7 +412,10 @@ const formatDisplayTime = (
   if (!value) {
     return "--";
   }
-  return formatApiDateTime(value, options?.withSeconds ? { second: "2-digit" } : undefined);
+  return formatApiDateTime(
+    value,
+    options?.withSeconds ? { second: "2-digit" } : undefined,
+  );
 };
 
 const formatDuration = (seconds: number) => {
@@ -547,11 +548,17 @@ export const TasksPage = () => {
     [crawlJobs, crawlPage],
   );
   const visibleCrawlJobEvents = useMemo(
-    () => getPageItems(crawlJobEvents, crawlEventPage, MONITOR_SECTION_PAGE_SIZE),
+    () =>
+      getPageItems(crawlJobEvents, crawlEventPage, MONITOR_SECTION_PAGE_SIZE),
     [crawlEventPage, crawlJobEvents],
   );
   const visibleCrawlJobPages = useMemo(
-    () => getPageItems(crawlJobPages, crawlDetailPagePage, MONITOR_SECTION_PAGE_SIZE),
+    () =>
+      getPageItems(
+        crawlJobPages,
+        crawlDetailPagePage,
+        MONITOR_SECTION_PAGE_SIZE,
+      ),
     [crawlDetailPagePage, crawlJobPages],
   );
   const visibleCrawlJobCandidates = useMemo(
@@ -636,44 +643,47 @@ export const TasksPage = () => {
     }
   }, [notifyError, selectedIdentityId, selectedLlmProfileId, tasksRequestKey]);
 
-  const loadCrawlJobs = useCallback(async (options?: { showLoading?: boolean }) => {
-    const requestId = latestCrawlJobsRequestIdRef.current + 1;
-    latestCrawlJobsRequestIdRef.current = requestId;
-    if (options?.showLoading ?? true) {
-      setCrawlJobsLoading(true);
-    }
-    try {
-      const data = await listCrawlJobs();
-      if (latestCrawlJobsRequestIdRef.current !== requestId) {
-        return;
+  const loadCrawlJobs = useCallback(
+    async (options?: { showLoading?: boolean }) => {
+      const requestId = latestCrawlJobsRequestIdRef.current + 1;
+      latestCrawlJobsRequestIdRef.current = requestId;
+      if (options?.showLoading ?? true) {
+        setCrawlJobsLoading(true);
       }
-      setCrawlJobs(data);
-      setSelectedCrawlJob((currentJob) => {
-        if (!currentJob) {
-          return currentJob;
+      try {
+        const data = await listCrawlJobs();
+        if (latestCrawlJobsRequestIdRef.current !== requestId) {
+          return;
         }
-        return data.find((job) => job.id === currentJob.id) ?? currentJob;
-      });
-      lastCrawlJobsLoadErrorRef.current = null;
-    } catch (loadError) {
-      if (latestCrawlJobsRequestIdRef.current !== requestId) {
-        return;
+        setCrawlJobs(data);
+        setSelectedCrawlJob((currentJob) => {
+          if (!currentJob) {
+            return currentJob;
+          }
+          return data.find((job) => job.id === currentJob.id) ?? currentJob;
+        });
+        lastCrawlJobsLoadErrorRef.current = null;
+      } catch (loadError) {
+        if (latestCrawlJobsRequestIdRef.current !== requestId) {
+          return;
+        }
+        const message =
+          loadError instanceof Error ? loadError.message : "加载抓取任务失败";
+        if (lastCrawlJobsLoadErrorRef.current !== message) {
+          notifyError("加载抓取任务失败", message);
+          lastCrawlJobsLoadErrorRef.current = message;
+        }
+      } finally {
+        if (
+          latestCrawlJobsRequestIdRef.current === requestId &&
+          (options?.showLoading ?? true)
+        ) {
+          setCrawlJobsLoading(false);
+        }
       }
-      const message =
-        loadError instanceof Error ? loadError.message : "加载抓取任务失败";
-      if (lastCrawlJobsLoadErrorRef.current !== message) {
-        notifyError("加载抓取任务失败", message);
-        lastCrawlJobsLoadErrorRef.current = message;
-      }
-    } finally {
-      if (
-        latestCrawlJobsRequestIdRef.current === requestId &&
-        (options?.showLoading ?? true)
-      ) {
-        setCrawlJobsLoading(false);
-      }
-    }
-  }, [notifyError]);
+    },
+    [notifyError],
+  );
 
   const loadBatchTaskDetails = useCallback(
     async (taskId: number) => {
@@ -1081,9 +1091,7 @@ export const TasksPage = () => {
         level: "error",
       });
       const message =
-        actionError instanceof Error
-          ? actionError.message
-          : "抓取任务重启失败";
+        actionError instanceof Error ? actionError.message : "抓取任务重启失败";
       notifyError("抓取任务操作失败", message);
     } finally {
       setRetryingCrawlJobId((currentJobId) =>
@@ -1105,7 +1113,10 @@ export const TasksPage = () => {
   };
 
   const handleApproveSelectedCrawlCandidates = async () => {
-    if (!selectedCrawlJobId || selectedReviewableCrawlCandidateIds.length === 0) {
+    if (
+      !selectedCrawlJobId ||
+      selectedReviewableCrawlCandidateIds.length === 0
+    ) {
       return;
     }
 
@@ -1133,7 +1144,9 @@ export const TasksPage = () => {
       await loadCrawlJobDetails(selectedCrawlJobId, { showLoading: false });
     } catch (actionError) {
       const message =
-        actionError instanceof Error ? actionError.message : "审核导入候选导师失败";
+        actionError instanceof Error
+          ? actionError.message
+          : "审核导入候选导师失败";
       notifyError("审核导入候选导师失败", message);
     } finally {
       setCrawlJobApproveLoading(false);
@@ -1186,9 +1199,6 @@ export const TasksPage = () => {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-3xl font-semibold text-stone-900">任务中心</h1>
-            <p className="mt-2 text-sm text-stone-600">
-              集中查看批量邮件和教师抓取任务的进度、异常与待处理项。
-            </p>
           </div>
         </div>
 
@@ -1288,112 +1298,114 @@ export const TasksPage = () => {
         <>
           <div className="mt-6 grid gap-4">
             {visibleBatchTasks.map((task) => {
-            const progress =
-              task.target_count === 0
-                ? 0
-                : Math.round((task.completed_count / task.target_count) * 100);
+              const progress =
+                task.target_count === 0
+                  ? 0
+                  : Math.round(
+                      (task.completed_count / task.target_count) * 100,
+                    );
 
-            return (
-              <article
-                key={task.id}
-                className="rounded-2xl border border-stone-200 bg-white px-5 py-5 shadow-sm"
-              >
-                <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_240px_minmax(260px,auto)_auto] lg:items-center">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 text-xs font-medium text-stone-500">
-                      <Mail className="h-4 w-4 text-primary" />
-                      批量邮件任务
+              return (
+                <article
+                  key={task.id}
+                  className="rounded-2xl border border-stone-200 bg-white px-5 py-5 shadow-sm"
+                >
+                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_240px_minmax(260px,auto)_auto] lg:items-center">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 text-xs font-medium text-stone-500">
+                        <Mail className="h-4 w-4 text-primary" />
+                        批量邮件任务
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h2 className="mt-2 truncate text-base font-semibold text-stone-900">
+                          {task.name}
+                        </h2>
+                        <span className="rounded-full bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-700">
+                          {BATCH_TASK_STATUS_LABELS[task.status]}
+                        </span>
+                      </div>
+                      <p className="mt-1 truncate text-sm text-stone-500">
+                        {buildScheduleLabel(task)}
+                      </p>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="mt-2 truncate text-base font-semibold text-stone-900">
-                        {task.name}
-                      </h2>
-                      <span className="rounded-full bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-700">
-                        {BATCH_TASK_STATUS_LABELS[task.status]}
+
+                    <div>
+                      <div className="mb-2 flex items-center justify-between text-xs text-stone-500">
+                        <span>
+                          {task.completed_count}/{task.target_count}
+                        </span>
+                        <span>{progress}%</span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-stone-100">
+                        <div
+                          className="h-full rounded-full bg-primary"
+                          style={{ width: `${progress}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                      <span className="rounded-full bg-stone-50 px-2.5 py-1 text-xs text-stone-600">
+                        待生成 {task.pending_generation_count}
                       </span>
-                    </div>
-                    <p className="mt-1 truncate text-sm text-stone-500">
-                      {buildScheduleLabel(task)}
-                    </p>
-                  </div>
-
-                  <div>
-                    <div className="mb-2 flex items-center justify-between text-xs text-stone-500">
-                      <span>
-                        {task.completed_count}/{task.target_count}
+                      <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-700">
+                        待审核 {task.review_required_count}
                       </span>
-                      <span>{progress}%</span>
-                    </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-stone-100">
-                      <div
-                        className="h-full rounded-full bg-primary"
-                        style={{ width: `${progress}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-                    <span className="rounded-full bg-stone-50 px-2.5 py-1 text-xs text-stone-600">
-                      待生成 {task.pending_generation_count}
-                    </span>
-                    <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-700">
-                      待审核 {task.review_required_count}
-                    </span>
-                    <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs text-emerald-700">
-                      已发送 {task.sent_count + task.replied_count}
-                    </span>
-                    {task.failed_count > 0 ? (
-                      <span className="rounded-full bg-red-50 px-2.5 py-1 text-xs text-red-700">
-                        失败 {task.failed_count}
+                      <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs text-emerald-700">
+                        已发送 {task.sent_count + task.replied_count}
                       </span>
-                    ) : null}
-                  </div>
+                      {task.failed_count > 0 ? (
+                        <span className="rounded-full bg-red-50 px-2.5 py-1 text-xs text-red-700">
+                          失败 {task.failed_count}
+                        </span>
+                      ) : null}
+                    </div>
 
-                  <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-                    {task.status === "running" ? (
+                    <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                      {task.status === "running" ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleAction(task.id, "pause")}
+                          className="ui-btn-secondary"
+                        >
+                          <Pause className="h-4 w-4" />
+                          暂停
+                        </button>
+                      ) : null}
+                      {task.status === "paused" ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleAction(task.id, "resume")}
+                          className="ui-btn-secondary"
+                        >
+                          <Play className="h-4 w-4" />
+                          继续
+                        </button>
+                      ) : null}
+                      {task.status !== "stopped" &&
+                      task.status !== "completed" ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleAction(task.id, "stop")}
+                          className="ui-btn-danger"
+                        >
+                          <Square className="h-4 w-4" />
+                          中止
+                        </button>
+                      ) : null}
                       <button
                         type="button"
-                        onClick={() => void handleAction(task.id, "pause")}
-                        className="ui-btn-secondary"
+                        onClick={() => setSelectedBatchTask(task)}
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 transition hover:border-primary/30 hover:bg-primary/5 hover:text-primary"
+                        aria-label="查看详情"
+                        title="查看详情"
                       >
-                        <Pause className="h-4 w-4" />
-                        暂停
+                        <ChevronRight className="h-4 w-4" />
                       </button>
-                    ) : null}
-                    {task.status === "paused" ? (
-                      <button
-                        type="button"
-                        onClick={() => void handleAction(task.id, "resume")}
-                        className="ui-btn-secondary"
-                      >
-                        <Play className="h-4 w-4" />
-                        继续
-                      </button>
-                    ) : null}
-                    {task.status !== "stopped" &&
-                    task.status !== "completed" ? (
-                      <button
-                        type="button"
-                        onClick={() => void handleAction(task.id, "stop")}
-                        className="ui-btn-danger"
-                      >
-                        <Square className="h-4 w-4" />
-                        中止
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      onClick={() => setSelectedBatchTask(task)}
-                      className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 transition hover:border-primary/30 hover:bg-primary/5 hover:text-primary"
-                      aria-label="查看详情"
-                      title="查看详情"
-                    >
-                      <ChevronRight className="h-4 w-4" />
-                    </button>
+                    </div>
                   </div>
-                </div>
-              </article>
-            );
+                </article>
+              );
             })}
           </div>
           <TaskListPagination
@@ -1415,27 +1427,27 @@ export const TasksPage = () => {
         <>
           <div className="mt-6 grid gap-4">
             {visibleCrawlJobs.map((job) => (
-            <CrawlJobCard
-              key={job.id}
-              job={job}
-              pausingCrawlJobId={pausingCrawlJobId}
-              resumingCrawlJobId={resumingCrawlJobId}
-              retryingCrawlJobId={retryingCrawlJobId}
-              onOpenDetails={(currentJob) => {
-                safeRecordUserAction({
-                  eventName: "tasks.crawl_job_detail_opened",
-                  data: { jobId: currentJob.id, status: currentJob.status },
-                });
-                setSelectedCrawlJob(currentJob);
-              }}
-              onPause={(jobId) => void handlePauseCrawlJob(jobId)}
-              onResume={(jobId) => void handleResumeCrawlJob(jobId)}
-              onCancel={(jobId) => void handleCancelCrawlJob(jobId)}
-              onRetry={(jobId) => void handleRetryCrawlJob(jobId)}
-              formatUpdatedAt={(value) =>
-                formatDisplayTime(value, { withSeconds: true })
-              }
-            />
+              <CrawlJobCard
+                key={job.id}
+                job={job}
+                pausingCrawlJobId={pausingCrawlJobId}
+                resumingCrawlJobId={resumingCrawlJobId}
+                retryingCrawlJobId={retryingCrawlJobId}
+                onOpenDetails={(currentJob) => {
+                  safeRecordUserAction({
+                    eventName: "tasks.crawl_job_detail_opened",
+                    data: { jobId: currentJob.id, status: currentJob.status },
+                  });
+                  setSelectedCrawlJob(currentJob);
+                }}
+                onPause={(jobId) => void handlePauseCrawlJob(jobId)}
+                onResume={(jobId) => void handleResumeCrawlJob(jobId)}
+                onCancel={(jobId) => void handleCancelCrawlJob(jobId)}
+                onRetry={(jobId) => void handleRetryCrawlJob(jobId)}
+                formatUpdatedAt={(value) =>
+                  formatDisplayTime(value, { withSeconds: true })
+                }
+              />
             ))}
           </div>
           <TaskListPagination
@@ -1835,7 +1847,10 @@ export const TasksPage = () => {
                     <Activity className="h-4 w-4 text-primary" />
                     执行日志
                   </h3>
-                  <div className="mt-3 flex-1 space-y-3" data-monitor-section-list>
+                  <div
+                    className="mt-3 flex-1 space-y-3"
+                    data-monitor-section-list
+                  >
                     {crawlJobEvents.length > 0 ? (
                       visibleCrawlJobEvents.map((event) => (
                         <div key={event.id} className="flex gap-3">
@@ -1845,7 +1860,9 @@ export const TasksPage = () => {
                               {event.message}
                             </p>
                             <p className="mt-1 text-xs text-stone-500">
-                              {formatDisplayTime(event.created_at, { withSeconds: true })}
+                              {formatDisplayTime(event.created_at, {
+                                withSeconds: true,
+                              })}
                             </p>
                           </div>
                         </div>
@@ -1869,7 +1886,10 @@ export const TasksPage = () => {
                     <FileSearch className="h-4 w-4 text-sky-600" />
                     已抓页面
                   </h3>
-                  <div className="mt-3 flex-1 space-y-2" data-monitor-section-list>
+                  <div
+                    className="mt-3 flex-1 space-y-2"
+                    data-monitor-section-list
+                  >
                     {crawlJobPages.length > 0 ? (
                       visibleCrawlJobPages.map((page) => (
                         <div
@@ -1933,8 +1953,8 @@ export const TasksPage = () => {
                             type="button"
                             onClick={() => setSelectedCrawlCandidateIds([])}
                             disabled={
-                              selectedReviewableCrawlCandidateIds.length === 0 ||
-                              crawlJobApproveLoading
+                              selectedReviewableCrawlCandidateIds.length ===
+                                0 || crawlJobApproveLoading
                             }
                             className="ui-btn-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
                           >
@@ -1946,12 +1966,14 @@ export const TasksPage = () => {
                               void handleApproveSelectedCrawlCandidates()
                             }
                             disabled={
-                              selectedReviewableCrawlCandidateIds.length === 0 ||
-                              crawlJobApproveLoading
+                              selectedReviewableCrawlCandidateIds.length ===
+                                0 || crawlJobApproveLoading
                             }
                             className="ui-btn-primary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
                           >
-                            {crawlJobApproveLoading ? "导入中..." : "审核通过并导入"}
+                            {crawlJobApproveLoading
+                              ? "导入中..."
+                              : "审核通过并导入"}
                           </button>
                         </div>
                       </div>
@@ -1965,16 +1987,16 @@ export const TasksPage = () => {
                       >
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div className="flex min-w-0 items-center gap-3">
-                              {selectedCrawlJob.status === "needs_review" ? (
-                                <input
-                                  type="checkbox"
-                                  checked={selectedReviewableCrawlCandidateIds.includes(
+                            {selectedCrawlJob.status === "needs_review" ? (
+                              <input
+                                type="checkbox"
+                                checked={selectedReviewableCrawlCandidateIds.includes(
+                                  candidate.id,
+                                )}
+                                disabled={crawlJobApproveLoading}
+                                onChange={() =>
+                                  handleToggleCrawlCandidateSelection(
                                     candidate.id,
-                                  )}
-                                  disabled={crawlJobApproveLoading}
-                                  onChange={() =>
-                                    handleToggleCrawlCandidateSelection(
-                                      candidate.id,
                                   )
                                 }
                                 aria-label={`选择候选导师 ${candidate.name}`}
@@ -2009,13 +2031,15 @@ export const TasksPage = () => {
                             </span>
                             <button
                               type="button"
-                              onClick={() => setSelectedCandidateDetail(candidate)}
+                              onClick={() =>
+                                setSelectedCandidateDetail(candidate)
+                              }
                               className="ui-btn-secondary px-3 py-2 text-sm"
                             >
                               查看详情
-                              </button>
-                            </div>
+                            </button>
                           </div>
+                        </div>
                       </div>
                     ))
                   ) : (
@@ -2079,9 +2103,14 @@ export const TasksPage = () => {
                 </div>
               </div>
               <div className="rounded-2xl border border-stone-100 bg-stone-50/70 px-4 py-3">
-                <div className="text-xs font-medium text-stone-500">院校 / 学院</div>
+                <div className="text-xs font-medium text-stone-500">
+                  院校 / 学院
+                </div>
                 <div className="mt-2 text-sm text-stone-900">
-                  {[selectedCandidateDetail.university, selectedCandidateDetail.school]
+                  {[
+                    selectedCandidateDetail.university,
+                    selectedCandidateDetail.school,
+                  ]
                     .filter(Boolean)
                     .join(" / ") || "暂无"}
                 </div>
@@ -2093,7 +2122,9 @@ export const TasksPage = () => {
                 </div>
               </div>
               <div className="rounded-2xl border border-stone-100 bg-stone-50/70 px-4 py-3">
-                <div className="text-xs font-medium text-stone-500">审核状态</div>
+                <div className="text-xs font-medium text-stone-500">
+                  审核状态
+                </div>
                 <div className="mt-2 text-sm text-stone-900">
                   {
                     CRAWL_CANDIDATE_REVIEW_STATUS_LABELS[
@@ -2103,13 +2134,17 @@ export const TasksPage = () => {
                 </div>
               </div>
               <div className="rounded-2xl border border-stone-100 bg-stone-50/70 px-4 py-3 md:col-span-2">
-                <div className="text-xs font-medium text-stone-500">研究方向</div>
+                <div className="text-xs font-medium text-stone-500">
+                  研究方向
+                </div>
                 <div className="mt-2 text-sm leading-6 text-stone-900">
                   {selectedCandidateDetail.research_direction || "暂无"}
                 </div>
               </div>
               <div className="rounded-2xl border border-stone-100 bg-stone-50/70 px-4 py-3 md:col-span-2">
-                <div className="text-xs font-medium text-stone-500">近期论文</div>
+                <div className="text-xs font-medium text-stone-500">
+                  近期论文
+                </div>
                 {selectedCandidateDetail.recent_papers.length > 0 ? (
                   <ul className="mt-2 space-y-2 text-sm text-stone-900">
                     {selectedCandidateDetail.recent_papers.map((paper) => (
@@ -2123,7 +2158,9 @@ export const TasksPage = () => {
                 )}
               </div>
               <div className="rounded-2xl border border-stone-100 bg-stone-50/70 px-4 py-3 md:col-span-2">
-                <div className="text-xs font-medium text-stone-500">链接信息</div>
+                <div className="text-xs font-medium text-stone-500">
+                  链接信息
+                </div>
                 <div className="mt-2 space-y-2 text-sm text-stone-900">
                   <div>
                     <span className="text-stone-500">资料页：</span>

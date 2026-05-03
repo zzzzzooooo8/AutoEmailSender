@@ -763,39 +763,10 @@ export const ProfessorsPage = () => {
             <div className="max-w-2xl">
               <h1
                 id="professors-workbench-title"
-                className="mt-4 text-3xl font-semibold tracking-[0.01em] text-stone-900"
+                className="text-3xl font-semibold tracking-[0.01em] text-stone-900"
               >
-                导师档案工作台
+                导师档案管理
               </h1>
-              <p className="mt-3 text-sm leading-6 text-stone-600">
-                用模板导入、手动维护、归档隐藏把导师数据整理干净。
-              </p>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-3xl border border-stone-200 bg-white px-4 py-3 shadow-sm">
-                <div className="text-xs uppercase tracking-[0.18em] text-stone-400">
-                  当前列表
-                </div>
-                <div className="mt-2 text-2xl font-semibold text-stone-900">
-                  {filteredProfessors.length}
-                </div>
-              </div>
-              <div className="rounded-3xl border border-stone-200 bg-white px-4 py-3 shadow-sm">
-                <div className="text-xs uppercase tracking-[0.18em] text-stone-400">
-                  当前筛选
-                </div>
-                <div className="mt-2 text-2xl font-semibold text-stone-900">
-                  {archiveFilterLabels[archiveFilter]}
-                </div>
-              </div>
-              <div className="rounded-3xl border border-stone-200 bg-white px-4 py-3 shadow-sm">
-                <div className="text-xs uppercase tracking-[0.18em] text-stone-400">
-                  已选择
-                </div>
-                <div className="mt-2 text-2xl font-semibold text-stone-900">
-                  {selectedIds.size}
-                </div>
-              </div>
             </div>
           </div>
 
@@ -1139,7 +1110,9 @@ export const ProfessorsPage = () => {
                     : void handleBulkArchive()
                 }
                 className={
-                  archiveFilter === "archived" ? "ui-btn-secondary" : "ui-btn-danger"
+                  archiveFilter === "archived"
+                    ? "ui-btn-secondary"
+                    : "ui-btn-danger"
                 }
               >
                 {archiveFilter === "archived" ? (
@@ -1147,9 +1120,7 @@ export const ProfessorsPage = () => {
                 ) : (
                   <Archive className="h-4 w-4" />
                 )}
-                {archiveFilter === "archived"
-                  ? "批量恢复"
-                  : "批量移入回收站"}
+                {archiveFilter === "archived" ? "批量恢复" : "批量移入回收站"}
               </button>
             </div>
           </div>
@@ -1594,7 +1565,9 @@ export const ProfessorsPage = () => {
                       ...previous,
                       start_urls:
                         previous.start_urls.length > 1
-                          ? previous.start_urls.filter((_, itemIndex) => itemIndex !== index)
+                          ? previous.start_urls.filter(
+                              (_, itemIndex) => itemIndex !== index,
+                            )
                           : [""],
                     }))
                   }

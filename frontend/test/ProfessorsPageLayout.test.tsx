@@ -69,6 +69,18 @@ describe("ProfessorsPage layout", () => {
     listProfessorsForManagement.mockResolvedValue([professor]);
   });
 
+  it("omits the low-value summary cards from the workbench header", async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(listProfessorsForManagement).toHaveBeenCalledWith("active");
+    });
+
+    expect(screen.queryByText("当前列表")).not.toBeInTheDocument();
+    expect(screen.queryByText("当前筛选")).not.toBeInTheDocument();
+    expect(screen.queryByText("已选择")).not.toBeInTheDocument();
+  });
+
   it("keeps row field labels inside each professor record for responsive reading", async () => {
     renderPage();
 
@@ -86,7 +98,7 @@ describe("ProfessorsPage layout", () => {
     expect(record.getByText("研究方向")).toBeInTheDocument();
     expect(record.getByText("更新时间")).toBeInTheDocument();
     expect(record.queryByText("Associate Professor / 测试大学 / 计算机学院")).not.toBeInTheDocument();
-    expect(record.getByText("Associate Professor")).toHaveClass("lg:text-center");
+    expect(record.getByText("Associate / Professor")).toHaveClass("lg:text-center");
     expect(record.getAllByText("机器学习与人机协作")).toHaveLength(1);
     expect(record.getByRole("button", { name: "选择 李教授" })).toHaveAttribute(
       "aria-pressed",
@@ -144,7 +156,7 @@ describe("ProfessorsPage layout", () => {
     const record = within(row as HTMLElement);
 
     expect(record.getByText("李教授")).toHaveClass("lg:text-center");
-    expect(record.getByText("Associate Professor")).toHaveClass("lg:text-center");
+    expect(record.getByText("Associate / Professor")).toHaveClass("lg:text-center");
     expect(record.getByText("li@example.edu")).toHaveClass("lg:text-center");
     expect(record.getByText("测试大学 / 计算机学院")).toHaveClass("lg:text-center");
     expect(
@@ -169,7 +181,7 @@ describe("ProfessorsPage layout", () => {
     expect(row).not.toBeNull();
     const record = within(row as HTMLElement);
     const editButton = record.getByRole("button", { name: "编辑" });
-    const archiveButton = record.getByRole("button", { name: "回收站" });
+    const archiveButton = record.getByRole("button", { name: "删除" });
     const actionGroup = editButton.closest("div");
 
     expect(actionGroup).toHaveClass("grid", "grid-cols-2", "lg:mx-auto");
