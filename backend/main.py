@@ -86,6 +86,10 @@ def create_app() -> FastAPI:
             "message": "Auto Email Agent API 已启动",
         }
 
+    @app.get("/health")
+    async def health() -> dict[str, str]:
+        return {"status": "ok"}
+
     return app
 
 
