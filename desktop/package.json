@@ -5,8 +5,8 @@
   "type": "module",
   "main": "dist/src/main.js",
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.preload.json --noEmit",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.preload.json",
     "test": "vitest run",
     "dev": "npm run build && electron . --dev",
     "pack": "npm run build && electron-builder --config electron-builder.yml --win --dir",

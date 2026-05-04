@@ -13,15 +13,20 @@ extraResources:
   - from: ../backend/dist/backend
     to: backend
 win:
+  icon: build/icon.ico
   target:
     - target: nsis
       arch:
         - x64
 nsis:
-  oneClick: true
+  oneClick: false
   perMachine: false
+  allowToChangeInstallationDirectory: true
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
   createDesktopShortcut: true
   createStartMenuShortcut: true
+  runAfterFinish: true
   shortcutName: Auto Email Sender
 publish:
   provider: github

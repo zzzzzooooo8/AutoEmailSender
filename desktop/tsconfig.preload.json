@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -10,6 +10,5 @@
     "outDir": "dist",
     "types": ["node", "vitest"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"],
-  "exclude": ["src/preload.ts"]
+  "include": ["src/preload.ts", "src/types.ts"]
 }

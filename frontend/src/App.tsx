@@ -1,4 +1,4 @@
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, HashRouter, Route, Routes } from 'react-router-dom';
 import { RouteScrollRestoration } from '@/components/organisms/RouteScrollRestoration';
 import { TopNavBar } from '@/components/organisms/TopNavBar';
 import { NotificationProvider } from '@/context/NotificationContext';
@@ -13,8 +13,10 @@ import { TestComposePage } from '@/pages/TestComposePage';
 import { WorkspacePage } from '@/pages/WorkspacePage';
 
 function App() {
+  const Router = window.autoEmailSender ? HashRouter : BrowserRouter;
+
   return (
-    <BrowserRouter>
+    <Router>
       <RouteScrollRestoration />
       <NotificationProvider>
         <SelectionProvider>
@@ -36,7 +38,7 @@ function App() {
           </div>
         </SelectionProvider>
       </NotificationProvider>
-    </BrowserRouter>
+    </Router>
   );
 }
 
