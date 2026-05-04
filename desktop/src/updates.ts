@@ -1,6 +1,9 @@
 import { app, BrowserWindow, ipcMain } from "electron";
-import { autoUpdater } from "electron-updater";
+import { createRequire } from "node:module";
 import type { UpdateStatus } from "./types.js";
+
+const require = createRequire(import.meta.url);
+const electronUpdater = require("electron-updater") as typeof import("electron-updater");
 
 let currentStatus: UpdateStatus = { state: "idle", version: "0.0.0" };
 
@@ -9,6 +12,7 @@ export function formatDownloadProgress(percent: number): number {
 }
 
 export function registerUpdateIpc(getWindow: () => BrowserWindow | null): void {
+  const autoUpdater = getAutoUpdater();
   autoUpdater.autoDownload = false;
   currentStatus = { state: "idle", version: app.getVersion() };
 
@@ -74,8 +78,12 @@ export function checkForUpdatesOnStartup(): void {
     return;
   }
   setTimeout(() => {
-    autoUpdater.checkForUpdates().catch(() => undefined);
+    getAutoUpdater().checkForUpdates().catch(() => undefined);
   }, 3_000);
+}
+
+function getAutoUpdater(): typeof electronUpdater.autoUpdater {
+  return electronUpdater.autoUpdater;
 }
 
 function publish(getWindow: () => BrowserWindow | null, status: UpdateStatus): void {
