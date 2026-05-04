@@ -16,6 +16,7 @@ from app.api import (
     materials_router,
     match_analysis_jobs_router,
     professors_router,
+    runtime_settings_router,
     test_compose_router,
     token_usage_router,
     workspaces_router,
@@ -76,6 +77,7 @@ def create_app() -> FastAPI:
     app.include_router(email_tasks_router)
     app.include_router(workspaces_router)
     app.include_router(token_usage_router)
+    app.include_router(runtime_settings_router)
 
     @app.get("/api/ping")
     async def ping() -> dict[str, str]:

@@ -23,6 +23,7 @@ from app.services.crawl_job_runs import (
     mark_crawl_job_run_paused,
     mark_crawl_job_run_running,
 )
+from app.services.runtime_settings import get_runtime_settings
 from app.services.llm_runtime import LLMRuntimeError, parse_structured_result
 from app.services.crawler_tools import (
     CrawlJobCanceled,
@@ -72,6 +73,19 @@ class CandidateEnrichmentResult:
     error_message: str | None = None
     retry_count: int = 0
     host_limited: bool = False
+
+
+@dataclass(slots=True)
+class CrawlRuntimeConcurrency:
+    profile_enrichment_concurrency: int
+    host_concurrency: int
+
+
+def resolve_crawl_runtime_concurrency(settings: Any) -> CrawlRuntimeConcurrency:
+    return CrawlRuntimeConcurrency(
+        profile_enrichment_concurrency=max(1, settings.crawler_profile_enrichment_concurrency),
+        host_concurrency=max(1, settings.crawler_host_concurrency),
+    )
 
 
 async def run_queued_crawl_jobs_once(
@@ -464,6 +478,7 @@ async def _enrich_saved_candidates_concurrent(
     trace_callback: Any | None = None,
 ) -> int:
     async with session_factory() as session:
+        runtime_settings = await get_runtime_settings(session)
         candidates = list(
             (
                 await session.execute(
@@ -479,6 +494,7 @@ async def _enrich_saved_candidates_concurrent(
         return 0
 
     settings = get_settings()
+    concurrency = resolve_crawl_runtime_concurrency(runtime_settings)
     await _emit_trace_event(
         trace_callback,
         {
@@ -501,7 +517,7 @@ async def _enrich_saved_candidates_concurrent(
             )
         )
 
-    worker_count = max(1, settings.crawler_profile_enrichment_concurrency)
+    worker_count = concurrency.profile_enrichment_concurrency
     for _ in range(worker_count):
         work_queue.put_nowait(None)
 
@@ -515,7 +531,7 @@ async def _enrich_saved_candidates_concurrent(
                 result_queue,
                 host_limiters,
                 trace_callback=trace_callback,
-                host_concurrency=max(1, settings.crawler_host_concurrency),
+                host_concurrency=concurrency.host_concurrency,
                 max_retries=max(0, settings.crawler_profile_fetch_max_retries),
             )
         )

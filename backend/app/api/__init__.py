@@ -7,6 +7,7 @@ from app.api.llm_profiles import router as llm_profiles_router
 from app.api.materials import router as materials_router
 from app.api.match_analysis_jobs import router as match_analysis_jobs_router
 from app.api.professors import router as professors_router
+from app.api.runtime_settings import router as runtime_settings_router
 from app.api.test_compose import router as test_compose_router
 from app.api.token_usage import router as token_usage_router
 from app.api.workspaces import router as workspaces_router
@@ -21,6 +22,7 @@ __all__ = [
     "materials_router",
     "match_analysis_jobs_router",
     "professors_router",
+    "runtime_settings_router",
     "test_compose_router",
     "token_usage_router",
     "workspaces_router",
