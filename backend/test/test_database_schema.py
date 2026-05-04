@@ -13,7 +13,7 @@ from app.services.outreach_templates import import_outreach_template_file
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "a9c8e7d6f5b4"
+HEAD_REVISION = "b6f1a2c3d4e5"
 LEGACY_RUNTIME_REVISION = "7a1d5e42c9bd"
 
 
@@ -95,6 +95,16 @@ class DatabaseSchemaTests(unittest.TestCase):
         self.assertIn("provider_payload", log_columns)
         self.assertIn("reply_headers", log_columns)
         self.assertNotIn("mail_delivery_mode", settings_columns)
+        self.assertTrue(
+            {
+                "match_analysis_job_worker_count",
+                "match_analysis_job_item_concurrency",
+                "match_analysis_job_interval_seconds",
+                "crawler_worker_count",
+                "crawler_profile_enrichment_concurrency",
+                "crawler_host_concurrency",
+            }.issubset(settings_columns),
+        )
         self.assertNotIn("signature", identity_columns)
         self.assertTrue(
             {

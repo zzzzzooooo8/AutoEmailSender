@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import DateTime, text
+from sqlalchemy import DateTime, Integer, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -28,4 +28,34 @@ class AppSetting(Base):
         nullable=False,
         server_default=text("CURRENT_TIMESTAMP"),
         onupdate=lambda: datetime.now(UTC),
+    )
+    match_analysis_job_worker_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("1"),
+    )
+    match_analysis_job_item_concurrency: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("3"),
+    )
+    match_analysis_job_interval_seconds: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("10"),
+    )
+    crawler_worker_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("2"),
+    )
+    crawler_profile_enrichment_concurrency: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("3"),
+    )
+    crawler_host_concurrency: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("1"),
     )

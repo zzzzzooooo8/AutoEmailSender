@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import get_settings
 from app.services.crawl_job_runtime import run_queued_crawl_jobs_once
 from app.services.match_analysis_job_runtime import run_queued_match_analysis_jobs_once
+from app.services.runtime_settings import get_runtime_settings
 from app.services.task_runtime import (
     dispatch_due_tasks_once,
     poll_for_replies_once,
@@ -44,10 +45,7 @@ class RuntimeManager:
                 self._loop(
                     f"match-analysis-worker-{index}",
                     settings.match_analysis_job_interval_seconds,
-                    lambda session_factory: run_queued_match_analysis_jobs_once(
-                        session_factory,
-                        item_concurrency=settings.match_analysis_job_item_concurrency,
-                    ),
+                    _run_match_analysis_worker_once,
                 ),
             )
             for index in range(1, settings.match_analysis_job_worker_count + 1)
@@ -98,3 +96,15 @@ class RuntimeManager:
                 await asyncio.wait_for(self._stopped.wait(), timeout=interval_seconds)
             except TimeoutError:
                 continue
+
+
+async def _run_match_analysis_worker_once(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> int:
+    async with session_factory() as session:
+        runtime_settings = await get_runtime_settings(session)
+
+    return await run_queued_match_analysis_jobs_once(
+        session_factory,
+        item_concurrency=runtime_settings.match_analysis_job_item_concurrency,
+    )

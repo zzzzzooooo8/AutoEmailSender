@@ -17,6 +17,7 @@ from app.services.crawl_job_runtime import (
     _enrich_saved_candidates,
     enrich_candidate_profile_with_llm,
     extract_profile_candidate_with_llm,
+    resolve_crawl_runtime_concurrency,
     run_queued_crawl_jobs_once,
 )
 from app.services.crawl_job_runs import create_initial_crawl_job_run
@@ -52,6 +53,21 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         get_settings.cache_clear()
         self.temp_dir.cleanup()
+
+    async def test_resolve_crawl_runtime_concurrency_prefers_database_settings(self) -> None:
+        settings = type(
+            "SettingsStub",
+            (),
+            {
+                "crawler_profile_enrichment_concurrency": 6,
+                "crawler_host_concurrency": 2,
+            },
+        )()
+
+        resolved = resolve_crawl_runtime_concurrency(settings)
+
+        self.assertEqual(resolved.profile_enrichment_concurrency, 6)
+        self.assertEqual(resolved.host_concurrency, 2)
 
     async def test_run_queued_crawl_job_moves_to_needs_review_when_candidates_saved(self) -> None:
         job_id = await self._create_default_profile_and_job()
