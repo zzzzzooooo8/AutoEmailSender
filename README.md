@@ -1,88 +1,86 @@
-# AutoEmailSender
+<div align="center">
+  <img src="frontend/public/favicon.svg" alt="Auto Email Sender Logo" width="100" height="100" />
+  <h1>Auto Email Sender</h1>
+  <p>
+    <strong>面向导师套磁场景的智能邮件助手</strong>
+  </p>
+  <p>
+    <a href="https://www.gnu.org/licenses/gpl-3.0">
+      <img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3" />
+    </a>
+    <img src="https://img.shields.io/badge/frontend-React%20%7C%20Vite-61DAFB" alt="Frontend: React | Vite" />
+    <img src="https://img.shields.io/badge/backend-FastAPI-009688" alt="Backend: FastAPI" />
+    <img src="https://img.shields.io/badge/database-SQLite-003B57" alt="Database: SQLite" />
+  </p>
+</div>
 
-一个基于 Flask 的「教授信息管理 + 邮件发送」的轻量级应用。支持通过 DOCX 文档模板快速个性化生成邮件、CSV 批量导入教授信息、管理发件人配置与用户资料，并记录发送历史。
+---
 
-## 快速开始（uv）
-> 项目使用 uv 管理依赖与运行脚本。请先安装 [uv](https://github.com/astral-sh/uv) ，并在终端中执行以下命令。
+> 从学校官网抓取导师信息，结合 LLM 分析匹配度，再完成草稿审核、定时批量发送和回复追踪。
 
-1. 同步依赖
-   ```bash
-   uv sync
-   ```
+Auto Email Sender 是一个本地运行的导师联系工具。它把导师抓取、匹配分析、邮件草稿、定时批量发送和回复追踪放在同一个流程里，适合需要批量联系导师、但又不想直接“无脑群发”的场景。
 
-2. 启动服务
-   ```bash
-   uv run app.py
-   ```
+系统会帮你减少重复整理和重复写信的工作，但最终发给谁、什么时候发、发什么内容，仍然由你确认。
 
-3. 访问：http://localhost:5000
+## 界面预览
 
+| 首页 | 工作区 |
+| --- | --- |
+| <img src="docs/screenshots/首页.png" alt="首页截图" /> | <img src="docs/screenshots/工作区.png" alt="工作区截图" /> |
 
-## 功能特性
-- 教授信息管理：增/删/改/查、导入导出（CSV）
-- 文档驱动邮件：从 DOCX 模板生成预览，按教授批量个性化填充并发送（HTML/纯文本）
-- 发件人与资料管理：支持设置默认发件人，上传套磁信/简历等文件
-- 发送记录：可查看历史发送状态与详情
-- 单机部署友好：内置 SQLite 作为数据库，开箱即用
+| 导师管理 | 个人页 |
+| --- | --- |
+| <img src="docs/screenshots/导师管理页.png" alt="导师管理截图" /> | <img src="docs/screenshots/个人中心.png" alt="个人页截图" /> |
 
+## 核心特点
 
-## 目录结构
+| 特点 | 说明 |
+| --- | --- |
+| 智能抓取 | 利用 Agent 从学校官网整理导师信息，减少手动复制和表格维护 |
+| 匹配度分析 | 通过 LLM 结合你的材料和导师资料，辅助判断联系优先级 |
+| 定时批量发送 | 草稿确认后，可以立即发送，也可以安排到指定时间批量发送 |
+| 回复追踪 | 自动检测导师回复，方便后续跟进 |
+
+## 页面概览
+
+| 页面 | 用途 |
+| --- | --- |
+| 首页 | 筛选导师，创建联系任务 |
+| 导师管理 | 抓取、导入和维护导师信息 |
+| 任务中心 | 查看批量任务和发送计划 |
+| 工作区 | 查看匹配结果，审核草稿并发送 |
+| 个人页 | 配置发件身份、材料、模板和邮箱 |
+| 测试写信页 | 先给自己发一封测试邮件 |
+
+## 快速开始
+
+启动后端：
+
+```bash
+cd backend
+uv sync
+uv run alembic upgrade head
+uv run uvicorn main:app --reload
 ```
-AutoEmailSender/
-├── app.py                       # Flask 入口 & 路由
-├── backend/                     # 后端逻辑
-│   ├── models/                  # SQLAlchemy 模型
-│   └── utils/                   # 工具函数
-├── routes/                      # 视图路由
-├── frontend/                    # 前端视图
-│   ├── templates/               # 页面模板
-│   └── static/                  # 静态资源（css/fonts/js）
-├── settings.json                # 应用设置
-└── pyproject.toml               # 依赖声明
+
+启动前端：
+
+```bash
+cd frontend
+npm install
+npm run dev
 ```
 
+打开 `http://127.0.0.1:5173`。
 
-## 配置说明（环境变量）
-可通过环境变量覆盖默认配置：
-- SECRET_KEY：Flask 密钥（默认 "your-secret-key-here"）
-- DATABASE_URL：数据库连接（默认 SQLite：`sqlite:///auto_email.db`）
-- MAIL_SERVER：SMTP 服务器（默认 `smtp.163.com`）
-- MAIL_PORT：SMTP 端口（默认 `25`）
-- MAIL_USE_TLS：是否启用 TLS（`true/false`，默认 false）
-- MAIL_USE_SSL：是否启用 SSL（`true/false`，默认 false）
-- LOG_LEVEL：日志级别（默认 `INFO`）
+## 技术栈
 
-提示：在「设置/用户管理」页面中也可以为发件人设置 `smtp_server` 与 `smtp_port`。发送时会优先读取默认用户的配置。
+- 前端：React、Vite、TypeScript、Tailwind CSS
+- 后端：FastAPI、SQLAlchemy、Alembic
+- 数据库：SQLite
+- 邮件：SMTP、IMAP
+- 模型：OpenAI 兼容接口
 
+## License
 
-## 使用流程
-1. 设置发件人
-   - 打开「用户管理」页面，新增一个用户（姓名、邮箱、邮箱授权码/密码），并填写 SMTP 服务器与端口。
-   - 首个用户会自动设置为默认用户，也可手动切换默认。
-
-2. 上传资料（可选）
-   - 在用户管理中上传套磁信 DOCX、简历 PDF 或其它材料。
-
-3. 导入教授
-   - 在「教授管理」页面上传 CSV 导入；支持下载模板、预览后导入、跳过重复项。
-
-4. 生成并发送邮件
-   - 打开「邮件生成」页面，选择模板文档（DOCX 格式），选择教授/学院，填写主题可用占位符（如 `{{name}}`）。
-   - 预览生成后，确认并发送。系统会记录发送结果到「发送记录」。
-
-占位符支持（示例）：
-- `{{name}}`/`{{professor_name}}`、`{{university}}`、`{{department}}`、`{{research_area}}`
-- `{{sender_name}}`、`{{sender_email}}`、`{{date}}`、`{{school}}`、`{{college}}`
-
-
-## 开发提示
-- 运行脚本统一使用：`uv run <script.py>`
-- 默认监听 0.0.0.0:5000（`app.py` 可修改端口）
-
-
-## 许可证
-
-本项目基于 GNU General Public License v3.0（GPL-3.0）授权开源。你可以自由使用、复制、修改和分发本项目，但任何修改版或衍生作品必须以同一许可证发布，并保留原始的版权与许可声明。
-
-- 许可证全文：参见 [LICENSE](./LICENSE)
-- 适用许可：GPL-3.0
+GPL-3.0

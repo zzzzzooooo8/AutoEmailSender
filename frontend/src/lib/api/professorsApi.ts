@@ -1,0 +1,84 @@
+import { apiFetch, buildApiUrl } from '@/lib/api/client';
+import type {
+  ProfessorActionResultDTO,
+  ProfessorBulkArchivePayloadDTO,
+  ProfessorDTO,
+  ProfessorDashboardItemDTO,
+  ProfessorImportFileResultDTO,
+  ProfessorImportResultDTO,
+  ProfessorManagementItemDTO,
+  ProfessorUpsertPayloadDTO,
+} from '@/types';
+
+export const listProfessors = (params?: {
+  identityId?: number | null;
+  llmProfileId?: number | null;
+  ids?: number[];
+}) =>
+  apiFetch<ProfessorDashboardItemDTO[]>(
+    '/api/professors',
+    undefined,
+    {
+      identity_id: params?.identityId ?? undefined,
+      llm_profile_id: params?.llmProfileId ?? undefined,
+      ids: params?.ids?.length ? params.ids.join(',') : undefined,
+    },
+  );
+
+export const listProfessorsForManagement = (archived: 'active' | 'archived' | 'all') =>
+  apiFetch<ProfessorManagementItemDTO[]>('/api/professors/management', undefined, {
+    archived,
+  });
+
+export const getProfessor = (professorId: number) =>
+  apiFetch<ProfessorDTO>(`/api/professors/${professorId}`);
+
+export const createProfessor = (payload: ProfessorUpsertPayloadDTO) =>
+  apiFetch<ProfessorManagementItemDTO>('/api/professors', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+export const updateProfessor = (professorId: number, payload: ProfessorUpsertPayloadDTO) =>
+  apiFetch<ProfessorManagementItemDTO>(`/api/professors/${professorId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+
+export const archiveProfessor = (professorId: number) =>
+  apiFetch<ProfessorActionResultDTO>(`/api/professors/${professorId}/archive`, {
+    method: 'POST',
+  });
+
+export const bulkArchiveProfessors = (payload: ProfessorBulkArchivePayloadDTO) =>
+  apiFetch<ProfessorActionResultDTO>('/api/professors/bulk-archive', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+export const restoreProfessor = (professorId: number) =>
+  apiFetch<ProfessorActionResultDTO>(`/api/professors/${professorId}/restore`, {
+    method: 'POST',
+  });
+
+export const importSampleProfessors = () =>
+  apiFetch<ProfessorImportResultDTO>('/api/professors/import-sample', {
+    method: 'POST',
+  });
+
+export const triggerCrawler = () =>
+  apiFetch<{ status: string; message: string }>('/api/professors/trigger-crawler', {
+    method: 'POST',
+  });
+
+export const importProfessorsFromFile = async (file: File) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return apiFetch<ProfessorImportFileResultDTO>('/api/professors/import-file', {
+    method: 'POST',
+    body: formData,
+  });
+};
+
+export const getProfessorTemplateDownloadUrl = (format: 'xlsx' | 'csv') =>
+  buildApiUrl('/api/professors/template', { format });
