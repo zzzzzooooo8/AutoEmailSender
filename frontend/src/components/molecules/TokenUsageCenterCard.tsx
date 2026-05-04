@@ -230,7 +230,7 @@ export function TokenUsageCenterCard() {
   };
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
+    <section className="min-w-0 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
       <button
         type="button"
         aria-expanded={open}
@@ -266,7 +266,7 @@ export function TokenUsageCenterCard() {
           onTransitionEnd={handleContentTransitionEnd}
           className="collapsible-card-content"
         >
-          <div className="min-h-0 space-y-5 px-6 pb-6">
+          <div className="min-h-0 min-w-0 space-y-5 px-6 pb-6">
             <TokenUsageFilters
               featureType={featureType}
               modelName={modelName}
@@ -299,7 +299,7 @@ export function TokenUsageCenterCard() {
                 </button>
               </div>
             ) : (
-              <div className="space-y-5">
+              <div className="min-w-0 space-y-5">
                 {showRecordRefreshing ? (
                   <div
                     role="status"
@@ -376,7 +376,7 @@ function TokenUsageFilters({
     ? Array.from(new Set([...modelOptions, modelName])).sort()
     : modelOptions;
   return (
-    <div className="grid gap-3 rounded-2xl border border-stone-200 bg-stone-50/70 p-4 md:grid-cols-[1fr_1fr_1fr_1fr_auto]">
+    <div className="grid min-w-0 gap-3 rounded-2xl border border-stone-200 bg-stone-50/70 p-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
       <NativeSelectField
         label="功能筛选"
         ariaLabel="功能筛选"
@@ -425,7 +425,7 @@ function TokenUsageFilters({
           className="h-10 w-full rounded-xl border border-stone-200 px-3 text-sm text-stone-700"
         />
       </label>
-      <div className="flex items-end gap-2">
+      <div className="flex min-w-0 flex-wrap items-end gap-2 md:col-span-2 xl:col-span-1">
         <button type="button" onClick={onSubmit} className="ui-btn-primary h-10 px-3">
           <Search className="h-4 w-4" />
           查询
@@ -593,7 +593,7 @@ function TokenUsageTrendChart({
   const axisMax = resolveChartAxisMax(maxTotal);
   const axisTicks = buildChartAxisTicks(axisMax);
   return (
-    <section className="border-t border-stone-200 pt-5">
+    <section className="min-w-0 border-t border-stone-200 pt-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-base font-semibold text-stone-900">输入 / 输出趋势</h3>
@@ -643,7 +643,7 @@ function TokenUsageTrendChart({
           暂无趋势数据
         </div>
       ) : (
-        <div className="mt-4 overflow-x-auto rounded-2xl border border-stone-200 bg-white px-4 py-5 shadow-sm">
+        <div className="mt-4 min-w-0 max-w-full overflow-x-auto rounded-2xl border border-stone-200 bg-white px-4 py-5 shadow-sm">
           <div className="min-w-[720px] pl-24 pr-5">
             <div className="relative h-72 border-b border-stone-500">
               {axisTicks.map((tick) => (

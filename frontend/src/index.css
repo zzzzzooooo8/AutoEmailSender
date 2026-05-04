@@ -12,6 +12,10 @@
   --foreground: #292524;
 }
 
+html {
+  scrollbar-gutter: stable;
+}
+
 * {
   box-sizing: border-box;
 }

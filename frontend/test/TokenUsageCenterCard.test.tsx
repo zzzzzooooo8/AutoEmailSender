@@ -150,6 +150,27 @@ describe("TokenUsageCenterCard", () => {
     });
   });
 
+  it("keeps wide controls constrained inside the profile page column", async () => {
+    mockedListTokenUsageRecords.mockResolvedValue(createRecordListResult());
+    render(<TokenUsageCenterCard />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Token 消耗记录中心/ }));
+    await waitFor(() => expect(screen.getByText("输入 / 输出趋势")).toBeInTheDocument());
+
+    const featureFilter = screen.getByRole("button", { name: "功能筛选" });
+    const filterPanel = featureFilter.closest(".grid");
+    expect(filterPanel).toHaveClass("min-w-0");
+    expect(filterPanel).toHaveClass("md:grid-cols-2");
+    expect(filterPanel).toHaveClass(
+      "xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]",
+    );
+
+    const chartScroller = screen.getByLabelText("10:00 输入 200 输出 30 总计 230")
+      .closest(".overflow-x-auto");
+    expect(chartScroller).toHaveClass("max-w-full");
+    expect(chartScroller).toHaveClass("min-w-0");
+  });
+
   it("filters records and chart by model name", async () => {
     mockedListTokenUsageRecords.mockResolvedValue(
       createRecordListResult({

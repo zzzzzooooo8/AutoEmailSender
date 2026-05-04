@@ -1,4 +1,5 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { RouteScrollRestoration } from '@/components/organisms/RouteScrollRestoration';
 import { TopNavBar } from '@/components/organisms/TopNavBar';
 import { NotificationProvider } from '@/context/NotificationContext';
 import { SelectionProvider } from '@/context/SelectionContext';
@@ -14,6 +15,7 @@ import { WorkspacePage } from '@/pages/WorkspacePage';
 function App() {
   return (
     <BrowserRouter>
+      <RouteScrollRestoration />
       <NotificationProvider>
         <SelectionProvider>
           <div className="flex min-h-screen flex-col bg-background">
