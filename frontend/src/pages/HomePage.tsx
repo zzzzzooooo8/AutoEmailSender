@@ -689,7 +689,7 @@ export const HomePage = () => {
           ) : null}
         </section>
 
-        <section className="mt-6 rounded-3xl border border-stone-200 bg-white shadow-sm">
+        <section className="mt-6 overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-sm">
           <div className="flex flex-wrap items-center gap-3 border-b border-stone-100 px-6 py-4">
             {visibleProfessors.length > 0 ? (
               <button

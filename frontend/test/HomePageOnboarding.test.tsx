@@ -301,6 +301,9 @@ describe("HomePage onboarding", () => {
     );
     expect(selectButton).toHaveClass("h-6", "w-6");
     expect(
+      screen.getByRole("button", { name: "选择当前结果" }).closest("section"),
+    ).toHaveClass("overflow-hidden");
+    expect(
       screen.queryByRole("checkbox", { name: "选择 王教授" }),
     ).not.toBeInTheDocument();
     const dashboardRow = screen.getByText("王教授").closest("article");
