@@ -524,6 +524,7 @@ export const TasksPage = () => {
   const lastCrawlJobDetailsLoadErrorRef = useRef<string | null>(null);
   const loadedTasksKeyRef = useRef<string | null>(null);
   const crawlJobsPreloadedRef = useRef(false);
+  const matchJobsPreloadedKeyRef = useRef<string | null>(null);
   const activeTasksRequestKeyRef = useRef<string | null>(null);
   const latestTasksRequestIdRef = useRef(0);
   const latestBatchTaskDetailsRequestIdRef = useRef(0);
@@ -749,7 +750,7 @@ export const TasksPage = () => {
     [notifyError],
   );
 
-  const loadMatchAnalysisJobs = useCallback(async () => {
+  const loadMatchAnalysisJobs = useCallback(async (options?: { showLoading?: boolean }) => {
     if (!selectedIdentityId || !selectedLlmProfileId) {
       setMatchAnalysisJobs([]);
       lastMatchJobsLoadErrorRef.current = null;
@@ -758,7 +759,9 @@ export const TasksPage = () => {
     }
     const requestId = latestMatchJobsRequestIdRef.current + 1;
     latestMatchJobsRequestIdRef.current = requestId;
-    setMatchJobsLoading(true);
+    if (options?.showLoading ?? true) {
+      setMatchJobsLoading(true);
+    }
     try {
       const data = await listMatchAnalysisJobs({
         identityId: selectedIdentityId,
@@ -786,7 +789,10 @@ export const TasksPage = () => {
         lastMatchJobsLoadErrorRef.current = message;
       }
     } finally {
-      if (latestMatchJobsRequestIdRef.current === requestId) {
+      if (
+        latestMatchJobsRequestIdRef.current === requestId &&
+        (options?.showLoading ?? true)
+      ) {
         setMatchJobsLoading(false);
       }
     }
@@ -963,6 +969,19 @@ export const TasksPage = () => {
   }, [loadCrawlJobs]);
 
   useEffect(() => {
+    if (!tasksRequestKey) {
+      matchJobsPreloadedKeyRef.current = null;
+      void loadMatchAnalysisJobs({ showLoading: false });
+      return;
+    }
+    if (matchJobsPreloadedKeyRef.current === tasksRequestKey) {
+      return;
+    }
+    matchJobsPreloadedKeyRef.current = tasksRequestKey;
+    void loadMatchAnalysisJobs({ showLoading: false });
+  }, [loadMatchAnalysisJobs, tasksRequestKey]);
+
+  useEffect(() => {
     if (activeTab !== "crawl") {
       return undefined;
     }
@@ -977,12 +996,12 @@ export const TasksPage = () => {
     if (activeTab !== "match") {
       return undefined;
     }
-    void loadMatchAnalysisJobs();
+    void loadMatchAnalysisJobs({ showLoading: matchAnalysisJobs.length === 0 });
     const timer = window.setInterval(() => {
-      void loadMatchAnalysisJobs();
+      void loadMatchAnalysisJobs({ showLoading: false });
     }, CRAWL_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [activeTab, loadMatchAnalysisJobs]);
+  }, [activeTab, loadMatchAnalysisJobs, matchAnalysisJobs.length]);
 
   useEffect(() => {
     if (!selectedBatchTask) {

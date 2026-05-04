@@ -3,6 +3,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TasksPage } from "@/pages/TasksPage";
 import { listBatchTaskItems, listBatchTasks } from "@/lib/api/batchTasksApi";
+import { listMatchAnalysisJobs } from "@/lib/api/matchAnalysisJobsApi";
 
 const mockedUseSelectionContext = vi.hoisted(() => vi.fn());
 
@@ -29,6 +30,13 @@ vi.mock("@/lib/api/batchTasksApi", () => ({
   pauseBatchTask: vi.fn(),
   resumeBatchTask: vi.fn(),
   stopBatchTask: vi.fn(),
+}));
+
+vi.mock("@/lib/api/matchAnalysisJobsApi", () => ({
+  listMatchAnalysisJobItems: vi.fn(),
+  listMatchAnalysisJobs: vi.fn(),
+  cancelMatchAnalysisJob: vi.fn(),
+  retryFailedMatchAnalysisJob: vi.fn(),
 }));
 
 const renderPage = () =>
@@ -110,6 +118,7 @@ describe("TasksPage layout", () => {
     });
     vi.mocked(listBatchTasks).mockResolvedValue([]);
     vi.mocked(listBatchTaskItems).mockResolvedValue([]);
+    vi.mocked(listMatchAnalysisJobs).mockResolvedValue([]);
   });
 
   it("uses the same wide page shell as the other primary pages", async () => {
@@ -129,6 +138,42 @@ describe("TasksPage layout", () => {
     expect(pageShell).toHaveClass("max-w-7xl");
     expect(screen.getByRole("button", { name: "批量邮件" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "教师抓取" })).toBeInTheDocument();
+  });
+
+  it("preloads match analysis count before the match tab is opened", async () => {
+    vi.mocked(listMatchAnalysisJobs).mockResolvedValue([
+      {
+        id: 9,
+        name: "鍖归厤鍒嗘瀽浠诲姟",
+        status: "running",
+        target_count: 3,
+        succeeded_count: 1,
+        failed_count: 0,
+        skipped_count: 0,
+        total_prompt_tokens: 100,
+        total_completion_tokens: 20,
+        total_tokens: 120,
+        identity_id: 1,
+        llm_profile_id: 2,
+        cancel_requested_at: null,
+        started_at: "2026-04-26T10:00:00Z",
+        finished_at: null,
+        created_at: "2026-04-26T10:00:00Z",
+        updated_at: "2026-04-26T10:01:00Z",
+        last_error: null,
+      },
+    ]);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(listMatchAnalysisJobs).toHaveBeenCalledWith({
+        identityId: 1,
+        llmProfileId: 2,
+      });
+    });
+
+    expect(screen.getByRole("button", { name: "匹配分析" })).toHaveTextContent("1");
   });
 
   it("opens batch task details from the single-column task list", async () => {

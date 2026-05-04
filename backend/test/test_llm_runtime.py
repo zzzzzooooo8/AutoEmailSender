@@ -207,10 +207,14 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         from app.services.llm_runtime import SYSTEM_MATCH_ONLY_PROMPT
 
         expected_fragments = [
-            "研究主题匹配度：0-50",
-            "能力与方法匹配度：0-30",
-            "个性化理由充分度：0-20",
-            "没有近期论文，但研究方向具体：不限制最高分",
+            "研究主题匹配度：0-45",
+            "能力与方法匹配度：0-25",
+            "近期论文交集：0-20",
+            "个性化理由充分度：0-10",
+            "有近期论文，且论文主题和默认材料有明确交集：应明显高于只有宽泛研究方向的导师",
+            "有近期论文，但论文和默认材料交集弱：不因论文数量多而加分",
+            "没有近期论文但研究方向具体：match_score 通常最高 80",
+            "没有近期论文，但研究方向具体：通常最高 80",
             "没有近期论文，且研究方向很宽泛：match_score 最高 75",
             "没有研究方向，但有近期论文：match_score 最高 85",
             "研究方向和近期论文都缺失：match_score 最高 30",

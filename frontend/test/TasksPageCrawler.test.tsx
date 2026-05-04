@@ -3,6 +3,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TasksPage } from "@/pages/TasksPage";
 import { listBatchTaskItems, listBatchTasks } from "@/lib/api/batchTasksApi";
+import { listMatchAnalysisJobs } from "@/lib/api/matchAnalysisJobsApi";
 import { clearDiagnosticEvents, getDiagnosticEvents } from "@/lib/diagnostics";
 import {
   cancelCrawlJob,
@@ -39,6 +40,13 @@ vi.mock("@/lib/api/batchTasksApi", () => ({
   pauseBatchTask: vi.fn(),
   resumeBatchTask: vi.fn(),
   stopBatchTask: vi.fn(),
+}));
+
+vi.mock("@/lib/api/matchAnalysisJobsApi", () => ({
+  listMatchAnalysisJobItems: vi.fn(),
+  listMatchAnalysisJobs: vi.fn(),
+  cancelMatchAnalysisJob: vi.fn(),
+  retryFailedMatchAnalysisJob: vi.fn(),
 }));
 
 vi.mock("@/lib/api/crawlJobsApi", () => ({
@@ -96,6 +104,7 @@ describe("TasksPage crawler jobs tab", () => {
     confirm.mockResolvedValue(true);
     vi.mocked(listBatchTasks).mockResolvedValue([]);
     vi.mocked(listBatchTaskItems).mockResolvedValue([]);
+    vi.mocked(listMatchAnalysisJobs).mockResolvedValue([]);
     vi.mocked(listCrawlJobs).mockResolvedValue([runningJob]);
     vi.mocked(cancelCrawlJob).mockResolvedValue(runningJob);
     vi.mocked(getCrawlJob).mockResolvedValue(runningJob);
