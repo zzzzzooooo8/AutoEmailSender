@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { getFrontendIndexPath, startBackend } from "./backend.js";
+import { checkForUpdatesOnStartup, registerUpdateIpc } from "./updates.js";
 import type { BackendController } from "./types.js";
 
 let mainWindow: BrowserWindow | null = null;
@@ -42,9 +43,11 @@ async function createWindow(): Promise<void> {
     repoRoot,
   });
   await mainWindow.loadURL(pathToFileURL(indexPath).toString());
+  checkForUpdatesOnStartup();
 }
 
 ipcMain.handle("app:get-version", () => app.getVersion());
+registerUpdateIpc(() => mainWindow);
 
 app.whenReady().then(() => {
   createWindow().catch((error: unknown) => {
