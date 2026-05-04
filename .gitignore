@@ -10,6 +10,10 @@ data/*.db
 data/*.db-*
 data/uploads/
 frontend/dist/
+backend/build/
+backend/dist/
+desktop/dist/
+desktop/release/
 .superpowers
 .omx
 .worktrees/

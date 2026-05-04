@@ -55,6 +55,16 @@ class DesktopRuntimeTests(unittest.TestCase):
             self.assertTrue(settings.uploads_dir.exists())
             self.assertTrue((data_dir / "logs" / "crawler").exists())
 
+    def test_desktop_entry_builds_uvicorn_options_from_args(self) -> None:
+        from desktop_entry import build_uvicorn_options
+
+        options = build_uvicorn_options(["--host", "127.0.0.1", "--port", "48123"])
+
+        self.assertEqual(options["app"], "main:app")
+        self.assertEqual(options["host"], "127.0.0.1")
+        self.assertEqual(options["port"], 48123)
+        self.assertIs(options["reload"], False)
+
 
 if __name__ == "__main__":
     unittest.main()
