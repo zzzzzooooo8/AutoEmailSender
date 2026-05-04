@@ -59,7 +59,7 @@ const isMatchConflictError = (error: unknown): error is ApiError =>
 
 export const HomePage = () => {
   const navigate = useNavigate();
-  const { confirm, dialog: confirmDialog } = useConfirmDialog();
+  const { choose, confirm, dialog: confirmDialog } = useConfirmDialog();
   const { notifyError, notifySuccess, notifyWarning } = useNotification();
   const {
     selectedIdentityId,
@@ -356,6 +356,25 @@ export const HomePage = () => {
       );
       return;
     }
+    if (
+      professor?.match_score !== null &&
+      professor?.match_score !== undefined
+    ) {
+      const action = await choose({
+        title: "该导师已有匹配分",
+        description: `${professor.name} 当前匹配分为 ${professor.match_score}%。请选择跳过本次分析，或重新计算匹配分。`,
+        confirmLabel: "重算",
+        secondaryLabel: "跳过",
+        cancelLabel: "取消",
+      });
+      if (action === "secondary") {
+        notifyWarning("已跳过匹配分析", "该导师已有匹配分，未重新计算。");
+        return;
+      }
+      if (action !== "confirm") {
+        return;
+      }
+    }
 
     toggleScoringProfessor(professorId, true);
     try {
@@ -395,7 +414,6 @@ export const HomePage = () => {
       return;
     }
 
-    setBulkScoring(true);
     const selectedProfessors = professors.filter((item) =>
       selectedIds.has(item.id),
     );
@@ -406,15 +424,43 @@ export const HomePage = () => {
         "缺少研究信息",
         "已选导师都缺少研究方向或近期论文，暂不能分析匹配度。",
       );
-      setBulkScoring(false);
       return;
     }
 
+    let professorIdsForJob = Array.from(selectedIds);
+    const scoredProfessors = analyzableProfessors.filter(
+      (professor) => professor.match_score !== null,
+    );
+    if (scoredProfessors.length > 0) {
+      const action = await choose({
+        title: "已选导师中有匹配分",
+        description: `已选导师中有 ${scoredProfessors.length} 位已经计算过匹配分。请选择跳过这些导师，或重新计算他们的匹配分。`,
+        confirmLabel: "重算",
+        secondaryLabel: "跳过",
+        cancelLabel: "取消",
+      });
+      if (action === "secondary") {
+        professorIdsForJob = analyzableProfessors
+          .filter((professor) => professor.match_score === null)
+          .map((professor) => professor.id);
+        if (professorIdsForJob.length === 0) {
+          notifyWarning(
+            "没有需要分析的导师",
+            "已选导师都已有匹配分，本次已按你的选择跳过。",
+          );
+          return;
+        }
+      } else if (action !== "confirm") {
+        return;
+      }
+    }
+
+    setBulkScoring(true);
     try {
       const job = await createMatchAnalysisJob({
         identity_id: selectedIdentityId,
         llm_profile_id: selectedLlmProfileId,
-        professor_ids: Array.from(selectedIds),
+        professor_ids: professorIdsForJob,
         name: null,
       });
       notifySuccess(
@@ -722,7 +768,7 @@ export const HomePage = () => {
                   已选中 {selectedIds.size} 位导师
                 </div>
                 <div className="mt-1 text-xs text-stone-500">
-                  可批量分析匹配度，或带着这些导师创建批量任务。
+                  可批量分析匹配度，或创建批量任务。
                 </div>
               </div>
               <div className="flex flex-wrap gap-3">

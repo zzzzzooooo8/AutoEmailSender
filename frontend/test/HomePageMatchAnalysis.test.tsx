@@ -8,7 +8,9 @@ import type { IdentityDTO, LLMProfileDTO, ProfessorDashboardItemDTO } from "@/ty
 const mockedUseSelectionContext = vi.hoisted(() => vi.fn());
 const mockedListProfessors = vi.hoisted(() => vi.fn());
 const mockedCalculateMatch = vi.hoisted(() => vi.fn());
+const mockedCreateMatchAnalysisJob = vi.hoisted(() => vi.fn());
 const mockedEnsureWorkspaceTask = vi.hoisted(() => vi.fn());
+const mockedChoose = vi.hoisted(() => vi.fn());
 const mockedNotifyError = vi.hoisted(() => vi.fn());
 const mockedNotifySuccess = vi.hoisted(() => vi.fn());
 const mockedNotifyWarning = vi.hoisted(() => vi.fn());
@@ -25,12 +27,17 @@ vi.mock("@/lib/api/emailTasksApi", () => ({
   calculateMatch: mockedCalculateMatch,
 }));
 
+vi.mock("@/lib/api/matchAnalysisJobsApi", () => ({
+  createMatchAnalysisJob: mockedCreateMatchAnalysisJob,
+}));
+
 vi.mock("@/lib/api/workspacesApi", () => ({
   ensureWorkspaceTask: mockedEnsureWorkspaceTask,
 }));
 
 vi.mock("@/lib/useConfirmDialog", () => ({
   useConfirmDialog: () => ({
+    choose: mockedChoose,
     confirm: vi.fn(),
     dialog: null,
   }),
@@ -93,7 +100,11 @@ const selectedLlmProfile: LLMProfileDTO = {
   updated_at: "2026-04-22T00:00:00Z",
 };
 
-const createProfessor = (id: number, name: string): ProfessorDashboardItemDTO => ({
+const createProfessor = (
+  id: number,
+  name: string,
+  overrides: Partial<ProfessorDashboardItemDTO> = {},
+): ProfessorDashboardItemDTO => ({
   id,
   name,
   email: `${id}@example.com`,
@@ -106,6 +117,7 @@ const createProfessor = (id: number, name: string): ProfessorDashboardItemDTO =>
   match_score: null,
   sent_count: 0,
   status: "preparing",
+  ...overrides,
 });
 
 const renderPage = () =>
@@ -119,7 +131,9 @@ describe("HomePage match analysis", () => {
   beforeEach(() => {
     mockedListProfessors.mockReset();
     mockedCalculateMatch.mockReset();
+    mockedCreateMatchAnalysisJob.mockReset();
     mockedEnsureWorkspaceTask.mockReset();
+    mockedChoose.mockReset();
     mockedNotifyError.mockReset();
     mockedNotifySuccess.mockReset();
     mockedNotifyWarning.mockReset();
@@ -136,6 +150,10 @@ describe("HomePage match analysis", () => {
     mockedEnsureWorkspaceTask.mockImplementation(async (professorId: number) => ({
       current_task: { id: professorId + 1000 },
     }));
+    mockedCreateMatchAnalysisJob.mockResolvedValue({
+      id: 1,
+      target_count: 2,
+    });
   });
 
   it("shows a warning when a single match request returns 409", async () => {
@@ -155,10 +173,142 @@ describe("HomePage match analysis", () => {
     expect(mockedNotifyError).not.toHaveBeenCalled();
   });
 
-  it("continues batch scoring after one 409 conflict", async () => {
-    mockedCalculateMatch
-      .mockRejectedValueOnce(new ApiError(409, "该任务正在分析中"))
-      .mockResolvedValueOnce({
+  it("skips a single scored professor when the user chooses skip", async () => {
+    mockedListProfessors.mockResolvedValue([
+      createProfessor(101, "王教授", { match_score: 88 }),
+    ]);
+    mockedChoose.mockResolvedValue("secondary");
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "分析匹配度" }));
+
+    await waitFor(() => {
+      expect(mockedNotifyWarning).toHaveBeenCalledWith(
+        "已跳过匹配分析",
+        "该导师已有匹配分，未重新计算。",
+      );
+    });
+    expect(mockedEnsureWorkspaceTask).not.toHaveBeenCalled();
+    expect(mockedCalculateMatch).not.toHaveBeenCalled();
+  });
+
+  it("recalculates a single scored professor when the user chooses recalculate", async () => {
+    mockedListProfessors.mockResolvedValue([
+      createProfessor(101, "王教授", { match_score: 88 }),
+    ]);
+    mockedChoose.mockResolvedValue("confirm");
+    mockedCalculateMatch.mockResolvedValue({
+      thread: {} as never,
+      usage: {
+        prompt_tokens: 10,
+        completion_tokens: 2,
+        total_tokens: 12,
+        cached_tokens: 0,
+      },
+      run_id: 1,
+    });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "分析匹配度" }));
+
+    await waitFor(() => {
+      expect(mockedCalculateMatch).toHaveBeenCalledWith(1101);
+    });
+  });
+
+  it("creates a batch match analysis job for selected professors", async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "选择 王教授" }));
+    fireEvent.click(screen.getByRole("button", { name: "选择 李教授" }));
+    fireEvent.click(screen.getByRole("button", { name: "批量分析匹配度" }));
+
+    await waitFor(() => {
+      expect(mockedCreateMatchAnalysisJob).toHaveBeenCalledWith({
+        identity_id: 1,
+        llm_profile_id: 1,
+        professor_ids: [101, 102],
+        name: null,
+      });
+    });
+  });
+
+  it("excludes scored professors from batch analysis when the user chooses skip", async () => {
+    mockedListProfessors.mockResolvedValue([
+      createProfessor(101, "王教授", { match_score: 88 }),
+      createProfessor(102, "李教授"),
+    ]);
+    mockedChoose.mockResolvedValue("secondary");
+    mockedCreateMatchAnalysisJob.mockResolvedValue({
+      id: 1,
+      target_count: 1,
+    });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "选择 王教授" }));
+    fireEvent.click(screen.getByRole("button", { name: "选择 李教授" }));
+    fireEvent.click(screen.getByRole("button", { name: "批量分析匹配度" }));
+
+    await waitFor(() => {
+      expect(mockedCreateMatchAnalysisJob).toHaveBeenCalledWith({
+        identity_id: 1,
+        llm_profile_id: 1,
+        professor_ids: [102],
+        name: null,
+      });
+    });
+  });
+
+  it("does not create a batch job when every selected scored professor is skipped", async () => {
+    mockedListProfessors.mockResolvedValue([
+      createProfessor(101, "王教授", { match_score: 88 }),
+      createProfessor(102, "李教授", { match_score: 77 }),
+    ]);
+    mockedChoose.mockResolvedValue("secondary");
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "选择 王教授" }));
+    fireEvent.click(screen.getByRole("button", { name: "选择 李教授" }));
+    fireEvent.click(screen.getByRole("button", { name: "批量分析匹配度" }));
+
+    await waitFor(() => {
+      expect(mockedNotifyWarning).toHaveBeenCalledWith(
+        "没有需要分析的导师",
+        "已选导师都已有匹配分，本次已按你的选择跳过。",
+      );
+    });
+    expect(mockedCreateMatchAnalysisJob).not.toHaveBeenCalled();
+  });
+
+  it("recalculates scored professors in a batch job when the user chooses recalculate", async () => {
+    mockedListProfessors.mockResolvedValue([
+      createProfessor(101, "王教授", { match_score: 88 }),
+      createProfessor(102, "李教授"),
+    ]);
+    mockedChoose.mockResolvedValue("confirm");
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "选择 王教授" }));
+    fireEvent.click(screen.getByRole("button", { name: "选择 李教授" }));
+    fireEvent.click(screen.getByRole("button", { name: "批量分析匹配度" }));
+
+    await waitFor(() => {
+      expect(mockedCreateMatchAnalysisJob).toHaveBeenCalledWith({
+        identity_id: 1,
+        llm_profile_id: 1,
+        professor_ids: [101, 102],
+        name: null,
+      });
+    });
+  });
+
+  it("reports a successful single recalculation", async () => {
+    mockedCalculateMatch.mockResolvedValue({
         thread: {} as never,
         usage: {
           prompt_tokens: 10,
@@ -171,16 +321,14 @@ describe("HomePage match analysis", () => {
 
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "选择 王教授" }));
-    fireEvent.click(screen.getByRole("button", { name: "选择 李教授" }));
-    fireEvent.click(screen.getByRole("button", { name: "批量分析匹配度" }));
+    const buttons = await screen.findAllByRole("button", { name: "分析匹配度" });
+    fireEvent.click(buttons[0]);
 
     await waitFor(() => {
-      expect(mockedNotifyError).toHaveBeenCalledWith(
-        "部分导师计算失败",
-        expect.stringContaining("王教授：正在分析中"),
+      expect(mockedNotifySuccess).toHaveBeenCalledWith(
+        "匹配分析完成",
+        expect.stringContaining("总计 12"),
       );
     });
-    expect(mockedCalculateMatch).toHaveBeenCalledTimes(2);
   });
 });

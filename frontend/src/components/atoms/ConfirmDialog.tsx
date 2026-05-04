@@ -9,10 +9,12 @@ type ConfirmDialogProps = {
   title: string;
   description?: string;
   confirmLabel?: string;
+  secondaryLabel?: string;
   cancelLabel?: string | null;
   tone?: ConfirmDialogTone;
   onCancel: () => void;
   onConfirm: () => void;
+  onSecondary?: () => void;
 };
 
 export const ConfirmDialog = ({
@@ -20,10 +22,12 @@ export const ConfirmDialog = ({
   title,
   description,
   confirmLabel = "确认",
+  secondaryLabel,
   cancelLabel,
   tone = "neutral",
   onCancel,
   onConfirm,
+  onSecondary,
 }: ConfirmDialogProps) => {
   const resolvedCancelLabel = cancelLabel ?? "取消";
   const showCancelButton = cancelLabel !== null;
@@ -99,6 +103,15 @@ export const ConfirmDialog = ({
                 className="inline-flex items-center justify-center rounded-2xl border border-stone-200 bg-white px-4 py-2.5 text-sm font-medium text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 hover:text-stone-900"
               >
                 {resolvedCancelLabel}
+              </button>
+            ) : null}
+            {secondaryLabel ? (
+              <button
+                type="button"
+                onClick={onSecondary}
+                className="inline-flex items-center justify-center rounded-2xl border border-stone-200 bg-white px-4 py-2.5 text-sm font-semibold text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 hover:text-stone-900"
+              >
+                {secondaryLabel}
               </button>
             ) : null}
             <button
