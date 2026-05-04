@@ -408,9 +408,7 @@ function ProfileSetupSection({
             <h2 className="text-xl font-semibold text-stone-900">{title}</h2>
             {badge}
           </div>
-          <p className="mt-2 text-sm leading-6 text-stone-600">
-            {description}
-          </p>
+          <p className="mt-2 text-sm leading-6 text-stone-600">{description}</p>
         </div>
         <ChevronDown
           className={clsx(
@@ -1803,8 +1801,8 @@ export const ProfilePage = () => {
     selectedLlmProfile ?? defaultLLMProfile ?? llmProfiles[0] ?? null;
   const setupHasTemplate = Boolean(
     setupIdentity?.outreach_template_subject?.trim() &&
-      (setupIdentity.outreach_template_body_text?.trim() ||
-        setupIdentity.outreach_template_body_html?.trim()),
+    (setupIdentity.outreach_template_body_text?.trim() ||
+      setupIdentity.outreach_template_body_html?.trim()),
   );
   const setupHasMaterial = Boolean(
     setupIdentity?.current_primary_material || setupIdentity?.materials.length,
@@ -2441,9 +2439,7 @@ export const ProfilePage = () => {
                   onClick={() => openAndScrollToSetupSection(item.id)}
                   className={clsx(
                     "rounded-2xl border bg-white px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary/20",
-                    item.completed
-                      ? "border-emerald-200"
-                      : "border-amber-200",
+                    item.completed ? "border-emerald-200" : "border-amber-200",
                   )}
                 >
                   <div className="flex items-center justify-between gap-3">
@@ -2492,7 +2488,6 @@ export const ProfilePage = () => {
               </span>
             }
           >
-
             <div className="mt-5 rounded-3xl border border-stone-200 bg-[#fcfbf8] p-4">
               <div className="grid gap-4 lg:grid-cols-[1.2fr,0.8fr]">
                 <EditorSwitcher
@@ -2570,7 +2565,7 @@ export const ProfilePage = () => {
                     }))
                   }
                   className={inputClassName}
-                  placeholder="示例：王同学"
+                  placeholder="示例：张三"
                 />
               </label>
               <label className="block">
@@ -2593,7 +2588,7 @@ export const ProfilePage = () => {
                   value={identityForm.smtp_host}
                   onChange={(event) => handleSmtpHostChange(event.target.value)}
                   className={inputClassName}
-                  placeholder="示例：smtp.qq.com"
+                  placeholder="示例：smtp.163.com"
                 />
               </label>
               <label className="block">
@@ -2623,7 +2618,7 @@ export const ProfilePage = () => {
                     }))
                   }
                   className={inputClassName}
-                  placeholder="示例：邮箱授权码或应用专用密码"
+                  placeholder="示例：邮箱授权码或应用专用密码（可从网页版邮箱设置页面中获取）"
                 />
               </label>
               <label className="block">
@@ -2637,7 +2632,7 @@ export const ProfilePage = () => {
                     }))
                   }
                   className={inputClassName}
-                  placeholder="示例：imap.qq.com"
+                  placeholder="示例：imap.163.com"
                 />
               </label>
               <label className="block">
@@ -2684,7 +2679,6 @@ export const ProfilePage = () => {
               </span>
             }
           >
-
             <div className="mt-6">
               <OutreachTemplateSummaryCard
                 form={identityForm}
@@ -2726,7 +2720,6 @@ export const ProfilePage = () => {
               </span>
             }
           >
-
             <div className="mt-5 rounded-3xl border border-stone-200 bg-[#fcfbf8] p-4">
               <div className="grid gap-4 lg:grid-cols-[1.2fr,0.8fr]">
                 <EditorSwitcher
@@ -3045,7 +3038,6 @@ export const ProfilePage = () => {
               </span>
             }
           >
-
             <div className="mt-6 grid gap-6 lg:grid-cols-[1fr,0.95fr] lg:items-start">
               <div>
                 <div className="flex items-center gap-2 text-sm font-semibold text-stone-900">
