@@ -38,6 +38,7 @@ class DesktopRuntimeTests(unittest.TestCase):
     def test_desktop_data_dir_controls_default_storage_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "AutoEmailSender"
+            expected_data_dir = data_dir.resolve()
             os.environ["AUTO_EMAIL_SENDER_DATA_DIR"] = str(data_dir)
             os.environ.pop("DATABASE_URL", None)
 
@@ -46,14 +47,14 @@ class DesktopRuntimeTests(unittest.TestCase):
             get_settings.cache_clear()
             settings = get_settings()
 
-            self.assertEqual(settings.data_dir, data_dir)
-            self.assertEqual(settings.uploads_dir, data_dir / "uploads")
+            self.assertEqual(settings.data_dir, expected_data_dir)
+            self.assertEqual(settings.uploads_dir, expected_data_dir / "uploads")
             self.assertEqual(
                 settings.database_url,
-                f"sqlite+aiosqlite:///{(data_dir / 'auto_email_sender.db').as_posix()}",
+                f"sqlite+aiosqlite:///{(expected_data_dir / 'auto_email_sender.db').as_posix()}",
             )
             self.assertTrue(settings.uploads_dir.exists())
-            self.assertTrue((data_dir / "logs" / "crawler").exists())
+            self.assertTrue((expected_data_dir / "logs" / "crawler").exists())
 
     def test_desktop_entry_builds_uvicorn_options_from_args(self) -> None:
         from desktop_entry import build_uvicorn_options
