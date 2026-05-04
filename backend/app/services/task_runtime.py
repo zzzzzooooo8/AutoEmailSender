@@ -32,6 +32,7 @@ from app.services.materials import (
     ensure_material_extracted_text,
     material_can_be_primary,
 )
+from app.services.operation_logs import record_operation_log
 from app.services.outreach_templates import (
     OUTREACH_GENERATION_MODE_TEMPLATE,
     build_template_context,
@@ -385,6 +386,16 @@ async def generate_task_draft(
                 provider_payload=provider_payload,
             ),
         )
+        await _record_email_task_log(
+            session,
+            task,
+            "email_task.draft_generated",
+            metadata={
+                "generation_mode": outreach_config.generation_mode,
+                "has_usage": usage is not None,
+                "selected_material_ids": task.selected_material_ids,
+            },
+        )
         await session.commit()
         return task.professor_id, task.identity_id, task.llm_profile_id
 
@@ -480,6 +491,16 @@ async def calculate_task_match(
         task.status = EmailTaskStatus.MATCHED.value
         task.updated_at = datetime.now(UTC)
         task.last_error = None
+        await _record_email_task_log(
+            session,
+            task,
+            "email_task.match_calculated",
+            metadata={
+                "match_analysis_run_id": run.id,
+                "match_score": task.match_score,
+                "force": force,
+            },
+        )
         await session.commit()
         return _match_action_result(
             task,
@@ -596,6 +617,12 @@ async def update_task_primary_material(
         task.scheduled_at = None
         task.last_error = None
         task.updated_at = datetime.now(UTC)
+        await _record_email_task_log(
+            session,
+            task,
+            "email_task.primary_material_updated",
+            metadata={"primary_material_id": task.primary_material_id},
+        )
         await session.commit()
 
     return await generate_task_draft(
@@ -645,6 +672,12 @@ async def update_task_outreach_config(
         task.scheduled_at = None
         task.last_error = None
         task.updated_at = datetime.now(UTC)
+        await _record_email_task_log(
+            session,
+            task,
+            "email_task.outreach_config_updated",
+            metadata={"outreach_generation_mode": task.outreach_generation_mode},
+        )
         await session.commit()
         return task.professor_id, task.identity_id, task.llm_profile_id
 
@@ -661,6 +694,12 @@ async def approve_and_send_task(
         _ensure_task_allows_legacy_manual_actions(task)
         await _snapshot_approval(session, task, payload)
         task.status = EmailTaskStatus.APPROVED.value
+        await _record_email_task_log(
+            session,
+            task,
+            "email_task.approved",
+            metadata={"selected_material_ids": task.selected_material_ids},
+        )
         await session.commit()
         professor_id = task.professor_id
         identity_id = task.identity_id
@@ -684,6 +723,15 @@ async def approve_and_schedule_task(
         task.status = EmailTaskStatus.SCHEDULED.value
         task.scheduled_at = payload.scheduled_at.astimezone(UTC)
         task.updated_at = datetime.now(UTC)
+        await _record_email_task_log(
+            session,
+            task,
+            "email_task.approved_and_scheduled",
+            metadata={
+                "scheduled_at": task.scheduled_at.isoformat() if task.scheduled_at else None,
+                "selected_material_ids": task.selected_material_ids,
+            },
+        )
         await session.commit()
         return task.professor_id, task.identity_id, task.llm_profile_id
 
@@ -700,6 +748,7 @@ async def cancel_scheduled_task(
         task.status = EmailTaskStatus.REVIEW_REQUIRED.value
         task.scheduled_at = None
         task.updated_at = datetime.now(UTC)
+        await _record_email_task_log(session, task, "email_task.schedule_canceled")
         await session.commit()
         return task.professor_id, task.identity_id, task.llm_profile_id
 
@@ -721,6 +770,13 @@ async def continue_task_manually(
 
         child_task = _create_manual_child_task(task, reuse_existing_draft=True)
         session.add(child_task)
+        await session.flush()
+        await _record_email_task_log(
+            session,
+            child_task,
+            "email_task.continued_manually",
+            metadata={"parent_task_id": task.id},
+        )
         await _commit_manual_child_task(session)
         return task.professor_id, task.identity_id, task.llm_profile_id
 
@@ -746,6 +802,13 @@ async def start_follow_up_task(
             minimum_status=EmailTaskStatus.MATCHED.value,
         )
         session.add(child_task)
+        await session.flush()
+        await _record_email_task_log(
+            session,
+            child_task,
+            "email_task.follow_up_started",
+            metadata={"parent_task_id": task.id},
+        )
         await _commit_manual_child_task(session)
         return task.professor_id, task.identity_id, task.llm_profile_id
 
@@ -819,6 +882,16 @@ async def dispatch_email_task(
                     provider_payload=provider_payload,
                 ),
             )
+            await _record_email_task_log(
+                session,
+                task,
+                "email_task.sent",
+                metadata={
+                    "rfc_message_id": rfc_message_id,
+                    "retry_count": task.retry_count,
+                    "attachment_count": len(attachments),
+                },
+            )
         except mail_runtime.MailRuntimeError as exc:
             task.status = EmailTaskStatus.SEND_FAILED.value
             task.last_error = str(exc)
@@ -835,6 +908,17 @@ async def dispatch_email_task(
                     content_html=body_html,
                     failure_summary=str(exc),
                 ),
+            )
+            await _record_email_task_log(
+                session,
+                task,
+                "email_task.send_failed",
+                level="warning",
+                message=str(exc),
+                metadata={
+                    "retry_count": task.retry_count,
+                    "attachment_count": len(attachments),
+                },
             )
 
         await session.commit()
@@ -881,6 +965,12 @@ async def poll_identity_replies(
                     rfc_message_id=message.message_id,
                     reply_headers=message.headers,
                 ),
+            )
+            await _record_email_task_log(
+                session,
+                task,
+                "email_task.reply_detected",
+                metadata={"message_id": message.message_id},
             )
             await session.commit()
             detected += 1
@@ -1051,6 +1141,39 @@ async def _commit_manual_child_task(session: AsyncSession) -> None:
     except IntegrityError as exc:
         await session.rollback()
         raise ValueError("该任务已创建过手动子任务，不能重复派生") from exc
+
+
+async def _record_email_task_log(
+    session: AsyncSession,
+    task: EmailTask,
+    event_name: str,
+    *,
+    level: str = "info",
+    message: str | None = None,
+    metadata: dict[str, object] | None = None,
+) -> None:
+    base_metadata: dict[str, object] = {
+        "task_id": task.id,
+        "source": task.source,
+        "status": task.status,
+        "batch_task_id": task.batch_task_id,
+        "parent_task_id": task.parent_task_id,
+        "professor_id": task.professor_id,
+        "identity_id": task.identity_id,
+        "llm_profile_id": task.llm_profile_id,
+    }
+    if metadata:
+        base_metadata.update(metadata)
+    await record_operation_log(
+        session,
+        category="email",
+        event_name=event_name,
+        level=level,
+        message=message,
+        entity_type="email_task",
+        entity_id=str(task.id),
+        metadata=base_metadata,
+    )
 
 
 def _resolve_task_outreach_config(task: EmailTask):

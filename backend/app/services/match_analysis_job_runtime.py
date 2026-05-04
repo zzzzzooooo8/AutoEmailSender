@@ -25,6 +25,7 @@ from app.services.task_runtime import (
     MatchAnalysisAlreadyRunningError,
     calculate_task_match,
 )
+from app.services.operation_logs import record_operation_log
 
 
 _ACTIVE_MATCH_ANALYSIS_JOB_IDS: set[int] = set()
@@ -119,6 +120,21 @@ async def create_match_analysis_job(
 
         job.target_count = queued_count
         job.skipped_count = skipped_count
+        await record_operation_log(
+            session,
+            category="match_analysis",
+            event_name="match_analysis_job.created",
+            entity_type="match_analysis_job",
+            entity_id=str(job.id),
+            metadata={
+                "name": job.name,
+                "identity_id": identity_id,
+                "llm_profile_id": llm_profile_id,
+                "selected_count": len(professors),
+                "target_count": queued_count,
+                "skipped_count": skipped_count,
+            },
+        )
         await session.commit()
         await session.refresh(job)
         return job
@@ -220,6 +236,7 @@ async def request_match_analysis_job_cancel(
                     updated_at=now,
                 ),
             )
+            await _record_match_analysis_job_log(session, job, "match_analysis_job.cancel_requested")
             await session.commit()
             await session.refresh(job)
             return job
@@ -227,6 +244,7 @@ async def request_match_analysis_job_cancel(
         if job.status == MatchAnalysisJobStatus.RUNNING.value:
             job.cancel_requested_at = now
             job.updated_at = now
+            await _record_match_analysis_job_log(session, job, "match_analysis_job.cancel_requested")
             await session.commit()
             await session.refresh(job)
             return job
@@ -665,4 +683,58 @@ async def _refresh_match_analysis_job_summary(
         if job.status == MatchAnalysisJobStatus.FAILED.value and skipped_count == len(items):
             job.last_error = "没有可分析导师"
 
+        await record_operation_log(
+            session,
+            category="match_analysis",
+            event_name=f"match_analysis_job.{job.status}",
+            level="error" if job.status == MatchAnalysisJobStatus.FAILED.value else "info",
+            message=job.last_error,
+            entity_type="match_analysis_job",
+            entity_id=str(job.id),
+            metadata={
+                "name": job.name,
+                "status": job.status,
+                "target_count": job.target_count,
+                "succeeded_count": succeeded_count,
+                "failed_count": failed_count,
+                "skipped_count": skipped_count,
+                "canceled_count": canceled_count,
+                "total_prompt_tokens": job.total_prompt_tokens,
+                "total_completion_tokens": job.total_completion_tokens,
+                "total_tokens": job.total_tokens,
+            },
+        )
         await session.commit()
+
+
+async def _record_match_analysis_job_log(
+    session: AsyncSession,
+    job: MatchAnalysisJob,
+    event_name: str,
+    *,
+    level: str = "info",
+    message: str | None = None,
+    metadata: dict[str, object] | None = None,
+) -> None:
+    base_metadata: dict[str, object] = {
+        "name": job.name,
+        "status": job.status,
+        "identity_id": job.identity_id,
+        "llm_profile_id": job.llm_profile_id,
+        "target_count": job.target_count,
+        "succeeded_count": job.succeeded_count,
+        "failed_count": job.failed_count,
+        "skipped_count": job.skipped_count,
+    }
+    if metadata:
+        base_metadata.update(metadata)
+    await record_operation_log(
+        session,
+        category="match_analysis",
+        event_name=event_name,
+        level=level,
+        message=message,
+        entity_type="match_analysis_job",
+        entity_id=str(job.id),
+        metadata=base_metadata,
+    )

@@ -23,6 +23,7 @@ from app.services.materials import (
     build_material_download_name,
     material_can_be_primary,
 )
+from app.services.operation_logs import record_operation_log
 
 
 router = APIRouter(prefix="/api", tags=["materials"])
@@ -62,6 +63,7 @@ async def upload_identity_material(
         identity.current_primary_material_id = material.id
         identity.updated_at = datetime.now(UTC)
 
+    await _record_material_log(session, material, "identity_material.uploaded")
     await session.commit()
     await session.refresh(identity)
     await session.refresh(material)
@@ -80,6 +82,7 @@ async def set_primary_material(
     identity = material.identity
     identity.current_primary_material_id = material.id
     identity.updated_at = datetime.now(UTC)
+    await _record_material_log(session, material, "identity_material.primary_set")
     await session.commit()
     await session.refresh(identity)
     return serialize_material(material, identity.current_primary_material_id)
@@ -114,6 +117,12 @@ async def delete_material(
         identity.current_primary_material_id = None
         identity.updated_at = datetime.now(UTC)
 
+    await _record_material_log(
+        session,
+        material,
+        "identity_material.deleted",
+        metadata={"was_primary": is_current_primary},
+    )
     delete_file(material.file_path)
     await session.delete(material)
     await session.commit()
@@ -181,3 +190,30 @@ def _normalize_material_type(material_type: str) -> str:
     if normalized not in {item.value for item in IdentityMaterialType}:
         raise HTTPException(status_code=400, detail="不支持的材料标签")
     return normalized
+
+
+async def _record_material_log(
+    session: AsyncSession,
+    material: IdentityMaterial,
+    event_name: str,
+    *,
+    metadata: dict[str, object] | None = None,
+) -> None:
+    base_metadata: dict[str, object] = {
+        "identity_id": material.identity_id,
+        "display_name": material.display_name,
+        "original_filename": material.original_filename,
+        "material_type": material.material_type,
+        "mime_type": material.mime_type,
+        "size_bytes": material.size_bytes,
+    }
+    if metadata:
+        base_metadata.update(metadata)
+    await record_operation_log(
+        session,
+        category="user_action",
+        event_name=event_name,
+        entity_type="identity_material",
+        entity_id=str(material.id),
+        metadata=base_metadata,
+    )

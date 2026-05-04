@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import os
 import tempfile
 import unittest
@@ -209,6 +210,118 @@ class OperationLogIntegrationTests(unittest.TestCase):
         self.assertNotIn("?api_key=", str(metadata))
         self.assertNotIn("#x", str(metadata))
 
+    def test_material_actions_record_operation_logs(self) -> None:
+        identity_id = self._create_identity("material-log@example.com")
+
+        upload_response = self.client.post(
+            f"/api/identities/{identity_id}/materials",
+            files={"file": ("resume.txt", io.BytesIO(b"resume body"), "text/plain")},
+            data={"material_type": "resume"},
+        )
+        self.assertEqual(upload_response.status_code, 201, msg=upload_response.text)
+        material_id = upload_response.json()["id"]
+
+        set_primary_response = self.client.post(f"/api/materials/{material_id}/set-primary")
+        delete_response = self.client.delete(f"/api/materials/{material_id}")
+
+        self.assertEqual(set_primary_response.status_code, 200, msg=set_primary_response.text)
+        self.assertEqual(delete_response.status_code, 204, msg=delete_response.text)
+        self.assertEqual(len(self._list_logs("identity_material.uploaded", entity_id=str(material_id))), 1)
+        self.assertEqual(len(self._list_logs("identity_material.primary_set", entity_id=str(material_id))), 1)
+        self.assertEqual(len(self._list_logs("identity_material.deleted", entity_id=str(material_id))), 1)
+
+    def test_workspace_and_email_task_actions_record_operation_logs(self) -> None:
+        identity_id = self._create_identity("workspace-log@example.com", outreach_generation_mode="template")
+        llm_profile_id = self._create_llm_profile("工作区日志模型")
+        professor_id = self._create_professor("工作区导师", "workspace-log@example.edu")
+
+        ensure_response = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_profile_id},
+        )
+        self.assertEqual(ensure_response.status_code, 200, msg=ensure_response.text)
+        task_id = ensure_response.json()["current_task"]["id"]
+
+        draft_response = self.client.post(f"/api/email-tasks/{task_id}/generate-draft")
+        schedule_response = self.client.post(
+            f"/api/email-tasks/{task_id}/approve-and-schedule",
+            json={
+                "subject": "联系 {{name}}",
+                "body_text": "{{name}} 老师您好",
+                "body_html": "<p>{{name}} 老师您好</p>",
+                "selected_material_ids": [],
+                "scheduled_at": "2026-05-05T10:00:00Z",
+            },
+        )
+        cancel_response = self.client.post(f"/api/email-tasks/{task_id}/cancel-schedule")
+        with patch(
+            "app.services.task_runtime.mail_runtime.send_email",
+            AsyncMock(return_value=self._build_send_result()),
+        ):
+            send_response = self.client.post(
+                f"/api/email-tasks/{task_id}/approve-and-send",
+                json={
+                    "subject": "联系 {{name}}",
+                    "body_text": "{{name}} 老师您好",
+                    "body_html": "<p>{{name}} 老师您好</p>",
+                    "selected_material_ids": [],
+                },
+            )
+
+        self.assertEqual(draft_response.status_code, 200, msg=draft_response.text)
+        self.assertEqual(schedule_response.status_code, 200, msg=schedule_response.text)
+        self.assertEqual(cancel_response.status_code, 200, msg=cancel_response.text)
+        self.assertEqual(send_response.status_code, 200, msg=send_response.text)
+        self.assertEqual(len(self._list_logs("email_task.created", entity_id=str(task_id))), 1)
+        self.assertEqual(len(self._list_logs("email_task.draft_generated", entity_id=str(task_id))), 1)
+        self.assertEqual(len(self._list_logs("email_task.approved_and_scheduled", entity_id=str(task_id))), 1)
+        self.assertEqual(len(self._list_logs("email_task.schedule_canceled", entity_id=str(task_id))), 1)
+        self.assertEqual(len(self._list_logs("email_task.sent", entity_id=str(task_id))), 1)
+
+    def test_test_compose_actions_record_operation_logs(self) -> None:
+        identity_id = self._create_identity("test-compose-log@example.com", outreach_generation_mode="template")
+        llm_profile_id = self._create_llm_profile("测试写信日志模型")
+
+        draft_response = self.client.post(f"/api/test-compose/{identity_id}/{llm_profile_id}/generate-draft")
+        save_response = self.client.post(
+            f"/api/test-compose/{identity_id}/{llm_profile_id}/draft",
+            json={
+                "subject": "测试主题",
+                "body_text": "测试正文",
+                "body_html": "<p>测试正文</p>",
+                "selected_material_ids": [],
+            },
+        )
+        with patch(
+            "app.services.test_compose_runtime.mail_runtime.send_email_to_recipient",
+            AsyncMock(return_value=self._build_send_result()),
+        ):
+            send_response = self.client.post(
+                f"/api/test-compose/{identity_id}/{llm_profile_id}/send",
+                json={
+                    "subject": "测试主题",
+                    "body_text": "测试正文",
+                    "body_html": "<p>测试正文</p>",
+                    "selected_material_ids": [],
+                },
+            )
+
+        self.assertEqual(draft_response.status_code, 200, msg=draft_response.text)
+        self.assertEqual(save_response.status_code, 200, msg=save_response.text)
+        self.assertEqual(send_response.status_code, 200, msg=send_response.text)
+        self.assertEqual(len(self._list_logs("test_compose.draft_generated", entity_id=str(identity_id))), 1)
+        self.assertEqual(len(self._list_logs("test_compose.draft_saved", entity_id=str(identity_id))), 1)
+        self.assertEqual(len(self._list_logs("test_compose.sent", entity_id=str(identity_id))), 1)
+
+    def test_settings_and_misc_actions_record_operation_logs(self) -> None:
+        sample_response = self.client.post("/api/professors/import-sample")
+        crawler_response = self.client.post("/api/professors/trigger-crawler")
+
+        self.assertEqual(sample_response.status_code, 200, msg=sample_response.text)
+        self.assertEqual(crawler_response.status_code, 200, msg=crawler_response.text)
+        self.assertEqual(len(self._list_logs("professor.import_sample")), 1)
+        self.assertEqual(len(self._list_logs("crawler.trigger_requested")), 1)
+
     def _list_logs(
         self,
         event_name: str,
@@ -225,7 +338,7 @@ class OperationLogIntegrationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, msg=response.text)
         return response.json()["items"]
 
-    def _create_identity(self, email: str) -> int:
+    def _create_identity(self, email: str, *, outreach_generation_mode: str = "llm") -> int:
         response = self.client.post(
             "/api/identities",
             json={
@@ -240,7 +353,7 @@ class OperationLogIntegrationTests(unittest.TestCase):
                 "imap_username": None,
                 "imap_password": None,
                 "default_language": "zh-CN",
-                "outreach_generation_mode": "llm",
+                "outreach_generation_mode": outreach_generation_mode,
                 "outreach_template_subject": "申请与{{name}}老师交流",
                 "outreach_template_body_text": "老师您好，我是{{sender_name}}。",
                 "outreach_template_body_html": None,
@@ -284,6 +397,12 @@ class OperationLogIntegrationTests(unittest.TestCase):
         response = self.client.post("/api/professors", json=self._professor_payload(name, email))
         self.assertEqual(response.status_code, 201, msg=response.text)
         return response.json()["id"]
+
+    @staticmethod
+    def _build_send_result():
+        from app.services.mail_runtime import SendMailResult
+
+        return SendMailResult(message_id="<operation-log-test@example.com>", provider_payload={})
 
     @staticmethod
     def _professor_payload(name: str, email: str) -> dict[str, object]:

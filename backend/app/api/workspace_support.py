@@ -27,6 +27,7 @@ from app.schemas.workspace import (
 )
 from app.services import llm_runtime
 from app.services.mail_runtime import strip_quoted_reply_html, strip_quoted_reply_text
+from app.services.operation_logs import record_operation_log
 from app.services.outreach_templates import get_identity_sender_name, resolve_outreach_template_config
 
 
@@ -210,6 +211,21 @@ async def ensure_workspace_task(
         updated_at=datetime.now(UTC),
     )
     session.add(task)
+    await session.flush()
+    await record_operation_log(
+        session,
+        category="email",
+        event_name="email_task.created",
+        entity_type="email_task",
+        entity_id=str(task.id),
+        metadata={
+            "source": task.source,
+            "professor_id": task.professor_id,
+            "identity_id": task.identity_id,
+            "llm_profile_id": task.llm_profile_id,
+            "primary_material_id": task.primary_material_id,
+        },
+    )
     await session.commit()
     await session.refresh(task)
     return task

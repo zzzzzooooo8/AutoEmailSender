@@ -20,6 +20,7 @@ from app.models import (
     MatchAnalysisJobItem,
     MatchAnalysisJobItemStatus,
     MatchAnalysisJobStatus,
+    OperationLog,
     Professor,
 )
 from app.services.match_analysis_job_runtime import (
@@ -73,6 +74,31 @@ class MatchAnalysisJobRuntimeTests(unittest.TestCase):
         self.assertIsNotNone(items[0].email_task_id)
         self.assertEqual(items[1].skip_reason, "缺少研究方向或近期论文")
 
+    def test_create_job_records_operation_log(self) -> None:
+        identity_id, llm_profile_id, professor_ids = self._run_async(
+            self._seed_create_job_data(),
+        )
+
+        job = self._run_async(
+            create_match_analysis_job(
+                self.session_factory,
+                identity_id=identity_id,
+                llm_profile_id=llm_profile_id,
+                professor_ids=[professor_ids[0], professor_ids[1]],
+                name="首轮匹配",
+            ),
+        )
+
+        logs = self._run_async(self._get_operation_logs("match_analysis_job.created"))
+        self.assertEqual(len(logs), 1)
+        self.assertEqual(logs[0].category, "match_analysis")
+        self.assertEqual(logs[0].entity_type, "match_analysis_job")
+        self.assertEqual(logs[0].entity_id, str(job.id))
+        self.assertEqual(logs[0].event_metadata["target_count"], 1)
+        self.assertEqual(logs[0].event_metadata["skipped_count"], 1)
+        self.assertEqual(logs[0].event_metadata["identity_id"], identity_id)
+        self.assertEqual(logs[0].event_metadata["llm_profile_id"], llm_profile_id)
+
     def test_run_queued_job_marks_success_and_updates_counts(self) -> None:
         identity_id, llm_profile_id, professor_ids = self._run_async(
             self._seed_create_job_data(),
@@ -104,6 +130,39 @@ class MatchAnalysisJobRuntimeTests(unittest.TestCase):
         self.assertEqual(stored.succeeded_count, 1)
         self.assertEqual(stored.failed_count, 0)
         self.assertEqual(stored.total_tokens, 100)
+
+    def test_run_queued_job_records_completion_operation_log(self) -> None:
+        identity_id, llm_profile_id, professor_ids = self._run_async(
+            self._seed_create_job_data(),
+        )
+        job = self._run_async(
+            create_match_analysis_job(
+                self.session_factory,
+                identity_id=identity_id,
+                llm_profile_id=llm_profile_id,
+                professor_ids=[professor_ids[0]],
+                name=None,
+            ),
+        )
+
+        with patch(
+            "app.services.task_runtime.llm_runtime.generate_match_evaluation",
+            AsyncMock(return_value=self._build_match_evaluation_result(match_score=88)),
+        ):
+            self._run_async(
+                run_queued_match_analysis_jobs_once(
+                    self.session_factory,
+                    item_concurrency=1,
+                ),
+            )
+
+        logs = self._run_async(self._get_operation_logs("match_analysis_job.completed"))
+        self.assertEqual(len(logs), 1)
+        self.assertEqual(logs[0].category, "match_analysis")
+        self.assertEqual(logs[0].entity_type, "match_analysis_job")
+        self.assertEqual(logs[0].entity_id, str(job.id))
+        self.assertEqual(logs[0].event_metadata["succeeded_count"], 1)
+        self.assertEqual(logs[0].event_metadata["status"], "completed")
 
     def test_run_queued_job_keeps_going_after_item_failure(self) -> None:
         identity_id, llm_profile_id, professor_ids = self._run_async(
@@ -315,6 +374,16 @@ class MatchAnalysisJobRuntimeTests(unittest.TestCase):
                     select(MatchAnalysisJobItem)
                     .where(MatchAnalysisJobItem.job_id == job_id)
                     .order_by(MatchAnalysisJobItem.id.asc()),
+                ),
+            )
+
+    async def _get_operation_logs(self, event_name: str) -> list[OperationLog]:
+        async with self.session_factory() as session:
+            return list(
+                await session.scalars(
+                    select(OperationLog)
+                    .where(OperationLog.event_name == event_name)
+                    .order_by(OperationLog.id.asc()),
                 ),
             )
 

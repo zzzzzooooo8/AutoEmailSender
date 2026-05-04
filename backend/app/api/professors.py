@@ -410,6 +410,16 @@ async def import_sample_professors(
             existing_emails.add(email)
         inserted_count += 1
 
+    await record_operation_log(
+        session,
+        category="user_action",
+        event_name="professor.import_sample",
+        entity_type="professor",
+        metadata={
+            "inserted_count": inserted_count,
+            "sample_count": len(SAMPLE_PROFESSORS),
+        },
+    )
     await session.commit()
     total_count = await session.scalar(select(func.count(Professor.id)))
     return ProfessorImportResult(
@@ -420,7 +430,17 @@ async def import_sample_professors(
 
 
 @router.post("/trigger-crawler")
-async def trigger_crawler() -> dict[str, str]:
+async def trigger_crawler(
+    session: AsyncSession = Depends(get_async_session),
+) -> dict[str, str]:
+    await record_operation_log(
+        session,
+        category="crawler",
+        event_name="crawler.trigger_requested",
+        entity_type="crawler",
+        metadata={"source": "professors.trigger_crawler"},
+    )
+    await session.commit()
     return {
         "status": "accepted",
         "message": "已接收智能抓取请求，当前版本先返回占位结果，后续可接入真实 crawler。",

@@ -28,6 +28,7 @@ from app.schemas.test_compose import (
 from app.services import llm_runtime, mail_runtime
 from app.services.mail_runtime import MailAttachment
 from app.services.materials import build_material_download_name, ensure_material_extracted_text
+from app.services.operation_logs import record_operation_log
 from app.services.outreach_templates import (
     OUTREACH_GENERATION_MODE_TEMPLATE,
     TEST_RECIPIENT_NAME,
@@ -114,6 +115,12 @@ async def generate_test_compose_draft(
             compose_session.selected_material_ids = generation.result.suggested_material_ids
 
     compose_session.updated_at = datetime.now(UTC)
+    await _record_test_compose_log(
+        session,
+        compose_session,
+        "test_compose.draft_generated",
+        metadata={"generation_mode": outreach_config.generation_mode},
+    )
     await session.commit()
 
     history = await _list_test_compose_messages(session, compose_session.id)
@@ -197,6 +204,18 @@ async def send_test_compose_message(
         )
 
     session.add(message)
+    await _record_test_compose_log(
+        session,
+        compose_session,
+        "test_compose.sent" if message.status == "sent" else "test_compose.send_failed",
+        level="info" if message.status == "sent" else "warning",
+        message=message.failure_summary,
+        metadata={
+            "status": message.status,
+            "message_id": message.rfc_message_id,
+            "attachment_count": len(attachments),
+        },
+    )
     await session.commit()
 
     history = await _list_test_compose_messages(session, compose_session.id)
@@ -226,6 +245,12 @@ async def save_test_compose_draft(
     compose_session.body_html = rendered.html
     compose_session.selected_material_ids = selected_material_ids
     compose_session.updated_at = datetime.now(UTC)
+    await _record_test_compose_log(
+        session,
+        compose_session,
+        "test_compose.draft_saved",
+        metadata={"selected_material_ids": selected_material_ids},
+    )
     await session.commit()
 
     history = await _list_test_compose_messages(session, compose_session.id)
@@ -359,6 +384,34 @@ def _build_self_recipient_professor(identity: IdentityProfile) -> Professor:
         department="测试院系",
         research_direction="测试研究方向",
         recent_papers=[],
+    )
+
+
+async def _record_test_compose_log(
+    session: AsyncSession,
+    compose_session: TestComposeSession,
+    event_name: str,
+    *,
+    level: str = "info",
+    message: str | None = None,
+    metadata: dict[str, object] | None = None,
+) -> None:
+    base_metadata: dict[str, object] = {
+        "session_id": compose_session.id,
+        "identity_id": compose_session.identity_id,
+        "llm_profile_id": compose_session.llm_profile_id,
+    }
+    if metadata:
+        base_metadata.update(metadata)
+    await record_operation_log(
+        session,
+        category="email",
+        event_name=event_name,
+        level=level,
+        message=message,
+        entity_type="test_compose",
+        entity_id=str(compose_session.identity_id),
+        metadata=base_metadata,
     )
 
 
