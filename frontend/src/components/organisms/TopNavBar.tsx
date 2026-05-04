@@ -1,6 +1,7 @@
 import { Link, NavLink } from "react-router-dom";
 import clsx from "clsx";
 import { BrainCircuit, Mail, UserCircle2 } from "lucide-react";
+import { DesktopUpdateButton } from "@/components/molecules/DesktopUpdateButton";
 import { TopBarSelectMenu } from "@/components/atoms/TopBarSelectMenu";
 import { useSelectionContext } from "@/context/SelectionContext";
 
@@ -52,6 +53,8 @@ export const TopNavBar = () => {
             </Link>
 
             <div className="flex flex-wrap items-center justify-end gap-3">
+              <DesktopUpdateButton />
+
               <TopBarSelectMenu
                 placeholder="身份"
                 icon={<UserCircle2 className="h-4 w-4" />}

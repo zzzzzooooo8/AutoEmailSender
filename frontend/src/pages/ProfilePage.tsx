@@ -28,7 +28,6 @@ import { useSelectionContext } from "@/context/SelectionContext";
 import { NativeSelectField } from "@/components/atoms/NativeSelectField";
 import { EmailTemplateEditor } from "@/components/molecules/EmailTemplateEditor";
 import { SubjectTemplateInput } from "@/components/molecules/SubjectTemplateInput";
-import { DesktopUpdateCard } from "@/components/molecules/DesktopUpdateCard";
 import { OtherSettingsCard } from "@/components/molecules/OtherSettingsCard";
 import { TokenUsageCenterCard } from "@/components/molecules/TokenUsageCenterCard";
 import { DiagnosticLogPanel } from "@/components/organisms/DiagnosticLogPanel";
@@ -3079,8 +3078,6 @@ export const ProfilePage = () => {
           </ProfileSetupSection>
 
           <TokenUsageCenterCard />
-
-          <DesktopUpdateCard />
 
           <OtherSettingsCard />
 

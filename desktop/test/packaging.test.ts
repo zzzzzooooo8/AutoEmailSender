@@ -2,6 +2,22 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+const readIconEntries = (iconPath: string) => {
+  const icon = readFileSync(iconPath);
+  const count = icon.readUInt16LE(4);
+
+  return Array.from({ length: count }, (_, index) => {
+    const offset = 6 + index * 16;
+    const width = icon[offset] === 0 ? 256 : icon[offset];
+    const height = icon[offset + 1] === 0 ? 256 : icon[offset + 1];
+    const bytes = icon.readUInt32LE(offset + 8);
+    const imageOffset = icon.readUInt32LE(offset + 12);
+    const image = icon.subarray(imageOffset, imageOffset + bytes);
+
+    return { width, height, image };
+  });
+};
+
 describe("windows installer packaging", () => {
   it("builds preload as CommonJS for Electron sandbox preload", () => {
     const packageJson = readFileSync(path.resolve("package.json"), "utf8");
@@ -16,6 +32,23 @@ describe("windows installer packaging", () => {
     expect(config).toContain("installerIcon: build/icon.ico");
     expect(config).toContain("uninstallerIcon: build/icon.ico");
     expect(existsSync(path.resolve("build", "icon.ico"))).toBe(true);
+  });
+
+  it("packages the window icon as a runtime resource", () => {
+    const config = readFileSync(path.resolve("electron-builder.yml"), "utf8");
+
+    expect(config).toContain("from: build/icon.ico");
+    expect(config).toContain("to: build/icon.ico");
+  });
+
+  it("uses a multi-size PNG-backed Windows icon", () => {
+    const entries = readIconEntries(path.resolve("build", "icon.ico"));
+
+    expect(entries.map(({ width }) => width)).toEqual([16, 24, 32, 48, 64, 128, 256]);
+    expect(entries.map(({ height }) => height)).toEqual([16, 24, 32, 48, 64, 128, 256]);
+    for (const entry of entries) {
+      expect(entry.image.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
+    }
   });
 
   it("uses an assisted installer with selectable install directory", () => {

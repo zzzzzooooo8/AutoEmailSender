@@ -12,6 +12,8 @@ extraResources:
     to: frontend
   - from: ../backend/dist/backend
     to: backend
+  - from: build/icon.ico
+    to: build/icon.ico
 win:
   icon: build/icon.ico
   target:

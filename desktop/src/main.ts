@@ -3,6 +3,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { getFrontendIndexPath, startBackend } from "./backend.js";
 import { checkForUpdatesOnStartup, registerUpdateIpc } from "./updates.js";
+import { getWindowIconPath } from "./windowIcon.js";
 import type { BackendController } from "./types.js";
 
 let mainWindow: BrowserWindow | null = null;
@@ -19,10 +20,15 @@ async function createWindow(): Promise<void> {
   });
 
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 860,
+    width: 1440,
+    height: 900,
     minWidth: 1024,
     minHeight: 700,
+    icon: getWindowIconPath({
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      repoRoot,
+    }),
     webPreferences: {
       preload: path.join(app.getAppPath(), "dist", "src", "preload.js"),
       contextIsolation: true,
