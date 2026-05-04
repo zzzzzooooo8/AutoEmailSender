@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NotificationProvider } from "@/context/NotificationContext";
+import { formatApiDateTime } from "@/lib/dateTime";
 import { ProfessorsPage } from "@/pages/ProfessorsPage";
 import type { ProfessorManagementItemDTO } from "@/types";
 
@@ -188,7 +189,7 @@ describe("ProfessorsPage layout", () => {
         item.classList.contains("lg:text-center"),
       ),
     ).toBe(true);
-    expect(record.getByText("04/23 08:00")).toHaveClass("lg:text-center");
+    expect(record.getByText(formatApiDateTime(professor.updated_at))).toHaveClass("lg:text-center");
     expect(record.getByRole("button", { name: "编辑" }).closest("div")).toHaveClass(
       "lg:justify-center",
     );

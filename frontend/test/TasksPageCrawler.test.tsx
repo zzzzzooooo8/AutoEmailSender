@@ -5,6 +5,7 @@ import { TasksPage } from "@/pages/TasksPage";
 import { listBatchTaskItems, listBatchTasks } from "@/lib/api/batchTasksApi";
 import { listMatchAnalysisJobs } from "@/lib/api/matchAnalysisJobsApi";
 import { clearDiagnosticEvents, getDiagnosticEvents } from "@/lib/diagnostics";
+import { formatApiDateTime } from "@/lib/dateTime";
 import {
   cancelCrawlJob,
   getCrawlJob,
@@ -209,7 +210,13 @@ describe("TasksPage crawler jobs tab", () => {
       ]),
     );
     expect(screen.getByText("调用 crawl_page 抓取入口页面")).toBeInTheDocument();
-    expect(screen.getByText("04/26 16:34:00")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        formatApiDateTime("2026-04-26T08:34:00", {
+          second: "2-digit",
+        }),
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText("Faculty")).toBeInTheDocument();
     expect(screen.getByText("张教授")).toBeInTheDocument();
 
