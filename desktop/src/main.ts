@@ -24,7 +24,7 @@ async function createWindow(): Promise<void> {
     minWidth: 1024,
     minHeight: 700,
     webPreferences: {
-      preload: path.join(app.getAppPath(), "dist", "preload.js"),
+      preload: path.join(app.getAppPath(), "dist", "src", "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
       additionalArguments: [`--backend-base-url=${backend.baseUrl}`],
