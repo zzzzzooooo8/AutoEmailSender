@@ -14,6 +14,9 @@ from app.models import (
     EmailDirection,
     EmailLog,
     LLMProfile,
+    MatchAnalysisJob,
+    MatchAnalysisJobItem,
+    MatchAnalysisJobStatus,
     MatchAnalysisRun,
 )
 from app.schemas.token_usage import (
@@ -212,6 +215,10 @@ async def _list_match_records(
     *,
     limit: int | None,
 ) -> list[TokenUsageRecordRead]:
+    job_records = await _list_match_job_records(session, limit=limit)
+    linked_run_ids_statement = select(MatchAnalysisJobItem.match_analysis_run_id).where(
+        MatchAnalysisJobItem.match_analysis_run_id.is_not(None),
+    )
     statement = (
         select(MatchAnalysisRun)
         .options(
@@ -219,6 +226,7 @@ async def _list_match_records(
             selectinload(MatchAnalysisRun.identity),
             selectinload(MatchAnalysisRun.llm_profile),
         )
+        .where(MatchAnalysisRun.id.not_in(linked_run_ids_statement))
         .order_by(MatchAnalysisRun.created_at.desc())
     )
     if limit is not None:
@@ -228,7 +236,31 @@ async def _list_match_records(
             statement,
         ),
     )
-    return [_match_run_to_record(run) for run in runs]
+    records = [*job_records, *[_match_run_to_record(run) for run in runs]]
+    records.sort(key=lambda item: item.created_at, reverse=True)
+    return records if limit is None else records[:limit]
+
+
+async def _list_match_job_records(
+    session: AsyncSession,
+    *,
+    limit: int | None,
+) -> list[TokenUsageRecordRead]:
+    statement = (
+        select(MatchAnalysisJob)
+        .options(
+            selectinload(MatchAnalysisJob.identity),
+            selectinload(MatchAnalysisJob.llm_profile),
+            selectinload(MatchAnalysisJob.items).selectinload(
+                MatchAnalysisJobItem.match_analysis_run,
+            ),
+        )
+        .order_by(MatchAnalysisJob.created_at.desc())
+    )
+    if limit is not None:
+        statement = statement.limit(limit)
+    jobs = list(await session.scalars(statement))
+    return [_match_job_to_record(job) for job in jobs]
 
 
 async def _list_draft_records(
@@ -299,6 +331,50 @@ def _match_run_to_record(run: MatchAnalysisRun) -> TokenUsageRecordRead:
         created_at=run.created_at,
         status="success" if run.success else "failed",
     )
+
+
+def _match_job_to_record(job: MatchAnalysisJob) -> TokenUsageRecordRead:
+    return TokenUsageRecordRead(
+        id=f"match_analysis_job:{job.id}",
+        feature_type="match_analysis",
+        feature_label="匹配分析",
+        title=job.name,
+        input_tokens=job.total_prompt_tokens,
+        output_tokens=job.total_completion_tokens,
+        cached_tokens=_sum_match_job_cached_tokens(job),
+        total_tokens=job.total_tokens,
+        model_name=job.llm_profile.model_name if job.llm_profile else None,
+        identity_name=_identity_name(job.identity),
+        created_at=job.created_at,
+        status=_map_match_job_status(job.status),
+    )
+
+
+def _sum_match_job_cached_tokens(job: MatchAnalysisJob) -> int:
+    return sum(
+        item.match_analysis_run.cached_tokens or 0
+        for item in job.items
+        if item.match_analysis_run is not None
+    )
+
+
+def _map_match_job_status(status: str) -> str:
+    if status in {
+        MatchAnalysisJobStatus.QUEUED.value,
+        MatchAnalysisJobStatus.RUNNING.value,
+    }:
+        return "running"
+    if status in {
+        MatchAnalysisJobStatus.COMPLETED.value,
+        MatchAnalysisJobStatus.PARTIAL_FAILED.value,
+    }:
+        return "success"
+    if status in {
+        MatchAnalysisJobStatus.FAILED.value,
+        MatchAnalysisJobStatus.CANCELED.value,
+    }:
+        return "failed"
+    return "unknown"
 
 
 def _draft_log_to_record(log: EmailLog) -> TokenUsageRecordRead | None:

@@ -1,10 +1,13 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TokenUsageCenterCard } from "@/components/molecules/TokenUsageCenterCard";
+import { formatTokenUsageBucketLabel } from "@/features/token-usage/client/tokenUsage";
 import type { TokenUsageRecordListDTO } from "@/types";
 
 const mockedListTokenUsageRecords = vi.hoisted(() => vi.fn());
 const mockedGetTokenUsageChart = vi.hoisted(() => vi.fn());
+const chartBucketStart = "2026-04-30T10:00:00Z";
+const chartBucketLabel = "10:00";
 
 vi.mock("@/lib/api/tokenUsage", () => ({
   listTokenUsageRecords: mockedListTokenUsageRecords,
@@ -22,8 +25,8 @@ describe("TokenUsageCenterCard", () => {
       range_end: "2026-04-30T10:00:00Z",
       buckets: [
         {
-          bucket_start: "2026-04-30T10:00:00Z",
-          bucket_label: "10:00",
+          bucket_start: chartBucketStart,
+          bucket_label: chartBucketLabel,
           input_tokens: 200,
           output_tokens: 30,
           total_tokens: 230,
@@ -165,7 +168,8 @@ describe("TokenUsageCenterCard", () => {
       "xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]",
     );
 
-    const chartScroller = screen.getByLabelText("10:00 输入 200 输出 30 总计 230")
+    const label = expectedChartBucketLabel();
+    const chartScroller = screen.getByLabelText(`${label} 输入 200 输出 30 总计 230`)
       .closest(".overflow-x-auto");
     expect(chartScroller).toHaveClass("max-w-full");
     expect(chartScroller).toHaveClass("min-w-0");
@@ -310,11 +314,12 @@ describe("TokenUsageCenterCard", () => {
     fireEvent.click(screen.getByRole("button", { name: /Token 消耗记录中心/ }));
 
     await waitFor(() => expect(screen.getByText("输入 / 输出趋势")).toBeInTheDocument());
-    expect(screen.getByText("10:00")).toBeInTheDocument();
+    const label = expectedChartBucketLabel();
+    expect(screen.getByText(label)).toBeInTheDocument();
     expect(screen.getByText("250 tokens")).toBeInTheDocument();
     expect(screen.getByText("0 tokens")).toBeInTheDocument();
 
-    const bar = screen.getByLabelText("10:00 输入 200 输出 30 总计 230");
+    const bar = screen.getByLabelText(`${label} 输入 200 输出 30 总计 230`);
     fireEvent.mouseEnter(bar, { clientX: 180, clientY: 90 });
     fireEvent.mouseMove(bar, { clientX: 210, clientY: 120 });
     expect(screen.getByRole("tooltip")).toHaveStyle({
@@ -369,6 +374,14 @@ function createRecordListResult(
     model_options: ["gpt-test"],
     ...overrides,
   };
+}
+
+function expectedChartBucketLabel(): string {
+  return formatTokenUsageBucketLabel({
+    bucketStart: chartBucketStart,
+    fallbackLabel: chartBucketLabel,
+    granularity: "hour",
+  });
 }
 
 function createDeferred<T>() {

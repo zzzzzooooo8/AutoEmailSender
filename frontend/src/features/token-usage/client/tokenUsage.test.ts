@@ -6,6 +6,8 @@ import {
   formatTokenRecordStatus,
   formatTokenValue,
   formatDateTimeLocalValue,
+  formatTokenUsageRecordTime,
+  formatTokenUsageBucketLabel,
   getTokenRecordFeatureTone,
   parseDateTimeLocalValue,
   resolveTokenUsagePageJump,
@@ -101,6 +103,35 @@ describe('token usage center helpers', () => {
     expect(parseDateTimeLocalValue('')).toBeNull();
     expect(parsed).not.toBeNull();
     expect(formatDateTimeLocalValue(parsed)).toBe('2026-04-30T10:00');
+  });
+
+  it('formats chart bucket labels in the viewer timezone', () => {
+    expect(
+      formatTokenUsageBucketLabel({
+        bucketStart: '2026-04-30T10:00:00Z',
+        fallbackLabel: '10:00',
+        granularity: 'hour',
+        timeZone: 'Asia/Shanghai',
+      }),
+    ).toBe('18:00');
+
+    expect(
+      formatTokenUsageBucketLabel({
+        bucketStart: '2026-04-30T18:00:00Z',
+        fallbackLabel: '04-30',
+        granularity: 'day',
+        timeZone: 'Asia/Shanghai',
+      }),
+    ).toBe('05-01');
+  });
+
+  it('formats token record timestamps as UTC when timezone suffix is omitted', () => {
+    expect(
+      formatTokenUsageRecordTime({
+        value: '2026-04-30T10:00:00',
+        timeZone: 'Asia/Shanghai',
+      }),
+    ).toContain('18:00');
   });
 
   it('resolves valid page jumps and rejects invalid ones', () => {

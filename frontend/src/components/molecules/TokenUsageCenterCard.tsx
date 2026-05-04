@@ -18,7 +18,9 @@ import {
   calculateStackedBarSegments,
   formatDateTimeLocalValue,
   formatTokenRecordStatus,
+  formatTokenUsageRecordTime,
   formatTokenValue,
+  formatTokenUsageBucketLabel,
   getTokenRecordFeatureTone,
   parseDateTimeLocalValue,
   resolveTokenUsagePageJump,
@@ -495,7 +497,7 @@ function TokenUsageRecordRow({ record }: { record: TokenUsageRecordDTO }) {
           </p>
         </div>
         <time className="text-xs text-stone-400" dateTime={record.created_at}>
-          {new Date(record.created_at).toLocaleString('zh-CN')}
+          {formatTokenUsageRecordTime({ value: record.created_at })}
         </time>
       </div>
       <div className="mt-3 grid gap-2 text-xs text-stone-600 sm:grid-cols-4">
@@ -664,6 +666,11 @@ function TokenUsageTrendChart({
               ))}
               <div className="relative z-10 flex h-full items-end justify-between gap-6">
                 {chart.buckets.map((bucket) => {
+                  const bucketLabel = formatTokenUsageBucketLabel({
+                    bucketStart: bucket.bucket_start,
+                    fallbackLabel: bucket.bucket_label,
+                    granularity: chart.granularity,
+                  });
                   const totalTokens = bucket.input_tokens + bucket.output_tokens;
                   const segments = calculateStackedBarSegments({
                     inputTokens: bucket.input_tokens,
@@ -690,7 +697,7 @@ function TokenUsageTrendChart({
                       ) : null}
                       <button
                         type="button"
-                        aria-label={`${bucket.bucket_label} 输入 ${bucket.input_tokens} 输出 ${bucket.output_tokens} 总计 ${totalTokens}`}
+                        aria-label={`${bucketLabel} 输入 ${bucket.input_tokens} 输出 ${bucket.output_tokens} 总计 ${totalTokens}`}
                         className="relative z-10 flex h-full w-full items-end justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
                         onMouseEnter={(event) => {
                           setActiveBucketStart(bucket.bucket_start);
@@ -735,7 +742,7 @@ function TokenUsageTrendChart({
                         >
                           <div className="flex items-center justify-between border-b border-stone-100 pb-2">
                             <span className="font-medium text-stone-500">
-                              {bucket.bucket_label}
+                              {bucketLabel}
                             </span>
                             <span className="font-semibold text-stone-900">
                               合计 {formatChartTokenNumber(totalTokens)} tokens
@@ -774,7 +781,11 @@ function TokenUsageTrendChart({
                   key={bucket.bucket_start}
                   className="min-w-14 flex-1 text-center text-xs text-stone-500"
                 >
-                  {bucket.bucket_label}
+                  {formatTokenUsageBucketLabel({
+                    bucketStart: bucket.bucket_start,
+                    fallbackLabel: bucket.bucket_label,
+                    granularity: chart.granularity,
+                  })}
                 </span>
               ))}
             </div>

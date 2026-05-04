@@ -20,6 +20,10 @@ from app.models import (
     EmailTask,
     IdentityProfile,
     LLMProfile,
+    MatchAnalysisJob,
+    MatchAnalysisJobItem,
+    MatchAnalysisJobItemStatus,
+    MatchAnalysisJobStatus,
     MatchAnalysisRun,
     Professor,
 )
@@ -323,6 +327,109 @@ class TokenUsageRecordsServiceTests(unittest.TestCase):
             )
             await session.commit()
 
+    async def _seed_batch_match_analysis_job(self) -> None:
+        now = datetime(2026, 5, 3, 10, 0, 0, tzinfo=UTC)
+        async with self.session_factory() as session:
+            identity = IdentityProfile(
+                name="博士申请邮箱",
+                profile_name="博士申请邮箱",
+                sender_name="王同学",
+                email_address="sender@example.com",
+                smtp_host="smtp.example.com",
+                smtp_port=465,
+                smtp_username="sender@example.com",
+                smtp_password="secret",
+                default_language="zh-CN",
+                outreach_generation_mode="llm",
+            )
+            llm_profile = LLMProfile(
+                name="OpenAI",
+                provider="openai",
+                api_key="test-key",
+                model_name="gpt-test",
+            )
+            professors = [
+                Professor(
+                    name="李老师",
+                    email="li@example.edu",
+                    university="示例大学",
+                    school="计算机学院",
+                    research_direction="信息抽取",
+                ),
+                Professor(
+                    name="张老师",
+                    email="zhang@example.edu",
+                    university="示例大学",
+                    school="计算机学院",
+                    research_direction="数据挖掘",
+                ),
+            ]
+            session.add_all([identity, llm_profile, *professors])
+            await session.flush()
+
+            job = MatchAnalysisJob(
+                name="批量匹配分析 2026-05-03 10:00",
+                identity_id=identity.id,
+                llm_profile_id=llm_profile.id,
+                status=MatchAnalysisJobStatus.COMPLETED.value,
+                target_count=2,
+                succeeded_count=2,
+                failed_count=0,
+                skipped_count=0,
+                total_prompt_tokens=300,
+                total_completion_tokens=30,
+                total_tokens=330,
+                started_at=now - timedelta(minutes=5),
+                finished_at=now,
+                created_at=now - timedelta(minutes=5),
+                updated_at=now,
+            )
+            session.add(job)
+            await session.flush()
+
+            for index, professor in enumerate(professors):
+                task = EmailTask(
+                    identity_id=identity.id,
+                    llm_profile_id=llm_profile.id,
+                    professor_id=professor.id,
+                    selected_material_ids=[],
+                )
+                session.add(task)
+                await session.flush()
+                run = MatchAnalysisRun(
+                    email_task_id=task.id,
+                    professor_id=professor.id,
+                    identity_id=identity.id,
+                    llm_profile_id=llm_profile.id,
+                    success=True,
+                    match_score=90 - index,
+                    prompt_tokens=100 + index * 100,
+                    completion_tokens=10 + index * 10,
+                    cached_tokens=5 + index,
+                    total_tokens=110 + index * 110,
+                    created_at=now - timedelta(minutes=4 - index),
+                )
+                session.add(run)
+                await session.flush()
+                session.add(
+                    MatchAnalysisJobItem(
+                        job_id=job.id,
+                        professor_id=professor.id,
+                        email_task_id=task.id,
+                        status=MatchAnalysisJobItemStatus.SUCCEEDED.value,
+                        match_analysis_run_id=run.id,
+                        prompt_tokens=run.prompt_tokens or 0,
+                        completion_tokens=run.completion_tokens or 0,
+                        total_tokens=run.total_tokens or 0,
+                        started_at=run.created_at,
+                        finished_at=run.created_at,
+                        created_at=run.created_at,
+                        updated_at=run.created_at,
+                    )
+                )
+
+            await session.commit()
+
     def test_lists_recent_function_level_token_records(self) -> None:
         self._run_async(self._seed_records())
 
@@ -353,6 +460,61 @@ class TokenUsageRecordsServiceTests(unittest.TestCase):
         self.assertEqual(result.summary.output_tokens, 90)
         self.assertEqual(result.summary.cached_tokens, 116)
         self.assertEqual(result.summary.total_tokens, 690)
+
+    def test_groups_batch_match_analysis_job_as_one_token_record(self) -> None:
+        self._run_async(self._seed_batch_match_analysis_job())
+
+        async def run_query():
+            async with self.session_factory() as session:
+                return await list_token_usage_records(
+                    session,
+                    page=1,
+                    page_size=20,
+                    feature_type="match_analysis",
+                )
+
+        result = self._run_async(run_query())
+
+        self.assertEqual(result.pagination.total_records, 1)
+        self.assertEqual(result.summary.record_count, 1)
+        self.assertEqual(result.summary.input_tokens, 300)
+        self.assertEqual(result.summary.output_tokens, 30)
+        self.assertEqual(result.summary.cached_tokens, 11)
+        self.assertEqual(result.summary.total_tokens, 330)
+        self.assertEqual(result.records[0].id, "match_analysis_job:1")
+        self.assertEqual(result.records[0].title, "批量匹配分析 2026-05-03 10:00")
+
+    def test_api_groups_batch_match_analysis_job_as_one_token_record(self) -> None:
+        self._run_async(self._seed_batch_match_analysis_job())
+
+        from app.core.database import get_async_session
+        from main import create_app
+
+        async def override_session():
+            async with self.session_factory() as session:
+                yield session
+
+        app = create_app()
+        app.dependency_overrides[get_async_session] = override_session
+        client = TestClient(app)
+        try:
+            response = client.get(
+                "/api/token-usage/records",
+                params={
+                    "page": 1,
+                    "page_size": 20,
+                    "feature_type": "match_analysis",
+                },
+            )
+        finally:
+            client.close()
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        payload = response.json()
+        self.assertEqual(payload["pagination"]["total_records"], 1)
+        self.assertEqual(payload["summary"]["record_count"], 1)
+        self.assertEqual(payload["records"][0]["id"], "match_analysis_job:1")
+        self.assertEqual(payload["records"][0]["total_tokens"], 330)
 
     def test_api_returns_token_usage_records(self) -> None:
         self._run_async(self._seed_records())
