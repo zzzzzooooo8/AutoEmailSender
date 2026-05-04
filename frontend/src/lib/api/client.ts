@@ -13,20 +13,24 @@ export const buildApiPath = (
   path: string,
   params?: Record<string, string | number | null | undefined>,
 ) => {
-  const url = new URL(path, window.location.origin);
+  const baseUrl = getDesktopBackendBaseUrl();
+  const url = new URL(path, baseUrl ?? window.location.origin);
   Object.entries(params ?? {}).forEach(([key, value]) => {
     if (value === null || value === undefined || value === "") {
       return;
     }
     url.searchParams.set(key, String(value));
   });
-  return `${url.pathname}${url.search}`;
+  return baseUrl ? url.toString() : `${url.pathname}${url.search}`;
 };
 
 export const buildApiUrl = (
   path: string,
   params?: Record<string, string | number | null | undefined>,
-) => new URL(buildApiPath(path, params), window.location.origin).toString();
+) => {
+  const apiPath = buildApiPath(path, params);
+  return apiPath.startsWith("http") ? apiPath : new URL(apiPath, window.location.origin).toString();
+};
 
 export const apiFetch = async <T>(
   path: string,
@@ -254,4 +258,9 @@ function stripUrlQueryAndHash(value: string): string {
   url.search = "";
   url.hash = "";
   return url.toString();
+}
+
+function getDesktopBackendBaseUrl(): string | null {
+  const baseUrl = window.autoEmailSender?.backendBaseUrl?.trim();
+  return baseUrl ? baseUrl.replace(/\/+$/, "") : null;
 }
