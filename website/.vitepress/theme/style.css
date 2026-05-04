@@ -1,0 +1,121 @@
+:root {
+  --vp-c-brand-1: #b91c1c;
+  --vp-c-brand-2: #dc2626;
+  --vp-c-brand-3: #ef4444;
+  --vp-home-hero-name-color: #b91c1c;
+}
+
+.VPHomeHero .image-src {
+  max-width: 180px;
+  max-height: 180px;
+}
+
+.vp-doc table img {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+}
+
+.home-screenshot-section {
+  margin: 12px auto 0;
+  max-width: 1120px;
+  padding: 0 24px;
+}
+
+.home-screenshot-card {
+  overflow: hidden;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 18px;
+  background: var(--vp-c-bg-soft);
+  box-shadow:
+    0 22px 50px rgba(15, 23, 42, 0.12),
+    0 1px 0 rgba(255, 255, 255, 0.7) inset;
+}
+
+.home-screenshot-card img {
+  display: block;
+  width: 100%;
+}
+
+.home-feature-section {
+  margin: 72px auto 0;
+  max-width: 1120px;
+  padding: 0 24px 48px;
+}
+
+.home-feature-heading {
+  max-width: 720px;
+}
+
+.home-feature-heading h2 {
+  margin: 0;
+  color: var(--vp-c-text-1);
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.25;
+}
+
+.home-feature-heading p {
+  margin: 14px 0 0;
+  color: var(--vp-c-text-2);
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+.home-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 28px;
+}
+
+.home-feature-grid article {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  background: var(--vp-c-bg-soft);
+  padding: 22px;
+}
+
+.home-feature-grid span {
+  color: var(--vp-c-brand-1);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.home-feature-grid h3 {
+  margin: 12px 0 0;
+  color: var(--vp-c-text-1);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.home-feature-grid p {
+  margin: 12px 0 0;
+  color: var(--vp-c-text-2);
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+@media (max-width: 768px) {
+  .home-screenshot-section {
+    margin-top: 0;
+    padding: 0 16px;
+  }
+
+  .home-screenshot-card {
+    border-radius: 12px;
+  }
+
+  .home-feature-section {
+    margin-top: 48px;
+    padding: 0 16px 36px;
+  }
+
+  .home-feature-heading h2 {
+    font-size: 26px;
+  }
+
+  .home-feature-grid {
+    grid-template-columns: 1fr;
+  }
+}
