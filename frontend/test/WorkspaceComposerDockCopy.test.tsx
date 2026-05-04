@@ -236,6 +236,39 @@ describe("WorkspaceComposerDock copy", () => {
     expect(screen.queryByRole("button", { name: "编辑草稿" })).not.toBeInTheDocument();
   });
 
+  it("shows scheduled summaries in local time when the API omits a timezone suffix", () => {
+    render(
+      <WorkspaceComposerDock
+        {...baseProps}
+        draftReady={true}
+        subject="测试主题"
+        content="老师您好"
+        contentHtml="<p>老师您好</p>"
+        selectedMaterialIds={[]}
+        scheduledAt="2026-04-22T10:00:00"
+        acting={false}
+        canChangeMode={true}
+        canCalculateMatch={true}
+        canGenerateDraft={true}
+        canContinueManually={false}
+        canStartFollowUp={false}
+        canSubmitDraft={true}
+        composerExpanded={true}
+        nextStepTitle="检查后发送"
+        nextStepDescription="检查主题、正文和附件后发送。"
+      />,
+    );
+
+    const expected = new Date("2026-04-22T10:00:00Z").toLocaleString("zh-CN", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    expect(screen.getByText(expected)).toBeInTheDocument();
+  });
+
   it("does not expose send actions for canceled tasks that should continue manually", () => {
     render(
       <WorkspaceComposerDock

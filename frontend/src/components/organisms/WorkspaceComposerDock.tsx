@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { EmailTemplateEditor } from '@/components/molecules/EmailTemplateEditor';
 import { SubjectTemplateInput } from '@/components/molecules/SubjectTemplateInput';
+import { formatApiDateTime } from '@/lib/dateTime';
 type RichEmailValue = { html: string; text: string };
 import { getTaskModeCopy } from '@/features/create-task/client/taskCopy';
 import {
@@ -134,17 +135,12 @@ const formatScheduleSummary = (value: string) => {
     return '未设置';
   }
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
+  const summary = formatApiDateTime(value);
+  if (!summary || summary === 'Invalid Date') {
     return '未设置';
   }
 
-  return date.toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return summary;
 };
 
 const formatTokenCount = (value: number | null | undefined) =>
