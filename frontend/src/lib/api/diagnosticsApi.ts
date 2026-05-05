@@ -1,4 +1,4 @@
-import { apiFetch } from "@/lib/api/client";
+import { apiFetch, buildApiPath } from "@/lib/api/client";
 
 export interface OperationLogDTO {
   id: number;
@@ -54,3 +54,11 @@ export const exportOperationLogs = (params: OperationLogListParams = {}) =>
     undefined,
     params,
   );
+
+export const exportCrawlerDebugLog = async (jobId: number) => {
+  const response = await fetch(buildApiPath(`/api/diagnostics/crawler-debug/${jobId}/export`));
+  if (!response.ok) {
+    throw new Error("抓取调试日志导出失败");
+  }
+  return response.blob();
+};

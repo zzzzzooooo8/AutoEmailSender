@@ -3,7 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +15,7 @@ from app.schemas.diagnostics import (
     OperationLogListResponse,
     OperationLogRead,
 )
+from app.services.crawler_debug import crawler_debug_file_path
 
 
 router = APIRouter(prefix="/api/diagnostics", tags=["diagnostics"])
@@ -114,6 +116,18 @@ async def export_operation_logs(
         total=total,
         items=[_to_operation_log_read(log) for log in logs],
         filters=filter_values,
+    )
+
+
+@router.get("/crawler-debug/{job_id}/export", response_class=FileResponse)
+async def export_crawler_debug_jsonl(job_id: int) -> FileResponse:
+    debug_file = crawler_debug_file_path(job_id)
+    if not debug_file.is_file():
+        raise HTTPException(status_code=404, detail="未找到该抓取任务的调试日志")
+    return FileResponse(
+        debug_file,
+        media_type="application/jsonl; charset=utf-8",
+        filename=debug_file.name,
     )
 
 

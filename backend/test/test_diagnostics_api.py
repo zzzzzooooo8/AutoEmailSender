@@ -15,8 +15,10 @@ class DiagnosticsApiTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.temp_dir = tempfile.TemporaryDirectory()
         cls.db_path = Path(cls.temp_dir.name) / "diagnostics_api_test.db"
+        cls.crawler_debug_dir = Path(cls.temp_dir.name) / "crawler-debug"
         os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{cls.db_path.as_posix()}"
         os.environ["ENABLE_BACKGROUND_WORKERS"] = "0"
+        os.environ["CRAWLER_DEBUG_DIR"] = cls.crawler_debug_dir.as_posix()
 
         from app.core.config import get_settings
         from app.core.database import dispose_engine, get_engine, get_session_factory
@@ -54,6 +56,7 @@ class DiagnosticsApiTests(unittest.TestCase):
         get_settings.cache_clear()
         os.environ.pop("DATABASE_URL", None)
         os.environ.pop("ENABLE_BACKGROUND_WORKERS", None)
+        os.environ.pop("CRAWLER_DEBUG_DIR", None)
         cls.temp_dir.cleanup()
 
     def setUp(self) -> None:
@@ -267,6 +270,32 @@ class DiagnosticsApiTests(unittest.TestCase):
         self.assertEqual(item["id"], log_id)
         self.assertEqual(item["metadata"], {"status": "ok", "usage": {"prompt_tokens": 10}})
         self.assertNotIn("event_metadata", item)
+
+    def test_export_crawler_debug_jsonl_returns_job_file(self) -> None:
+        self.crawler_debug_dir.mkdir(parents=True, exist_ok=True)
+        debug_file = self.crawler_debug_dir / "crawl-job-42.jsonl"
+        debug_file.write_text(
+            '{"job_id": 42, "event_type": "started"}\n'
+            '{"job_id": 42, "event_type": "finished"}\n',
+            encoding="utf-8",
+            newline="\n",
+        )
+
+        response = self.client.get("/api/diagnostics/crawler-debug/42/export")
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        self.assertEqual(response.headers["content-type"], "application/jsonl; charset=utf-8")
+        self.assertEqual(
+            response.headers["content-disposition"],
+            'attachment; filename="crawl-job-42.jsonl"',
+        )
+        self.assertEqual(response.text.count("\n"), 2)
+        self.assertIn('"event_type": "started"', response.text)
+
+    def test_export_crawler_debug_jsonl_returns_404_when_missing(self) -> None:
+        response = self.client.get("/api/diagnostics/crawler-debug/404/export")
+
+        self.assertEqual(response.status_code, 404)
 
     def _seed_log(
         self,

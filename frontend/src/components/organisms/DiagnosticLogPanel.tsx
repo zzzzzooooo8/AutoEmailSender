@@ -21,10 +21,14 @@ import {
   type DiagnosticEvent,
 } from "@/lib/diagnostics";
 import {
+  exportCrawlerDebugLog,
   exportOperationLogs,
   listOperationLogs,
   type OperationLogDTO,
 } from "@/lib/api/diagnosticsApi";
+import { listCrawlJobs } from "@/lib/api/crawlJobsApi";
+import { formatApiDateTime } from "@/lib/dateTime";
+import type { CrawlJobSummaryDTO } from "@/types";
 
 type FilterValue = "" | string;
 
@@ -58,6 +62,8 @@ export const DiagnosticLogPanel = () => {
     getDiagnosticEvents(),
   );
   const [backendLogs, setBackendLogs] = useState<OperationLogDTO[]>([]);
+  const [crawlJobs, setCrawlJobs] = useState<CrawlJobSummaryDTO[]>([]);
+  const [selectedCrawlJobId, setSelectedCrawlJobId] = useState("");
   const [level, setLevel] = useState<FilterValue>("");
   const [category, setCategory] = useState<FilterValue>("");
   const [exportDate, setExportDate] = useState(() =>
@@ -66,6 +72,7 @@ export const DiagnosticLogPanel = () => {
   const [loadingBackendLogs, setLoadingBackendLogs] = useState(false);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [exportingCrawlerLog, setExportingCrawlerLog] = useState(false);
   const [refreshIndex, setRefreshIndex] = useState(0);
   const [isExpanded, setIsExpanded] = useState(false);
   const [renderContent, setRenderContent] = useState(false);
@@ -98,13 +105,18 @@ export const DiagnosticLogPanel = () => {
       setBackendError(null);
 
       try {
-        const response = await listOperationLogs(backendParams);
+        const [response, crawlJobResponse] = await Promise.all([
+          listOperationLogs(backendParams),
+          listCrawlJobs({ limit: 50 }),
+        ]);
         if (!ignore) {
           setBackendLogs(response.items);
+          setCrawlJobs(crawlJobResponse);
         }
       } catch {
         if (!ignore) {
           setBackendLogs([]);
+          setCrawlJobs([]);
           setBackendError("后端诊断日志暂时不可用");
         }
       } finally {
@@ -240,6 +252,34 @@ export const DiagnosticLogPanel = () => {
     }
   };
 
+  const handleExportCrawlerLog = async () => {
+    const jobId = Number(selectedCrawlJobId);
+    if (!Number.isInteger(jobId) || jobId <= 0) {
+      return;
+    }
+
+    setExportingCrawlerLog(true);
+    try {
+      const blob = await exportCrawlerDebugLog(jobId);
+      downloadBlob(blob, `crawl-job-${jobId}.jsonl`);
+      safeRecordUserAction({
+        eventName: "diagnostics.crawler_debug_export_succeeded",
+        data: { jobId },
+      });
+      notifySuccess("抓取日志已导出");
+    } catch (error) {
+      const message = getErrorMessage(error, "请稍后重试");
+      safeRecordUserAction({
+        eventName: "diagnostics.crawler_debug_export_failed",
+        message,
+        level: "error",
+      });
+      notifyError("导出抓取日志失败", message);
+    } finally {
+      setExportingCrawlerLog(false);
+    }
+  };
+
   return (
     <section className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
       <button
@@ -290,6 +330,23 @@ export const DiagnosticLogPanel = () => {
             </div>
 
             <div className="mt-5 flex flex-wrap items-end gap-3">
+              <label className="block min-w-72">
+                <span className="mb-2 block text-xs font-medium text-stone-500">
+                  智能抓取任务
+                </span>
+                <select
+                  value={selectedCrawlJobId}
+                  onChange={(event) => setSelectedCrawlJobId(event.target.value)}
+                  className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="">选择最近 50 次抓取任务</option>
+                  {crawlJobs.map((job) => (
+                    <option key={job.id} value={String(job.id)}>
+                      {formatCrawlJobOption(job)}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <label className="block min-w-40">
                 <span className="mb-2 block text-xs font-medium text-stone-500">
                   导出日期
@@ -363,6 +420,19 @@ export const DiagnosticLogPanel = () => {
               </button>
               <button
                 type="button"
+                onClick={() => void handleExportCrawlerLog()}
+                disabled={!selectedCrawlJobId || exportingCrawlerLog}
+                className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {exportingCrawlerLog ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+                导出抓取日志
+              </button>
+              <button
+                type="button"
                 onClick={handleClearLocalLogs}
                 className="ui-btn-danger"
               >
@@ -398,6 +468,21 @@ function SummaryMetric({
       </div>
     </div>
   );
+}
+
+function downloadBlob(blob: Blob, filename: string): void {
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
+}
+
+function formatCrawlJobOption(job: CrawlJobSummaryDTO): string {
+  return `#${job.id} ${job.status} ${job.university} ${job.school} ${formatApiDateTime(job.created_at)}`;
 }
 
 function filterEventsByDate(

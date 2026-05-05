@@ -122,6 +122,27 @@ class CrawlJobsApiTests(unittest.TestCase):
             ],
         )
 
+    def test_list_crawl_jobs_allows_limit_for_diagnostics_selector(self) -> None:
+        for index in range(3):
+            response = self.client.post(
+                "/api/crawl-jobs",
+                json={
+                    "university": "示例大学",
+                    "school": f"学院 {index}",
+                    "start_url": f"https://example.edu/faculty/{index}",
+                    "llm_profile_id": None,
+                },
+            )
+            self.assertEqual(response.status_code, 201, msg=response.text)
+
+        response = self.client.get("/api/crawl-jobs?limit=2")
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        payload = response.json()
+        self.assertEqual(len(payload), 2)
+        self.assertEqual(payload[0]["school"], "学院 2")
+        self.assertEqual(payload[1]["school"], "学院 1")
+
     def test_create_crawl_job_rejects_unsafe_start_urls_item(self) -> None:
         response = self.client.post(
             "/api/crawl-jobs",
@@ -458,6 +479,56 @@ class CrawlJobsApiTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+
+    def test_approve_allows_canceled_job_and_preserves_canceled_status(self) -> None:
+        create_response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "llm_profile_id": None,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        job_id = create_response.json()["id"]
+        self._seed_page_and_candidates(job_id)
+        self._set_job_status(job_id, "canceled")
+        candidates = self.client.get(f"/api/crawl-jobs/{job_id}/candidates").json()
+
+        response = self.client.post(
+            f"/api/crawl-jobs/{job_id}/approve",
+            json={"candidate_ids": [candidates[0]["id"]]},
+        )
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        self.assertEqual(response.json()["inserted_count"], 1)
+        detail_response = self.client.get(f"/api/crawl-jobs/{job_id}")
+        self.assertEqual(detail_response.json()["status"], "canceled")
+
+    def test_approve_rejects_paused_job_with_saved_candidates(self) -> None:
+        create_response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "llm_profile_id": None,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        job_id = create_response.json()["id"]
+        self._seed_page_and_candidates(job_id)
+        self._set_job_status(job_id, "paused")
+        candidates = self.client.get(f"/api/crawl-jobs/{job_id}/candidates").json()
+
+        response = self.client.post(
+            f"/api/crawl-jobs/{job_id}/approve",
+            json={"candidate_ids": [candidates[0]["id"]]},
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"], "抓取任务尚未进入审核状态")
 
     def test_approve_rejects_job_before_review_state(self) -> None:
         create_response = self.client.post(

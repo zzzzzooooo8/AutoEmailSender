@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -43,6 +45,7 @@ from app.services.professor_management import is_valid_professor_email
 
 
 router = APIRouter(prefix="/api/crawl-jobs", tags=["crawl-jobs"])
+CrawlJobListLimit = Annotated[int, Query(ge=1, le=50)]
 
 
 @router.post("", response_model=CrawlJobRead, status_code=status.HTTP_201_CREATED)
@@ -86,6 +89,7 @@ async def create_crawl_job(
 
 @router.get("", response_model=list[CrawlJobSummaryRead])
 async def list_crawl_jobs(
+    limit: CrawlJobListLimit = 50,
     session: AsyncSession = Depends(get_async_session),
 ) -> list[CrawlJobSummaryRead]:
     jobs = list(
@@ -94,7 +98,7 @@ async def list_crawl_jobs(
                 select(CrawlJob)
                 .options(selectinload(CrawlJob.current_run))
                 .order_by(CrawlJob.created_at.desc(), CrawlJob.id.desc())
-                .limit(50),
+                .limit(limit),
             )
         ).scalars(),
     )
@@ -215,7 +219,7 @@ async def approve_crawl_candidates(
     session: AsyncSession = Depends(get_async_session),
 ) -> CrawlJobApproveResult:
     job = await _get_crawl_job_or_404(session, job_id)
-    if job.status != CrawlJobStatus.NEEDS_REVIEW.value:
+    if job.status not in {CrawlJobStatus.NEEDS_REVIEW.value, CrawlJobStatus.CANCELED.value}:
         raise HTTPException(status_code=409, detail="抓取任务尚未进入审核状态")
     if not payload.candidate_ids:
         raise HTTPException(status_code=400, detail="请至少选择一位候选导师")
@@ -272,7 +276,8 @@ async def approve_crawl_candidates(
         candidate.review_status = CrawlCandidateReviewStatus.ACCEPTED.value
         candidate.updated_at = now
 
-    job.status = CrawlJobStatus.COMPLETED.value
+    if job.status == CrawlJobStatus.NEEDS_REVIEW.value:
+        job.status = CrawlJobStatus.COMPLETED.value
     job.updated_at = now
     await record_operation_log(
         session,
