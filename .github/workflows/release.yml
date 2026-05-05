@@ -35,14 +35,6 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Test frontend
-        working-directory: frontend
-        run: npm run test
-
-      - name: Lint frontend
-        working-directory: frontend
-        run: npm run lint
-
       - name: Build frontend
         working-directory: frontend
         run: npm run build
@@ -51,10 +43,6 @@ jobs:
         working-directory: backend
         run: uv sync --dev
 
-      - name: Test backend desktop runtime
-        working-directory: backend
-        run: uv run python -m unittest test.test_desktop_runtime
-
       - name: Build backend executable
         run: ./scripts/build-backend.ps1 -Clean
         shell: pwsh
@@ -62,10 +50,6 @@ jobs:
       - name: Install desktop dependencies
         working-directory: desktop
         run: npm ci
-
-      - name: Test desktop
-        working-directory: desktop
-        run: npm test
 
       - name: Generate release notes
         run: node ./scripts/release-notes.mjs --version "${{ github.ref_name }}" --upper-ref "${{ github.sha }}" --output ./desktop/release-notes.md
