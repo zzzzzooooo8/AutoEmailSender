@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 import clsx from "clsx";
 import { AlertTriangle, X } from "lucide-react";
 
@@ -51,7 +52,7 @@ export const ConfirmDialog = ({
     return null;
   }
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-[90] flex items-center justify-center bg-stone-950/35 p-4 backdrop-blur-md"
       onClick={onCancel}
@@ -129,6 +130,7 @@ export const ConfirmDialog = ({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
