@@ -2,6 +2,7 @@ import { apiFetch } from '@/lib/api/client';
 import type {
   CrawlCandidateDTO,
   CrawlCandidateUpdatePayloadDTO,
+  CrawlJobEnrichResultDTO,
   CrawlJobApproveResultDTO,
   CrawlJobCreatePayloadDTO,
   CrawlJobDTO,
@@ -45,6 +46,12 @@ export const updateCrawlCandidate = (
 
 export const approveCrawlCandidates = (jobId: number, candidateIds: number[]) =>
   apiFetch<CrawlJobApproveResultDTO>(`/api/crawl-jobs/${jobId}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ candidate_ids: candidateIds }),
+  });
+
+export const enrichCrawlCandidates = (jobId: number, candidateIds: number[]) =>
+  apiFetch<CrawlJobEnrichResultDTO>(`/api/crawl-jobs/${jobId}/enrich`, {
     method: 'POST',
     body: JSON.stringify({ candidate_ids: candidateIds }),
   });

@@ -17,11 +17,14 @@ from app.models import (
     CrawlJob,
     CrawlJobStatus,
     CrawlPage,
+    LLMProfile,
     Professor,
 )
 from app.schemas.crawl_job import (
     CrawlCandidateRead,
     CrawlCandidateUpdatePayload,
+    CrawlJobEnrichPayload,
+    CrawlJobEnrichResult,
     CrawlJobApprovePayload,
     CrawlJobApproveResult,
     CrawlJobCreatePayload,
@@ -39,9 +42,12 @@ from app.services.crawl_job_runs import (
     mark_crawl_job_run_finished,
     mark_crawl_job_run_paused,
     mark_crawl_job_run_queued,
+    mark_crawl_job_run_running,
 )
 from app.services.operation_logs import record_operation_log
 from app.services.professor_management import is_valid_professor_email
+from app.services.crawl_job_runtime import enrich_selected_crawl_candidates
+from app.core.database import get_session_factory
 
 
 router = APIRouter(prefix="/api/crawl-jobs", tags=["crawl-jobs"])
@@ -301,6 +307,89 @@ async def approve_crawl_candidates(
         message=(
             f"审核完成：新增 {inserted_count} 位导师，更新 {updated_count} 位导师，"
             f"跳过 {skipped_count} 位候选。"
+        ),
+    )
+
+
+@router.post("/{job_id}/enrich", response_model=CrawlJobEnrichResult)
+async def enrich_crawl_candidates(
+    job_id: int,
+    payload: CrawlJobEnrichPayload,
+    session: AsyncSession = Depends(get_async_session),
+) -> CrawlJobEnrichResult:
+    job = await _get_crawl_job_or_404(session, job_id)
+    if job.status == CrawlJobStatus.RUNNING.value:
+        raise HTTPException(status_code=409, detail="候选信息正在补全中，请稍后再试")
+    if job.status != CrawlJobStatus.NEEDS_REVIEW.value:
+        raise HTTPException(status_code=409, detail="抓取任务尚未进入审核状态")
+    if not payload.candidate_ids:
+        raise HTTPException(status_code=400, detail="请至少选择一位候选导师")
+
+    llm_profile: LLMProfile | None = None
+    if job.llm_profile_id is not None:
+        llm_profile = await session.get(LLMProfile, job.llm_profile_id)
+    if llm_profile is None:
+        llm_profile = await session.scalar(
+            select(LLMProfile)
+            .where(LLMProfile.is_default.is_(True))
+            .order_by(LLMProfile.created_at.asc(), LLMProfile.id.asc())
+            .limit(1),
+        )
+    if llm_profile is None:
+        raise HTTPException(status_code=409, detail="请先配置可用的 LLM Profile")
+
+    now = datetime.now(UTC)
+    job.status = CrawlJobStatus.RUNNING.value
+    job.error_message = None
+    job.updated_at = now
+    await mark_crawl_job_run_running(session, job, now=now)
+    await session.commit()
+
+    async def trace_callback(event: dict[str, object]) -> None:
+        async with get_session_factory()() as trace_session:
+            trace_job = await trace_session.get(CrawlJob, job_id)
+            if trace_job is None:
+                return
+            trace = list(trace_job.agent_trace or [])
+            trace.append(normalize_agent_trace_event(event))
+            trace_job.agent_trace = trace[-100:]
+            trace_job.updated_at = datetime.now(UTC)
+            await trace_session.commit()
+
+    try:
+        summary = await enrich_selected_crawl_candidates(
+            get_session_factory(),
+            job_id=job_id,
+            candidate_ids=payload.candidate_ids,
+            llm_profile=llm_profile,
+            trace_callback=trace_callback,
+        )
+    finally:
+        async with get_session_factory()() as final_session:
+            final_job = await final_session.get(CrawlJob, job_id)
+            if final_job is not None and final_job.status == CrawlJobStatus.RUNNING.value:
+                final_job.status = CrawlJobStatus.NEEDS_REVIEW.value
+                final_job.updated_at = datetime.now(UTC)
+                await mark_crawl_job_run_finished(
+                    final_session,
+                    final_job,
+                    status=CrawlJobStatus.NEEDS_REVIEW.value,
+                    now=datetime.now(UTC),
+                )
+                await final_session.commit()
+
+    if summary.selected_count == 0:
+        raise HTTPException(status_code=400, detail="未找到可补全的候选导师")
+
+    return CrawlJobEnrichResult(
+        selected_count=summary.selected_count,
+        enriched_count=summary.enriched_count,
+        unchanged_count=summary.unchanged_count,
+        failed_count=summary.failed_count,
+        message=(
+            f"补全完成：选中 {summary.selected_count} 位，成功补全 "
+            f"{summary.enriched_count} 位，未变化 {summary.unchanged_count} 位，"
+            f"失败 {summary.failed_count} 位。"
         ),
     )
 

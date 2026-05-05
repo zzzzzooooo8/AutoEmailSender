@@ -36,6 +36,7 @@ import {
 import {
   cancelCrawlJob,
   approveCrawlCandidates,
+  enrichCrawlCandidates,
   getCrawlJob,
   getCrawlJobEvents,
   listCrawlCandidates,
@@ -499,6 +500,7 @@ export const TasksPage = () => {
     number[]
   >([]);
   const [crawlJobApproveLoading, setCrawlJobApproveLoading] = useState(false);
+  const [crawlJobEnrichLoading, setCrawlJobEnrichLoading] = useState(false);
   const [retryingCrawlJobId, setRetryingCrawlJobId] = useState<number | null>(
     null,
   );
@@ -1060,6 +1062,7 @@ export const TasksPage = () => {
   useEffect(() => {
     setSelectedCrawlCandidateIds([]);
     setCrawlJobApproveLoading(false);
+    setCrawlJobEnrichLoading(false);
     setSelectedCandidateDetail(null);
     setCrawlEventPage(1);
     setCrawlDetailPagePage(1);
@@ -1390,6 +1393,34 @@ export const TasksPage = () => {
       notifyError("审核导入候选导师失败", message);
     } finally {
       setCrawlJobApproveLoading(false);
+    }
+  };
+
+  const handleEnrichSelectedCrawlCandidates = async () => {
+    if (
+      !selectedCrawlJobId ||
+      selectedReviewableCrawlCandidateIds.length === 0
+    ) {
+      return;
+    }
+
+    setCrawlJobEnrichLoading(true);
+    try {
+      const result = await enrichCrawlCandidates(
+        selectedCrawlJobId,
+        selectedReviewableCrawlCandidateIds,
+      );
+      notifySuccess("候选信息补全完成", result.message);
+      await loadCrawlJobs({ showLoading: false });
+      await loadCrawlJobDetails(selectedCrawlJobId, { showLoading: false });
+    } catch (actionError) {
+      const message =
+        actionError instanceof Error
+          ? actionError.message
+          : "补全候选导师信息失败";
+      notifyError("补全候选导师信息失败", message);
+    } finally {
+      setCrawlJobEnrichLoading(false);
     }
   };
 
@@ -2432,6 +2463,9 @@ export const TasksPage = () => {
                         <div className="text-sm text-amber-900">
                           可导入 {reviewableCrawlCandidateIds.length} 位，已选{" "}
                           {selectedReviewableCrawlCandidateIds.length} 位
+                          <span className="mt-1 block text-xs text-amber-700">
+                            可反复选择候选补全缺失信息，补全后仍可继续审核。
+                          </span>
                         </div>
                         <div className="flex flex-wrap gap-2">
                           <button
@@ -2444,7 +2478,8 @@ export const TasksPage = () => {
                             disabled={
                               reviewableCrawlCandidateIds.length === 0 ||
                               allReviewableCrawlCandidatesSelected ||
-                              crawlJobApproveLoading
+                              crawlJobApproveLoading ||
+                              crawlJobEnrichLoading
                             }
                             className="ui-btn-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
                           >
@@ -2455,7 +2490,9 @@ export const TasksPage = () => {
                             onClick={() => setSelectedCrawlCandidateIds([])}
                             disabled={
                               selectedReviewableCrawlCandidateIds.length ===
-                                0 || crawlJobApproveLoading
+                                0 ||
+                              crawlJobApproveLoading ||
+                              crawlJobEnrichLoading
                             }
                             className="ui-btn-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
                           >
@@ -2464,11 +2501,30 @@ export const TasksPage = () => {
                           <button
                             type="button"
                             onClick={() =>
+                              void handleEnrichSelectedCrawlCandidates()
+                            }
+                            disabled={
+                              selectedReviewableCrawlCandidateIds.length ===
+                                0 ||
+                              crawlJobApproveLoading ||
+                              crawlJobEnrichLoading
+                            }
+                            className="ui-btn-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {crawlJobEnrichLoading
+                              ? "补全中..."
+                              : "补全缺失信息"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
                               void handleApproveSelectedCrawlCandidates()
                             }
                             disabled={
                               selectedReviewableCrawlCandidateIds.length ===
-                                0 || crawlJobApproveLoading
+                                0 ||
+                              crawlJobApproveLoading ||
+                              crawlJobEnrichLoading
                             }
                             className="ui-btn-primary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
                           >
@@ -2494,7 +2550,10 @@ export const TasksPage = () => {
                                 checked={selectedReviewableCrawlCandidateIds.includes(
                                   candidate.id,
                                 )}
-                                disabled={crawlJobApproveLoading}
+                                disabled={
+                                  crawlJobApproveLoading ||
+                                  crawlJobEnrichLoading
+                                }
                                 onChange={() =>
                                   handleToggleCrawlCandidateSelection(
                                     candidate.id,

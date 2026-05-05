@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.models import Base, CrawlCandidate, CrawlJob, CrawlJobRun, CrawlJobStatus, CrawlPage, LLMProfile
 from app.services.crawl_job_runtime import (
     _enrich_saved_candidates,
+    enrich_selected_crawl_candidates,
     enrich_candidate_profile_with_llm,
     extract_profile_candidate_with_llm,
     resolve_crawl_runtime_concurrency,
@@ -1538,6 +1539,104 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(candidate.department, "人工智能学院")
             self.assertEqual(candidate.research_direction, "具身智能")
             self.assertEqual(candidate.recent_papers, ["Paper X", "Paper Y"])
+
+    async def test_enrich_selected_crawl_candidates_only_updates_selected_ids(self) -> None:
+        job_id = await self._create_default_profile_and_job()
+        await self._seed_candidates(job_id, count=2, host="example.edu")
+        llm_profile = await self._get_default_llm_profile()
+
+        async with self.session_factory() as session:
+            candidates = list(
+                (
+                    await session.scalars(
+                        select(CrawlCandidate)
+                        .where(CrawlCandidate.job_id == job_id)
+                        .order_by(CrawlCandidate.id.asc())
+                    )
+                )
+            )
+            selected_id = candidates[0].id
+            unselected_id = candidates[1].id
+
+        async def fake_crawl_page_with_crawl4ai(
+            ctx: CrawlToolContext,
+            url: str,
+            *,
+            intent: str = "generic",
+        ) -> PageSnapshot:
+            _ = ctx, intent
+            return PageSnapshot(
+                url=url,
+                title="Teacher",
+                text="邮箱：selected@example.edu\n院系：计算机学院",
+                html="<html></html>",
+                links=[],
+                fetch_method="http",
+                status="succeeded",
+            )
+
+        async def fake_enrich_with_llm(
+            ctx: CrawlToolContext,
+            llm_profile: LLMProfile,
+            candidate: CrawlCandidate,
+            page_text: str,
+        ) -> CandidateEnrichmentPayload:
+            _ = ctx, llm_profile, candidate, page_text
+            return CandidateEnrichmentPayload(email="selected@example.edu")
+
+        with patch(
+            "app.services.crawl_job_runtime.crawl_page_with_crawl4ai",
+            new=fake_crawl_page_with_crawl4ai,
+        ), patch(
+            "app.services.crawl_job_runtime.enrich_candidate_profile_with_llm",
+            new=fake_enrich_with_llm,
+        ):
+            result = await enrich_selected_crawl_candidates(
+                self.session_factory,
+                job_id=job_id,
+                candidate_ids=[selected_id],
+                llm_profile=llm_profile,
+            )
+
+        self.assertEqual(result.enriched_count, 1)
+        self.assertEqual(result.selected_count, 1)
+
+        async with self.session_factory() as session:
+            selected = await session.get(CrawlCandidate, selected_id)
+            unselected = await session.get(CrawlCandidate, unselected_id)
+            assert selected is not None
+            assert unselected is not None
+            self.assertEqual(selected.email, "selected@example.edu")
+            self.assertIsNone(unselected.email)
+
+    async def test_enrich_selected_crawl_candidates_counts_complete_candidates_as_unchanged(self) -> None:
+        job_id = await self._create_default_profile_and_job()
+        await self._seed_candidates(job_id, count=1, host="example.edu")
+        llm_profile = await self._get_default_llm_profile()
+
+        async with self.session_factory() as session:
+            candidate = await session.scalar(
+                select(CrawlCandidate).where(CrawlCandidate.job_id == job_id)
+            )
+            assert candidate is not None
+            candidate.email = "teacher@example.edu"
+            candidate.department = "计算机学院"
+            candidate.research_direction = "机器学习"
+            candidate.recent_papers = ["Paper A"]
+            selected_id = candidate.id
+            await session.commit()
+
+        result = await enrich_selected_crawl_candidates(
+            self.session_factory,
+            job_id=job_id,
+            candidate_ids=[selected_id],
+            llm_profile=llm_profile,
+        )
+
+        self.assertEqual(result.selected_count, 1)
+        self.assertEqual(result.enriched_count, 0)
+        self.assertEqual(result.unchanged_count, 1)
+        self.assertEqual(result.failed_count, 0)
 
     async def _create_default_profile_and_job(
         self,

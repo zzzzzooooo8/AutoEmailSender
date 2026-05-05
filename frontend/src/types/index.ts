@@ -411,6 +411,14 @@ export interface CrawlJobApproveResultDTO {
   message: string;
 }
 
+export interface CrawlJobEnrichResultDTO {
+  selected_count: number;
+  enriched_count: number;
+  unchanged_count: number;
+  failed_count: number;
+  message: string;
+}
+
 export interface CrawlJobRetryPayloadDTO {
   clear_existing_data: boolean;
 }

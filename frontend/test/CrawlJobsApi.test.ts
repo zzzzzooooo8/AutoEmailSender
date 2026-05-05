@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   cancelCrawlJob,
   createCrawlJob,
+  enrichCrawlCandidates,
   getCrawlJob,
   getCrawlJobEvents,
   listCrawlJobs,
@@ -137,6 +138,24 @@ describe('crawlJobsApi', () => {
 
     expect(mockedApiFetch).toHaveBeenCalledWith('/api/crawl-jobs/7/cancel', {
       method: 'POST',
+    });
+  });
+
+  it('enriches selected crawl candidates with the expected payload', async () => {
+    const result = {
+      selected_count: 2,
+      enriched_count: 1,
+      unchanged_count: 1,
+      failed_count: 0,
+      message: '补全完成',
+    };
+    mockedApiFetch.mockResolvedValue(result);
+
+    await expect(enrichCrawlCandidates(7, [11, 12])).resolves.toBe(result);
+
+    expect(mockedApiFetch).toHaveBeenCalledWith('/api/crawl-jobs/7/enrich', {
+      method: 'POST',
+      body: JSON.stringify({ candidate_ids: [11, 12] }),
     });
   });
 });

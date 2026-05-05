@@ -238,3 +238,15 @@ class CrawlJobApproveResult(BaseModel):
     skipped_count: int
     message: str
 
+
+class CrawlJobEnrichPayload(BaseModel):
+    candidate_ids: list[int]
+
+
+class CrawlJobEnrichResult(BaseModel):
+    selected_count: int
+    enriched_count: int
+    unchanged_count: int
+    failed_count: int
+    message: str
+

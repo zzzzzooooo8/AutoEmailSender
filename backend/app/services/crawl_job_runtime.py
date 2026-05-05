@@ -76,6 +76,14 @@ class CandidateEnrichmentResult:
 
 
 @dataclass(slots=True)
+class SelectedCandidateEnrichmentSummary:
+    selected_count: int
+    enriched_count: int
+    unchanged_count: int
+    failed_count: int
+
+
+@dataclass(slots=True)
 class CrawlRuntimeConcurrency:
     profile_enrichment_concurrency: int
     host_concurrency: int
@@ -470,6 +478,35 @@ async def _enrich_saved_candidates(
     )
 
 
+async def enrich_selected_crawl_candidates(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    job_id: int,
+    candidate_ids: list[int],
+    llm_profile: LLMProfile,
+    trace_callback: Any | None = None,
+) -> SelectedCandidateEnrichmentSummary:
+    async with session_factory() as session:
+        job = await session.get(CrawlJob, job_id)
+        if job is None:
+            raise ValueError("未找到抓取任务")
+        ctx = CrawlToolContext(
+            job_id=job.id,
+            start_url=job.start_url,
+            university=job.university,
+            school=job.school,
+            session_factory=session_factory,
+        )
+
+    return await _enrich_selected_candidates_concurrent(
+        session_factory,
+        ctx,
+        candidate_ids=candidate_ids,
+        llm_profile=llm_profile,
+        trace_callback=trace_callback,
+    )
+
+
 async def _enrich_saved_candidates_concurrent(
     session_factory: async_sessionmaker[AsyncSession],
     ctx: CrawlToolContext,
@@ -478,7 +515,6 @@ async def _enrich_saved_candidates_concurrent(
     trace_callback: Any | None = None,
 ) -> int:
     async with session_factory() as session:
-        runtime_settings = await get_runtime_settings(session)
         candidates = list(
             (
                 await session.execute(
@@ -492,6 +528,78 @@ async def _enrich_saved_candidates_concurrent(
     pending_candidates = [candidate for candidate in candidates if _needs_profile_enrichment(candidate)]
     if not pending_candidates:
         return 0
+
+    enriched, _unchanged, _failed = await _enrich_candidate_collection_concurrent(
+        session_factory,
+        ctx,
+        pending_candidates,
+        llm_profile=llm_profile,
+        trace_callback=trace_callback,
+    )
+    return enriched
+
+
+async def _enrich_selected_candidates_concurrent(
+    session_factory: async_sessionmaker[AsyncSession],
+    ctx: CrawlToolContext,
+    *,
+    candidate_ids: list[int],
+    llm_profile: LLMProfile,
+    trace_callback: Any | None = None,
+) -> SelectedCandidateEnrichmentSummary:
+    unique_ids = list(dict.fromkeys(candidate_ids))
+    if not unique_ids:
+        return SelectedCandidateEnrichmentSummary(0, 0, 0, 0)
+
+    async with session_factory() as session:
+        candidates = list(
+            (
+                await session.execute(
+                    select(CrawlCandidate)
+                    .where(
+                        CrawlCandidate.job_id == ctx.job_id,
+                        CrawlCandidate.id.in_(unique_ids),
+                    )
+                    .order_by(CrawlCandidate.created_at.asc(), CrawlCandidate.id.asc())
+                )
+            ).scalars()
+        )
+
+    pending_candidates = [candidate for candidate in candidates if _needs_profile_enrichment(candidate)]
+    already_complete_count = len(candidates) - len(pending_candidates)
+    if not pending_candidates:
+        return SelectedCandidateEnrichmentSummary(
+            len(candidates),
+            0,
+            already_complete_count,
+            0,
+        )
+
+    enriched, unchanged, failed = await _enrich_candidate_collection_concurrent(
+        session_factory,
+        ctx,
+        pending_candidates,
+        llm_profile=llm_profile,
+        trace_callback=trace_callback,
+    )
+    return SelectedCandidateEnrichmentSummary(
+        selected_count=len(candidates),
+        enriched_count=enriched,
+        unchanged_count=unchanged + already_complete_count,
+        failed_count=failed,
+    )
+
+
+async def _enrich_candidate_collection_concurrent(
+    session_factory: async_sessionmaker[AsyncSession],
+    ctx: CrawlToolContext,
+    pending_candidates: list[CrawlCandidate],
+    *,
+    llm_profile: LLMProfile,
+    trace_callback: Any | None = None,
+) -> tuple[int, int, int]:
+    async with session_factory() as session:
+        runtime_settings = await get_runtime_settings(session)
 
     settings = get_settings()
     concurrency = resolve_crawl_runtime_concurrency(runtime_settings)
@@ -562,126 +670,7 @@ async def _enrich_saved_candidates_concurrent(
             },
         },
     )
-    return enriched
-
-    pending_candidates = [candidate for candidate in candidates if _needs_profile_enrichment(candidate)]
-    enriched = 0
-    unchanged = 0
-    failed = 0
-
-    if pending_candidates:
-        await _emit_trace_event(
-            trace_callback,
-            {
-                "event_type": "enrichment",
-                "message": f"开始统一补全候选导师详情，共 {len(pending_candidates)} 位待补全",
-                "created_at": datetime.now(UTC).isoformat(),
-                "raw": {"candidate_count": len(pending_candidates)},
-            },
-        )
-
-    for candidate in pending_candidates:
-        async with session_factory() as session:
-            await ensure_crawl_job_can_continue(session, ctx.job_id)
-
-        await _emit_trace_event(
-            trace_callback,
-            {
-                "event_type": "enrichment",
-                "message": f"开始补全候选导师详情：{candidate.name}",
-                "created_at": datetime.now(UTC).isoformat(),
-                "raw": {
-                    "candidate_id": candidate.id,
-                    "profile_url": candidate.profile_url,
-                },
-            },
-        )
-
-        snapshot = await crawl_page_with_crawl4ai(
-            ctx,
-            candidate.profile_url or "",
-            intent="profile",
-        )
-        if snapshot.status != "succeeded" or not snapshot.text.strip():
-            failed += 1
-            await _emit_trace_event(
-                trace_callback,
-                {
-                    "event_type": "enrichment",
-                    "message": f"候选导师详情补全失败：{candidate.name}",
-                    "created_at": datetime.now(UTC).isoformat(),
-                    "raw": {
-                        "candidate_id": candidate.id,
-                        "profile_url": candidate.profile_url,
-                        "status": snapshot.status,
-                        "error_message": snapshot.error_message,
-                    },
-                },
-            )
-            continue
-
-        try:
-            enrichment = await enrich_candidate_profile_with_llm(
-                ctx,
-                llm_profile,
-                candidate,
-                snapshot.text,
-            )
-        except Exception:
-            enrichment = _extract_fallback_enrichment(snapshot.text)
-        if not _has_any_enrichment(enrichment):
-            fallback = extract_candidate_profile_enrichment(snapshot.text)
-            enrichment = CandidateEnrichmentPayload.model_validate(fallback)
-
-        changes = enrichment.model_dump()
-        changed_fields = [field for field, value in changes.items() if value]
-        if await _apply_candidate_enrichment(session_factory, candidate.id, enrichment):
-            enriched += 1
-            await _emit_trace_event(
-                trace_callback,
-                {
-                    "event_type": "enrichment",
-                    "message": f"候选导师详情补全成功：{candidate.name}（{_format_enrichment_fields(changed_fields)}）",
-                    "created_at": datetime.now(UTC).isoformat(),
-                    "raw": {
-                        "candidate_id": candidate.id,
-                        "profile_url": candidate.profile_url,
-                        "updated_fields": changed_fields,
-                    },
-                },
-            )
-        else:
-            unchanged += 1
-            await _emit_trace_event(
-                trace_callback,
-                {
-                    "event_type": "enrichment",
-                    "message": f"候选导师详情无新增信息：{candidate.name}",
-                    "created_at": datetime.now(UTC).isoformat(),
-                    "raw": {
-                        "candidate_id": candidate.id,
-                        "profile_url": candidate.profile_url,
-                        "detected_fields": changed_fields,
-                    },
-                },
-            )
-
-    if pending_candidates:
-        await _emit_trace_event(
-            trace_callback,
-            {
-                "event_type": "enrichment",
-                "message": f"候选导师详情补全完成：成功 {enriched} 位，未变化 {unchanged} 位，失败 {failed} 位",
-                "created_at": datetime.now(UTC).isoformat(),
-                "raw": {
-                    "candidate_count": len(pending_candidates),
-                    "enriched_count": enriched,
-                    "unchanged_count": unchanged,
-                    "failed_count": failed,
-                },
-            },
-        )
-    return enriched
+    return enriched, unchanged, failed
 
 
 async def _run_candidate_enrichment_worker(
