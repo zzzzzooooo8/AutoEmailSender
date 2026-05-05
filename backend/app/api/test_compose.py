@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
+from app.services.llm_runtime import LLMRuntimeError
 from app.schemas.test_compose import (
     TestComposeDraftUpdateRequest,
     TestComposeMessageSendRequest,
@@ -110,6 +111,8 @@ async def _run_test_compose_action(
 ) -> TestComposeThreadRead:
     try:
         return await action()
+    except LLMRuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except ValueError as exc:
         detail = str(exc)
         status_code = 404 if "未找到" in detail else 400

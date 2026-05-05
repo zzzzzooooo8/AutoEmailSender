@@ -3366,6 +3366,35 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(send_payload["history"][0]["rfc_message_id"], "<self-test@example.com>")
         mocked_send.assert_awaited_once()
 
+    def test_test_compose_generate_draft_returns_bad_gateway_when_llm_fails(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        material_id = self._upload_material(
+            identity_id,
+            filename="resume.txt",
+            content=b"My research focuses on information extraction and agents.",
+            material_type="resume",
+        )
+        set_primary_response = self.client.post(f"/api/materials/{material_id}/set-primary")
+        self.assertEqual(set_primary_response.status_code, 200, msg=set_primary_response.text)
+
+        from app.services import llm_runtime
+
+        with patch(
+            "app.services.test_compose_runtime.llm_runtime.generate_draft_content",
+            AsyncMock(
+                side_effect=llm_runtime.LLMRuntimeError(
+                    "模型返回的正文无效",
+                    endpoint_kind="chat_completions",
+                    status_code=500,
+                ),
+            ),
+        ):
+            response = self.client.post(f"/api/test-compose/{identity_id}/{llm_id}/generate-draft")
+
+        self.assertEqual(response.status_code, 502, msg=response.text)
+        self.assertEqual(response.json()["detail"], "模型返回的正文无效")
+
     def test_test_compose_status_is_completed_by_identity_across_llm_profiles(self) -> None:
         identity_id = self._create_identity(with_imap=False)
         first_llm_id = self._create_llm()
