@@ -10,5 +10,5 @@ class BackendBuildScriptTest(unittest.TestCase):
         content = script.resolve().read_text(encoding="utf-8")
 
         self.assertIn("$env:PLAYWRIGHT_BROWSERS_PATH = $PlaywrightBrowsersDir", content)
-        self.assertIn("uv run python -m playwright install chromium", content)
-        self.assertIn("uv run python -m patchright install chromium", content)
+        self.assertIn("uv run python -m playwright install --only-shell chromium", content)
+        self.assertIn("uv run python -m patchright install --only-shell chromium", content)

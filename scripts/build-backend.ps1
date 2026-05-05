@@ -12,13 +12,13 @@ $PlaywrightBrowsersDir = Join-Path $BackendDir "ms-playwright"
 Push-Location $BackendDir
 try {
   if ($Clean) {
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "build", "dist"
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "build", "dist", "ms-playwright"
   }
 
   uv sync --dev
   $env:PLAYWRIGHT_BROWSERS_PATH = $PlaywrightBrowsersDir
-  uv run python -m playwright install chromium
-  uv run python -m patchright install chromium
+  uv run python -m playwright install --only-shell chromium
+  uv run python -m patchright install --only-shell chromium
   uv run pyinstaller `
     --noconfirm `
     --clean `
