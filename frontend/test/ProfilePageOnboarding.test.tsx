@@ -379,6 +379,43 @@ describe("ProfilePage onboarding", () => {
     expect(screen.queryByText(/匹配阈值/)).not.toBeInTheDocument();
   });
 
+  it("saves sender identity even when the default outreach template is empty", async () => {
+    const identityWithoutTemplate: IdentityDTO = {
+      ...selectedIdentity,
+      outreach_template_subject: null,
+      outreach_template_body_text: null,
+      outreach_template_body_html: null,
+    };
+    mockedUseSelectionContext.mockReturnValue({
+      identities: [identityWithoutTemplate],
+      llmProfiles: [selectedLlmProfile],
+      selectedIdentityId: identityWithoutTemplate.id,
+      selectedLlmProfileId: selectedLlmProfile.id,
+      selectedIdentity: identityWithoutTemplate,
+      selectedLlmProfile,
+      setSelectedIdentityId: vi.fn(),
+      setSelectedLlmProfileId: vi.fn(),
+      refreshSelections: vi.fn(),
+      loading: false,
+    });
+
+    renderPage();
+    openSetupSection("发件身份");
+
+    fireEvent.click(await screen.findByRole("button", { name: "保存身份" }));
+
+    await waitFor(() => {
+      expect(updateIdentity).toHaveBeenCalledWith(
+        identityWithoutTemplate.id,
+        expect.objectContaining({
+          outreach_template_subject: null,
+          outreach_template_body_text: null,
+          outreach_template_body_html: null,
+        }),
+      );
+    });
+  });
+
   it("renders the material entry and connection testing area for an existing identity", () => {
     renderPage();
     openSetupSection("材料与模板");

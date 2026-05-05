@@ -2120,7 +2120,9 @@ export const ProfilePage = () => {
     }));
   };
 
-  const saveIdentity = async (): Promise<IdentityDTO | null> => {
+  const saveIdentity = async ({
+    validateTemplate = false,
+  }: { validateTemplate?: boolean } = {}): Promise<IdentityDTO | null> => {
     if (!identityForm.profile_name.trim() || !identityForm.sender_name.trim()) {
       notifyFormErrors("请检查表单", ["请填写配置名称和发件人姓名"]);
       return null;
@@ -2135,11 +2137,13 @@ export const ProfilePage = () => {
       notifyFormErrors("请检查表单", ["请先填写所有带红色星号的身份必填项"]);
       return null;
     }
-    const templateValidationMessage =
-      getTemplateValidationMessage(identityForm);
-    if (templateValidationMessage) {
-      notifyFormErrors("请检查表单", [templateValidationMessage]);
-      return null;
+    if (validateTemplate) {
+      const templateValidationMessage =
+        getTemplateValidationMessage(identityForm);
+      if (templateValidationMessage) {
+        notifyFormErrors("请检查表单", [templateValidationMessage]);
+        return null;
+      }
     }
 
     setSubmittingIdentity(true);
@@ -3086,7 +3090,7 @@ export const ProfilePage = () => {
         form={identityForm}
         onClose={() => setTemplateModalOpen(false)}
         onComplete={() =>
-          void saveIdentity().then((saved) => {
+          void saveIdentity({ validateTemplate: true }).then((saved) => {
             if (saved) {
               setTemplateModalOpen(false);
             }

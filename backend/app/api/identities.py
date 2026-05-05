@@ -25,7 +25,6 @@ from app.services.operation_logs import record_operation_log
 from app.services.outreach_templates import (
     OUTREACH_GENERATION_MODE_LLM,
     OUTREACH_GENERATION_MODE_TEMPLATE,
-    get_outreach_template_defaults_validation_error,
     import_outreach_template_file,
 )
 
@@ -54,7 +53,6 @@ async def create_identity(
 ) -> IdentityProfileRead:
     existing_count = await session.scalar(select(func.count(IdentityProfile.id)))
     data = _normalize_identity_payload(payload)
-    _validate_identity_outreach_defaults(data)
     identity = IdentityProfile(**data)
     if not existing_count:
         identity.is_default = True
@@ -77,7 +75,6 @@ async def update_identity(
 ) -> IdentityProfileRead:
     identity = await _get_identity(session, identity_id)
     data = _normalize_identity_payload(payload)
-    _validate_identity_outreach_defaults(data)
     if data["is_default"]:
         await _clear_default_identities(session, exclude_id=identity_id)
 
@@ -321,15 +318,6 @@ def _normalize_identity_payload(
         data.get("outreach_template_body_html"),
     )
     return data
-
-
-def _validate_identity_outreach_defaults(data: dict[str, object]) -> None:
-    detail = get_outreach_template_defaults_validation_error(
-        data.get("outreach_template_subject"),
-        data.get("outreach_template_body_text"),
-    )
-    if detail:
-        raise HTTPException(status_code=400, detail=detail)
 
 
 def _infer_imap_host(smtp_host: str) -> str:

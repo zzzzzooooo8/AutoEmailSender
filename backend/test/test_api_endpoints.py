@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "a9c8e7d6f5b4"
+HEAD_REVISION = "b6f1a2c3d4e5"
 
 
 class ApiEndpointTests(unittest.TestCase):
@@ -202,7 +202,7 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400, msg=response.text)
         self.assertEqual(response.json()["detail"], "请选择模板文件")
 
-    def test_identity_requires_template_subject_in_all_modes(self) -> None:
+    def test_identity_allows_missing_template_subject_in_all_modes(self) -> None:
         for mode in ("llm", "template"):
             with self.subTest(mode=mode):
                 payload = self._build_identity_payload(
@@ -219,10 +219,10 @@ class ApiEndpointTests(unittest.TestCase):
                     json=payload,
                 )
 
-                self.assertEqual(response.status_code, 400)
-                self.assertEqual(response.json()["detail"], "请先填写默认套磁信主题")
+                self.assertEqual(response.status_code, 201, msg=response.text)
+                self.assertIsNone(response.json()["outreach_template_subject"])
 
-    def test_identity_requires_plain_text_template_body_even_when_html_exists(self) -> None:
+    def test_identity_allows_missing_plain_text_template_body_even_when_html_exists(self) -> None:
         response = self.client.post(
             "/api/identities",
             json=self._build_identity_payload(
@@ -234,31 +234,29 @@ class ApiEndpointTests(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["detail"], "请先填写默认套磁信纯文本正文")
+        self.assertEqual(response.status_code, 201, msg=response.text)
+        self.assertIsNone(response.json()["outreach_template_body_text"])
+        self.assertEqual(response.json()["outreach_template_body_html"], "<p>老师您好，我是{{sender_name}}。</p>")
 
-    def test_identity_update_requires_subject_and_plain_text_body(self) -> None:
+    def test_identity_update_allows_incomplete_template_defaults(self) -> None:
         cases = [
             {
                 "name": "只缺主题",
                 "subject": None,
                 "body_text": "老师您好，我是{{sender_name}}。",
                 "body_html": "<p>老师您好，我是{{sender_name}}。</p>",
-                "detail": "请先填写默认套磁信主题",
             },
             {
                 "name": "只缺纯文本正文",
                 "subject": "申请与{{name}}老师交流",
                 "body_text": None,
                 "body_html": "<p>老师您好，我是{{sender_name}}。</p>",
-                "detail": "请先填写默认套磁信纯文本正文",
             },
             {
                 "name": "主题和纯文本正文都缺",
                 "subject": None,
                 "body_text": None,
                 "body_html": "<p>老师您好，我是{{sender_name}}。</p>",
-                "detail": "请先填写默认套磁信主题和纯文本正文",
             },
         ]
 
@@ -290,8 +288,10 @@ class ApiEndpointTests(unittest.TestCase):
                     json=update_payload,
                 )
 
-                self.assertEqual(response.status_code, 400)
-                self.assertEqual(response.json()["detail"], case["detail"])
+                self.assertEqual(response.status_code, 200, msg=response.text)
+                self.assertEqual(response.json()["outreach_template_subject"], case["subject"])
+                self.assertEqual(response.json()["outreach_template_body_text"], case["body_text"])
+                self.assertEqual(response.json()["outreach_template_body_html"], case["body_html"])
 
     def test_llm_structured_result_validation_rejects_invalid_json(self) -> None:
         from app.services.llm_runtime import DraftGenerationResult, LLMRuntimeError, parse_structured_result
@@ -305,7 +305,7 @@ class ApiEndpointTests(unittest.TestCase):
             json={
                 "name": "张教授",
                 "email": "zhang@example.edu",
-                "title": "Professor",
+                "title": "教授",
                 "university": "Example University",
                 "school": "School of AI",
                 "department": "Computer Science",
@@ -323,7 +323,7 @@ class ApiEndpointTests(unittest.TestCase):
             json={
                 "name": "张教授",
                 "email": "zhang@example.edu",
-                "title": "Chair Professor",
+                "title": "副教授",
                 "university": "Example University",
                 "school": "School of AI",
                 "department": "Computer Science",
@@ -334,7 +334,7 @@ class ApiEndpointTests(unittest.TestCase):
             },
         )
         self.assertEqual(update_response.status_code, 200)
-        self.assertEqual(update_response.json()["title"], "Chair Professor")
+        self.assertEqual(update_response.json()["title"], "副教授")
         self.assertEqual(update_response.json()["recent_papers"], ["Paper C"])
 
         active_list = self.client.get("/api/professors/management", params={"archived": "active"})
@@ -927,7 +927,7 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertNotIn("{{name}}", kwargs["body_html"])
         self.assertEqual(response.json()["current_task"]["approved_subject"], "申请与{{name}}老师交流")
 
-    def test_identity_llm_mode_requires_subject_and_plain_text_body_when_template_is_empty(self) -> None:
+    def test_identity_llm_mode_allows_empty_template_defaults(self) -> None:
         response = self.client.post(
             "/api/identities",
             json=self._build_identity_payload(
@@ -939,8 +939,10 @@ class ApiEndpointTests(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["detail"], "请先填写默认套磁信主题和纯文本正文")
+        self.assertEqual(response.status_code, 201, msg=response.text)
+        self.assertIsNone(response.json()["outreach_template_subject"])
+        self.assertIsNone(response.json()["outreach_template_body_text"])
+        self.assertIsNone(response.json()["outreach_template_body_html"])
 
     def test_material_upload_open_download_set_primary_and_delete(self) -> None:
         identity_id = self._create_identity(with_imap=False)

@@ -46,6 +46,8 @@ describe("ProfilePage setup sections", () => {
     );
     expect(modalUsageSource).toContain("savingTemplate={submittingIdentity}");
     expect(modalUsageSource).toContain("onComplete={() =>");
-    expect(modalUsageSource).toContain("saveIdentity().then((saved) =>");
+    expect(modalUsageSource).toContain(
+      "saveIdentity({ validateTemplate: true }).then((saved) =>",
+    );
   });
 });
