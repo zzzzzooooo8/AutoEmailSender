@@ -3,7 +3,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { getFrontendIndexPath, startBackend } from "./backend.js";
 import { checkForUpdatesOnStartup, registerUpdateIpc } from "./updates.js";
-import { shouldHideWindowOnClose } from "./windowLifecycle.js";
+import { restoreExistingWindow, shouldHideWindowOnClose } from "./windowLifecycle.js";
 import { getWindowIconPath } from "./windowIcon.js";
 import type { BackendController, BackendExit, BackendStatus } from "./types.js";
 
@@ -15,6 +15,11 @@ let isQuitting = false;
 let currentBackendStatus: BackendStatus = { state: "starting" };
 
 const repoRoot = path.resolve(app.getAppPath(), "..");
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!hasSingleInstanceLock) {
+  app.quit();
+}
 
 function showMainWindow(): void {
   if (mainWindow === null) {
@@ -22,11 +27,7 @@ function showMainWindow(): void {
     return;
   }
 
-  if (mainWindow.isMinimized()) {
-    mainWindow.restore();
-  }
-  mainWindow.show();
-  mainWindow.focus();
+  restoreExistingWindow(mainWindow);
 }
 
 function quitFromTray(): void {
@@ -170,13 +171,17 @@ function publishBackendStatus(status: typeof currentBackendStatus): void {
 ipcMain.handle("app:get-version", () => app.getVersion());
 registerUpdateIpc(() => mainWindow);
 
-app.whenReady().then(() => {
-  createWindow().catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    dialog.showErrorBox("启动失败", message);
-    app.quit();
+if (hasSingleInstanceLock) {
+  app.on("second-instance", showMainWindow);
+
+  app.whenReady().then(() => {
+    createWindow().catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      dialog.showErrorBox("启动失败", message);
+      app.quit();
+    });
   });
-});
+}
 
 app.on("window-all-closed", () => {
   if (isQuitting) {
