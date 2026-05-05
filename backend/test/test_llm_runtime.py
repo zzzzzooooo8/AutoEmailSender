@@ -11,6 +11,7 @@ from app.services.llm_runtime import (
     generate_match_evaluation,
     LLMRuntimeError,
     parse_completion_usage,
+    probe_llm_profile,
     request_chat_completion,
     resolve_base_url,
 )
@@ -416,6 +417,43 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.usage.prompt_tokens, 12)
         self.assertEqual(result.usage.completion_tokens, 7)
         self.assertEqual(result.usage.total_tokens, 19)
+
+    async def test_probe_llm_profile_disables_deepseek_thinking(self) -> None:
+        profile = LLMProfile(
+            name="deepseek",
+            provider="deepseek",
+            api_base_url="https://api.deepseek.com/v1",
+            api_key="test-key",
+            model_name="deepseek-chat",
+        )
+        calls: list[tuple[str, dict[str, object] | None]] = []
+        responses = [
+            _FakeResponse(
+                status_code=200,
+                payload={
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "OK",
+                            },
+                        },
+                    ],
+                },
+            ),
+        ]
+
+        with patch(
+            "app.services.llm_runtime.httpx.AsyncClient",
+            side_effect=lambda *args, **kwargs: _FakeAsyncClient(responses, calls),
+        ):
+            result = await probe_llm_profile(profile)
+
+        self.assertTrue(result.ok)
+        assert calls[0][1] is not None
+        self.assertEqual(
+            calls[0][1]["thinking"],
+            {"type": "disabled"},
+        )
 
     async def test_fetch_llm_profile_models_uses_models_endpoint(self) -> None:
         profile = LLMProfile(

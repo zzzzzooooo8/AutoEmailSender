@@ -358,6 +358,8 @@ async def _legacy_probe_llm_profile(profile: LLMProfile) -> LLMProbeResult:
             "temperature": 0,
             "max_tokens": min(profile.max_tokens or DEFAULT_LLM_MAX_TOKENS, 8),
         }
+        if is_deepseek_profile(profile):
+            payload["thinking"] = {"type": "disabled"}
         completion = await request_chat_completion(profile, payload)
     except LLMRuntimeError as exc:
         return LLMProbeResult(
@@ -638,6 +640,8 @@ async def probe_llm_profile(profile: LLMProfile) -> LLMProbeResult:
             "temperature": 0,
             "max_tokens": min(profile.max_tokens or DEFAULT_LLM_MAX_TOKENS, 8),
         }
+        if is_deepseek_profile(profile):
+            payload["thinking"] = {"type": "disabled"}
         completion = await request_chat_completion(profile, payload)
     except LLMRuntimeError as exc:
         return LLMProbeResult(
@@ -1219,6 +1223,19 @@ def parse_structured_result(
 
 def resolve_base_url(api_base_url: str | None) -> str:
     return (api_base_url or DEFAULT_BASE_URL).strip().rstrip("/")
+
+
+def is_deepseek_profile(profile: LLMProfile) -> bool:
+    provider = (profile.provider or "").strip().lower()
+    if provider == "deepseek":
+        return True
+
+    model_name = (profile.model_name or "").strip().lower()
+    if model_name.startswith("deepseek"):
+        return True
+
+    base_url = resolve_base_url(profile.api_base_url).lower()
+    return "deepseek" in base_url
 
 
 def build_endpoint_url(base_url: str, suffix: str) -> str:
