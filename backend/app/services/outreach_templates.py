@@ -4,6 +4,7 @@ import io
 import re
 import tempfile
 from dataclasses import dataclass
+from html import escape
 from pathlib import Path
 
 from bs4 import BeautifulSoup
@@ -300,6 +301,10 @@ def _extract_text_from_bytes(file_name: str, content: bytes) -> str:
 
 
 def _convert_docx_template_to_html(content: bytes) -> str:
+    formatted_html = _convert_docx_template_to_formatted_html(content)
+    if formatted_html:
+        return normalize_html_template(formatted_html)
+
     try:
         import mammoth
     except ImportError as exc:
@@ -314,6 +319,279 @@ def _convert_docx_template_to_html(content: bytes) -> str:
     if not html_content:
         raise ValueError("模板文件里没有可用正文")
     return normalize_html_template(_decorate_docx_email_html(html_content))
+
+
+def _convert_docx_template_to_formatted_html(content: bytes) -> str:
+    try:
+        from docx import Document
+        from docx.oxml.ns import qn
+        from docx.table import Table
+        from docx.text.paragraph import Paragraph
+    except ImportError as exc:
+        raise ValueError("当前环境缺少 .docx 模板解析依赖 python-docx") from exc
+
+    try:
+        document = Document(io.BytesIO(content))
+    except Exception as exc:
+        raise ValueError("解析 .docx 模板失败") from exc
+
+    html_parts: list[str] = []
+    visible_paragraph_count = 0
+    for child in document.element.body.iterchildren():
+        if child.tag == qn("w:p"):
+            paragraph = Paragraph(child, document)
+            paragraph_html = _render_docx_paragraph(paragraph, visible_paragraph_count)
+            if paragraph_html:
+                visible_paragraph_count += 1
+                html_parts.append(paragraph_html)
+        elif child.tag == qn("w:tbl"):
+            table_html = _render_docx_table(Table(child, document))
+            if table_html:
+                html_parts.append(table_html)
+
+    if not html_parts:
+        return ""
+
+    container = BeautifulSoup("", "html.parser").new_tag(
+        "div",
+        style=(
+            f"font-family:{EMAIL_TEMPLATE_FONT_STACK};"
+            "font-size:12pt;"
+            "line-height:1.5;"
+            "color:#000000;"
+            "max-width:100%;"
+        ),
+    )
+    container.append(BeautifulSoup("".join(html_parts), "html.parser"))
+    return str(container)
+
+
+def _render_docx_paragraph(paragraph, visible_index: int) -> str:
+    body_html = _render_docx_runs(paragraph.runs)
+    text = paragraph.text.strip()
+    if not text and not body_html.strip():
+        return ""
+
+    tag_name = _get_docx_paragraph_tag_name(paragraph)
+    soup = BeautifulSoup("", "html.parser")
+    tag = soup.new_tag(tag_name)
+    style = _build_docx_paragraph_style(paragraph, tag_name, visible_index)
+    if style:
+        tag["style"] = style
+    tag.append(BeautifulSoup(body_html or escape(text), "html.parser"))
+    return str(tag)
+
+
+def _render_docx_runs(runs) -> str:
+    parts: list[str] = []
+    for run in runs:
+        if not run.text:
+            continue
+        text = escape(run.text).replace("\n", "<br>")
+        style = _build_docx_run_style(run)
+        if style:
+            text = f'<span style="{style}">{text}</span>'
+        if run.bold:
+            text = f"<strong>{text}</strong>"
+        if run.italic:
+            text = f"<em>{text}</em>"
+        if run.underline:
+            text = f"<u>{text}</u>"
+        parts.append(text)
+    return "".join(parts)
+
+
+def _render_docx_table(table) -> str:
+    row_parts: list[str] = []
+    for row in table.rows:
+        cell_parts: list[str] = []
+        for cell in row.cells:
+            paragraph_parts = [
+                _render_docx_paragraph(paragraph, 0)
+                for paragraph in cell.paragraphs
+            ]
+            content = "".join(part for part in paragraph_parts if part)
+            cell_parts.append(
+                "<td "
+                'style="border:1px solid #666666;padding:8px 10px;'
+                'vertical-align:top;font-size:12pt;line-height:1.5;color:#000000;">'
+                f"{content}</td>"
+            )
+        row_parts.append(f"<tr>{''.join(cell_parts)}</tr>")
+
+    if not row_parts:
+        return ""
+    return (
+        '<table style="width:100%;border-collapse:collapse;table-layout:fixed;'
+        f'margin:12px 0;"><tbody>{"".join(row_parts)}</tbody></table>'
+    )
+
+
+def _get_docx_paragraph_tag_name(paragraph) -> str:
+    style_name = (getattr(paragraph.style, "name", "") or "").lower()
+    match = re.search(r"heading\s+([1-6])", style_name)
+    if match:
+        return f"h{match.group(1)}"
+    return "p"
+
+
+def _build_docx_paragraph_style(paragraph, tag_name: str, visible_index: int) -> str:
+    fragments = [
+        "margin:0 0 12px 0",
+        f"font-family:{_get_docx_paragraph_font_family(paragraph)}",
+        f"font-size:{_get_docx_paragraph_font_size(paragraph, tag_name)}",
+        f"line-height:{_get_docx_paragraph_line_height(paragraph)}",
+        "color:#000000",
+        "white-space:pre-wrap",
+    ]
+
+    text_align = _get_docx_paragraph_text_align(paragraph)
+    if text_align:
+        fragments.append(f"text-align:{text_align}")
+
+    indent = _get_docx_first_line_indent(paragraph)
+    if tag_name == "p":
+        fragments.append(f"text-indent:{indent if indent is not None else '0'}")
+    if visible_index == 0 and indent is None:
+        fragments.append("text-indent:0")
+
+    if tag_name.startswith("h"):
+        fragments.extend(["font-weight:700", "text-indent:0"])
+
+    return ";".join(fragments) + ";"
+
+
+def _build_docx_run_style(run) -> str:
+    fragments: list[str] = []
+    font_family = _get_docx_run_font_family(run)
+    if font_family:
+        fragments.append(f"font-family:{font_family}")
+    font_size = _get_docx_run_font_size(run)
+    if font_size:
+        fragments.append(f"font-size:{font_size}")
+    color = _get_docx_run_color(run)
+    if color:
+        fragments.append(f"color:{color}")
+    return ";".join(fragments) + (";" if fragments else "")
+
+
+def _get_docx_paragraph_font_family(paragraph) -> str:
+    for run in paragraph.runs:
+        font_family = _get_docx_run_font_family(run)
+        if font_family:
+            return font_family
+    return EMAIL_TEMPLATE_FONT_STACK
+
+
+def _get_docx_paragraph_font_size(paragraph, tag_name: str) -> str:
+    for run in paragraph.runs:
+        font_size = _get_docx_run_font_size(run)
+        if font_size:
+            return font_size
+    heading_defaults = {
+        "h1": "16pt",
+        "h2": "14pt",
+        "h3": "13pt",
+        "h4": "12pt",
+        "h5": "12pt",
+        "h6": "12pt",
+    }
+    return heading_defaults.get(tag_name, "12pt")
+
+
+def _get_docx_paragraph_line_height(paragraph) -> str:
+    line_spacing = paragraph.paragraph_format.line_spacing
+    if isinstance(line_spacing, (int, float)):
+        return f"{line_spacing:g}"
+    return "1.5"
+
+
+def _get_docx_paragraph_text_align(paragraph) -> str | None:
+    alignment = paragraph.alignment
+    if alignment is None:
+        return None
+    name = getattr(alignment, "name", "").lower()
+    if "center" in name:
+        return "center"
+    if "right" in name:
+        return "right"
+    if "justify" in name or "distribute" in name:
+        return "justify"
+    if "left" in name:
+        return "left"
+    return None
+
+
+def _get_docx_first_line_indent(paragraph) -> str | None:
+    first_line_indent = paragraph.paragraph_format.first_line_indent
+    if first_line_indent is None:
+        return None
+    points = _docx_length_to_points(first_line_indent)
+    if points is None or points <= 0:
+        return "0"
+    font_size = _docx_font_size_to_points(_get_docx_paragraph_font_size(paragraph, "p")) or 12.0
+    em_value = points / font_size
+    if abs(em_value - round(em_value)) < 0.05:
+        em_text = str(int(round(em_value)))
+    else:
+        em_text = f"{em_value:.2f}".rstrip("0").rstrip(".")
+    return f"{em_text}em"
+
+
+def _get_docx_run_font_family(run) -> str | None:
+    font_name = run.font.name
+    rpr = getattr(run._element, "rPr", None)
+    rfonts = getattr(rpr, "rFonts", None) if rpr is not None else None
+    east_asia_name = None
+    if rfonts is not None:
+        try:
+            from docx.oxml.ns import qn
+
+            east_asia_name = rfonts.get(qn("w:eastAsia"))
+        except Exception:
+            east_asia_name = None
+    if east_asia_name and font_name and east_asia_name != font_name:
+        return f"'{font_name}','{east_asia_name}',{EMAIL_TEMPLATE_FONT_STACK}"
+    if east_asia_name:
+        return f"'{east_asia_name}',{EMAIL_TEMPLATE_FONT_STACK}"
+    if font_name:
+        return f"'{font_name}',{EMAIL_TEMPLATE_FONT_STACK}"
+    return None
+
+
+def _get_docx_run_font_size(run) -> str | None:
+    if run.font.size is None:
+        return None
+    points = _docx_length_to_points(run.font.size)
+    if points is None:
+        return None
+    return f"{points:g}pt"
+
+
+def _get_docx_run_color(run) -> str | None:
+    color = run.font.color
+    if color is None or color.rgb is None:
+        return None
+    return f"#{color.rgb}"
+
+
+def _docx_length_to_points(value) -> float | None:
+    if value is None:
+        return None
+    points = getattr(value, "pt", None)
+    if points is not None:
+        return float(points)
+    try:
+        return float(value) / 12700
+    except (TypeError, ValueError):
+        return None
+
+
+def _docx_font_size_to_points(value: str) -> float | None:
+    match = re.match(r"^([0-9]+(?:\.[0-9]+)?)pt$", value)
+    if not match:
+        return None
+    return float(match.group(1))
 
 
 def _extract_docx_template_to_text(content: bytes) -> str:

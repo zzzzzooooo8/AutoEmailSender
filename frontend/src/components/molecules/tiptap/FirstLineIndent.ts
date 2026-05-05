@@ -5,7 +5,7 @@ export const FirstLineIndent = Extension.create({
   addGlobalAttributes() {
     return [
       {
-        types: ["paragraph"],
+        types: ["paragraph", "heading"],
         attributes: {
           firstLineIndent: {
             default: null,

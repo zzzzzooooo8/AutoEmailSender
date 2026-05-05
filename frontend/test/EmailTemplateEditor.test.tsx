@@ -106,6 +106,23 @@ describe("EmailTemplateEditor", () => {
     expect(screen.queryByText("{{name}}")).not.toBeInTheDocument();
   });
 
+  it("keeps imported word heading structure in the editor", () => {
+    render(
+      <EmailTemplateEditor
+        label="邮件正文"
+        html='<h1 style="font-size:16pt;line-height:1.5">[推免自荐] 陈帆</h1><p style="text-indent:2em">正文</p>'
+        onChange={vi.fn()}
+      />,
+    );
+
+    const editor = screen.getByRole("textbox", { name: "邮件正文" });
+
+    expect(editor.querySelector("h1")).not.toBeNull();
+    expect(editor.innerHTML).toContain("font-size: 16pt");
+    expect(editor.innerHTML).toContain("line-height: 1.5");
+    expect(editor.innerHTML).toContain("text-indent: 2em");
+  });
+
   it("inserts placeholder chips and emits template tokens", () => {
     const handleChange = vi.fn();
     render(

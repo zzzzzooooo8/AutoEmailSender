@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -67,6 +68,53 @@ class OutreachTemplateImportTests(unittest.TestCase):
         self.assertIn("推免资格", result.body_text)
         self.assertIn("王俊杰，以专业第一的成绩获得了推免资格。现在联系您或许有些晚了", result.body_text)
         self.assertNotIn("推免资格\n\n。现在联系您", result.body_text)
+
+    def test_docx_import_preserves_word_paragraph_formatting(self) -> None:
+        from docx import Document
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.shared import Pt
+
+        from app.services.outreach_templates import import_outreach_template_file
+
+        document = Document()
+        heading = document.add_heading("[推免自荐] 陈帆", level=1)
+        heading.runs[0].font.name = "Times New Roman"
+        heading.runs[0].font.size = Pt(16)
+
+        greeting = document.add_paragraph()
+        greeting.paragraph_format.line_spacing = 1.5
+        greeting_run = greeting.add_run("尊敬的王宏霞教授：")
+        greeting_run.font.name = "Times New Roman"
+        greeting_run.font.size = Pt(12)
+
+        body = document.add_paragraph()
+        body.paragraph_format.first_line_indent = Pt(24)
+        body.paragraph_format.line_spacing = 1.5
+        body.add_run("我是陈帆，")
+        highlighted = body.add_run("专业第一")
+        highlighted.bold = True
+        body.add_run("，希望加入您的课题组。")
+
+        signature = document.add_paragraph()
+        signature.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        signature.add_run("陈           帆")
+
+        buffer = BytesIO()
+        document.save(buffer)
+        result = import_outreach_template_file("format.docx", buffer.getvalue())
+        soup = BeautifulSoup(result.body_html, "html.parser")
+
+        heading_tag = soup.find("h1")
+        body_tag = soup.find(string="我是陈帆，").find_parent("p")
+        signature_tag = soup.find(string="陈           帆").find_parent("p")
+
+        self.assertIn("font-size:16pt", heading_tag.get("style", ""))
+        self.assertIn("font-weight:700", heading_tag.get("style", ""))
+        self.assertIn("text-indent:2em", body_tag.get("style", ""))
+        self.assertIn("line-height:1.5", body_tag.get("style", ""))
+        self.assertIn("text-align:right", signature_tag.get("style", ""))
+        self.assertIn("<strong", result.body_html)
+        self.assertIn("专业第一", result.body_text)
 
     def test_docx_fixture_keeps_reference_html_block_structure(self) -> None:
         from app.services.outreach_templates import import_outreach_template_file

@@ -5,6 +5,12 @@ const ALLOWED_TAGS = [
   "b",
   "br",
   "em",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
   "i",
   "li",
   "ol",
@@ -45,7 +51,7 @@ export const deriveTextFromEmailHtml = (value: string): string => {
   container.innerHTML = value.trim();
   const lines: string[] = [];
 
-  container.querySelectorAll("p, li").forEach((element) => {
+  container.querySelectorAll("h1, h2, h3, h4, h5, h6, p, li").forEach((element) => {
     const text = element.textContent?.replace(/\s+/g, " ").trim();
     if (!text) {
       return;

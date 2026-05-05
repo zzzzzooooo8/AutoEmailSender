@@ -21,6 +21,7 @@ import { FontFamily } from "@/components/molecules/tiptap/FontFamily";
 import { FontSize } from "@/components/molecules/tiptap/FontSize";
 import { LineHeight } from "@/components/molecules/tiptap/LineHeight";
 import { FirstLineIndent } from "@/components/molecules/tiptap/FirstLineIndent";
+import { BlockTypography } from "@/components/molecules/tiptap/BlockTypography";
 import {
   EmailTable,
   EmailTableCell,
@@ -134,14 +135,16 @@ export const EmailTemplateEditor = ({
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
-        heading: false,
+        heading: {
+          levels: [1, 2, 3, 4, 5, 6],
+        },
       }),
       Link.configure({
         openOnClick: false,
       }),
       Underline,
       TextStyle,
-      TextAlign.configure({ types: ["paragraph"] }),
+      TextAlign.configure({ types: ["paragraph", "heading"] }),
       EmailTable.configure({ resizable: true }),
       TableRow,
       EmailTableHeader,
@@ -151,6 +154,7 @@ export const EmailTemplateEditor = ({
       FontSize,
       LineHeight,
       FirstLineIndent,
+      BlockTypography,
     ],
     content: prepareTemplatePlaceholderHtml(html),
     immediatelyRender: false,

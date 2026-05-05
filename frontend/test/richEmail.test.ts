@@ -24,4 +24,17 @@ describe("richEmail", () => {
     expect(html).toContain('style="font-family:SimSun"');
     expect(deriveTextFromEmailHtml(html)).toContain("老师您好");
   });
+
+  it("preserves imported word heading and paragraph styles", () => {
+    const html = normalizeEmailHtml(
+      '<h1 style="font-family:SimSun;font-size:16pt;text-align:center">标题</h1><p style="text-indent:2em;line-height:1.5;text-align:right">落款</p>',
+    );
+
+    expect(html).toContain("<h1");
+    expect(html).toContain("font-size:16pt");
+    expect(html).toContain("text-align:center");
+    expect(html).toContain("text-indent:2em");
+    expect(html).toContain("text-align:right");
+    expect(deriveTextFromEmailHtml(html)).toBe("标题\n落款");
+  });
 });
