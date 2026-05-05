@@ -1,21 +1,32 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type { BackendStatus, UpdateStatus } from "./types.js";
 
-const backendBaseUrl = process.argv
+let backendBaseUrl = process.argv
   .find((value) => value.startsWith("--backend-base-url="))
   ?.replace("--backend-base-url=", "");
+let currentBackendStatus: BackendStatus = { state: "starting" };
+const backendStatusCallbacks = new Set<(status: BackendStatus) => void>();
+
+ipcRenderer.on("backend:status", (_event: IpcRendererEvent, status: BackendStatus) => {
+  currentBackendStatus = status;
+  if (status.state === "ready") {
+    backendBaseUrl = status.baseUrl;
+  }
+  backendStatusCallbacks.forEach((callback) => callback(status));
+});
 
 contextBridge.exposeInMainWorld("autoEmailSender", {
   backendBaseUrl,
+  getBackendBaseUrl: () => backendBaseUrl,
   getVersion: () => ipcRenderer.invoke("app:get-version") as Promise<string>,
   checkForUpdate: () => ipcRenderer.invoke("update:check") as Promise<UpdateStatus>,
   downloadUpdate: () => ipcRenderer.invoke("update:download") as Promise<UpdateStatus>,
   quitAndInstall: () => ipcRenderer.invoke("update:quit-and-install") as Promise<void>,
   onBackendStatus: (callback: (status: BackendStatus) => void) => {
-    const listener = (_event: IpcRendererEvent, status: BackendStatus) => callback(status);
-    ipcRenderer.on("backend:status", listener);
+    backendStatusCallbacks.add(callback);
+    queueMicrotask(() => callback(currentBackendStatus));
     return () => {
-      ipcRenderer.removeListener("backend:status", listener);
+      backendStatusCallbacks.delete(callback);
     };
   },
   onUpdateStatus: (callback: (status: UpdateStatus) => void) => {

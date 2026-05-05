@@ -4,11 +4,12 @@ import { pathToFileURL } from "node:url";
 import { getFrontendIndexPath, startBackend } from "./backend.js";
 import { checkForUpdatesOnStartup, registerUpdateIpc } from "./updates.js";
 import { getWindowIconPath } from "./windowIcon.js";
-import type { BackendController, BackendExit } from "./types.js";
+import type { BackendController, BackendExit, BackendStatus } from "./types.js";
 
 let mainWindow: BrowserWindow | null = null;
 let backend: BackendController | null = null;
 let restartingBackend = false;
+let currentBackendStatus: BackendStatus = { state: "starting" };
 
 const repoRoot = path.resolve(app.getAppPath(), "..");
 
@@ -29,9 +30,12 @@ async function createWindow(): Promise<void> {
       preload: path.join(app.getAppPath(), "dist", "src", "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      additionalArguments: [`--backend-base-url=${backend.baseUrl}`],
     },
   });
+  mainWindow.webContents.on("did-finish-load", () => {
+    mainWindow?.webContents.send("backend:status", currentBackendStatus);
+  });
+  publishBackendReady(backend);
 
   if (!app.isPackaged && process.argv.includes("--dev")) {
     await mainWindow.loadURL("http://127.0.0.1:5173");
@@ -45,7 +49,6 @@ async function createWindow(): Promise<void> {
     repoRoot,
   });
   await mainWindow.loadURL(pathToFileURL(indexPath).toString());
-  checkForUpdatesOnStartup();
 }
 
 async function startDesktopBackend(): Promise<BackendController> {
@@ -67,7 +70,7 @@ async function restartBackendAfterUnexpectedExit(exit: BackendExit): Promise<voi
 
   restartingBackend = true;
   backend = null;
-  mainWindow?.webContents.send("backend:status", {
+  publishBackendStatus({
     state: "restarting",
     code: exit.code,
     signal: exit.signal,
@@ -75,19 +78,40 @@ async function restartBackendAfterUnexpectedExit(exit: BackendExit): Promise<voi
 
   try {
     backend = await startDesktopBackend();
-    mainWindow?.webContents.send("backend:status", {
-      state: "ready",
-      baseUrl: backend.baseUrl,
-    });
+    publishBackendReady(backend);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    mainWindow?.webContents.send("backend:status", {
+    publishBackendStatus({
       state: "error",
       message,
     });
   } finally {
     restartingBackend = false;
   }
+}
+
+function publishBackendReady(controller: BackendController): void {
+  publishBackendStatus({ state: "starting" });
+  controller.ready
+    .then(() => {
+      publishBackendStatus({
+        state: "ready",
+        baseUrl: controller.baseUrl,
+      });
+      checkForUpdatesOnStartup();
+    })
+    .catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      publishBackendStatus({
+        state: "error",
+        message,
+      });
+    });
+}
+
+function publishBackendStatus(status: typeof currentBackendStatus): void {
+  currentBackendStatus = status;
+  mainWindow?.webContents.send("backend:status", status);
 }
 
 ipcMain.handle("app:get-version", () => app.getVersion());

@@ -82,10 +82,9 @@ export async function startBackend(options: {
     notifyBackendExit(lifecycle, code, signal);
   });
 
-  await waitForHealth(baseUrl, child);
-
   return {
     baseUrl,
+    ready: waitForReady(baseUrl, child),
     stop: () => stopBackend(child, lifecycle),
   };
 }
@@ -131,7 +130,7 @@ function spawnBackend(input: {
   );
 }
 
-async function waitForHealth(
+async function waitForReady(
   baseUrl: string,
   child: ChildProcessWithoutNullStreams,
 ): Promise<void> {
@@ -143,20 +142,20 @@ async function waitForHealth(
 
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
-      throw new Error(`Backend exited before health check succeeded: ${stderr.slice(-800)}`);
+      throw new Error(`Backend exited before readiness check succeeded: ${stderr.slice(-800)}`);
     }
-    if (await isHealthy(baseUrl)) {
+    if (await isReady(baseUrl)) {
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 400));
   }
 
-  throw new Error(`Backend health check timed out: ${stderr.slice(-800)}`);
+  throw new Error(`Backend readiness check timed out: ${stderr.slice(-800)}`);
 }
 
-async function isHealthy(baseUrl: string): Promise<boolean> {
+async function isReady(baseUrl: string): Promise<boolean> {
   return new Promise((resolve) => {
-    const request = http.get(`${baseUrl}/health`, (response) => {
+    const request = http.get(`${baseUrl}/ready`, (response) => {
       response.resume();
       resolve(response.statusCode === 200);
     });

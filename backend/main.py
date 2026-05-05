@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
@@ -31,26 +33,54 @@ from app.services.runtime_manager import RuntimeManager
 
 
 ensure_windows_proactor_event_loop_policy()
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    runtime_manager: RuntimeManager | None = None
-    await ensure_database_schema()
-    async with get_session_factory()() as session:
-        await cleanup_old_operation_logs(session)
-        await session.commit()
-    if get_settings().enable_background_workers:
-        runtime_manager = RuntimeManager(get_session_factory())
-        await runtime_manager.start()
-        app.state.runtime_manager = runtime_manager
+    app.state.runtime_ready = False
+    app.state.runtime_error = None
+    app.state.runtime_manager = None
+    runtime_task = asyncio.create_task(initialize_runtime(app))
+    runtime_task.add_done_callback(log_runtime_initialization_failure)
 
     try:
         yield
     finally:
+        if not runtime_task.done():
+            runtime_task.cancel()
+            await asyncio.gather(runtime_task, return_exceptions=True)
+        runtime_manager = app.state.runtime_manager
         if runtime_manager is not None:
             await runtime_manager.stop()
         await dispose_engine()
+
+
+async def initialize_runtime(app: FastAPI) -> None:
+    try:
+        await ensure_database_schema()
+        async with get_session_factory()() as session:
+            await cleanup_old_operation_logs(session)
+            await session.commit()
+        if get_settings().enable_background_workers:
+            runtime_manager = RuntimeManager(get_session_factory())
+            await runtime_manager.start()
+            app.state.runtime_manager = runtime_manager
+        app.state.runtime_ready = True
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        app.state.runtime_error = str(exc)
+        raise
+
+
+def log_runtime_initialization_failure(task: asyncio.Task[None]) -> None:
+    if task.cancelled():
+        return
+    try:
+        task.result()
+    except Exception:
+        logger.exception("桌面后端运行时初始化失败")
 
 
 def create_app() -> FastAPI:
@@ -89,6 +119,15 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/ready")
+    async def ready() -> dict[str, str]:
+        runtime_error = getattr(app.state, "runtime_error", None)
+        if runtime_error:
+            raise HTTPException(status_code=500, detail=runtime_error)
+        if not getattr(app.state, "runtime_ready", False):
+            raise HTTPException(status_code=503, detail="后端初始化中")
+        return {"status": "ready"}
 
     return app
 

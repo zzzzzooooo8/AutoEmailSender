@@ -51,6 +51,29 @@ describe("desktop backend helpers", () => {
     expect(env.ENABLE_BACKGROUND_WORKERS).toBe("true");
   });
 
+  it("allows backend controllers to expose readiness separately from process launch", async () => {
+    let markReady: (() => void) | undefined;
+    const controller = {
+      baseUrl: "http://127.0.0.1:48123",
+      ready: new Promise<void>((resolve) => {
+        markReady = resolve;
+      }),
+      stop: async () => undefined,
+    };
+    let ready = false;
+    void controller.ready.then(() => {
+      ready = true;
+    });
+
+    await Promise.resolve();
+    expect(controller.baseUrl).toBe("http://127.0.0.1:48123");
+    expect(ready).toBe(false);
+
+    markReady?.();
+    await controller.ready;
+    expect(ready).toBe(true);
+  });
+
   it("normalizes valid ports", () => {
     expect(normalizePort("48123")).toBe(48123);
   });

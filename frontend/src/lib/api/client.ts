@@ -44,7 +44,7 @@ export const apiFetch = async <T>(
   options?: RequestInit,
   params?: Record<string, string | number | null | undefined>,
 ): Promise<T> => {
-  const apiPath = buildApiPath(path, params);
+  const apiPath = await buildApiPathForFetch(path, params);
   const diagnosticData = {
     method: (options?.method ?? "GET").toUpperCase(),
     path: stripQueryAndHash(apiPath),
@@ -268,6 +268,53 @@ function stripUrlQueryAndHash(value: string): string {
 }
 
 function getDesktopBackendBaseUrl(): string | null {
-  const baseUrl = desktopBackendBaseUrlOverride ?? window.autoEmailSender?.backendBaseUrl?.trim();
+  const desktopApi = window.autoEmailSender;
+  const baseUrl =
+    desktopBackendBaseUrlOverride ??
+    desktopApi?.getBackendBaseUrl?.()?.trim() ??
+    desktopApi?.backendBaseUrl?.trim();
   return baseUrl ? baseUrl.replace(/\/+$/, "") : null;
+}
+
+async function buildApiPathForFetch(
+  path: string,
+  params?: Record<string, string | number | null | undefined>,
+): Promise<string> {
+  if (window.autoEmailSender) {
+    await waitForDesktopBackendBaseUrl();
+  }
+  return buildApiPath(path, params);
+}
+
+async function waitForDesktopBackendBaseUrl(): Promise<string | null> {
+  const currentBaseUrl = getDesktopBackendBaseUrl();
+  if (currentBaseUrl || !window.autoEmailSender) {
+    return currentBaseUrl;
+  }
+
+  const subscribe = window.autoEmailSender.onBackendStatus;
+  if (!subscribe) {
+    return null;
+  }
+
+  return new Promise((resolve, reject) => {
+    let unsubscribe: () => void = () => undefined;
+    const timeout = window.setTimeout(() => {
+      unsubscribe();
+      reject(new Error("桌面后端启动超时"));
+    }, 35_000);
+    unsubscribe = subscribe((status) => {
+      if (status.state === "ready") {
+        window.clearTimeout(timeout);
+        updateDesktopBackendBaseUrl(status.baseUrl);
+        unsubscribe();
+        resolve(status.baseUrl);
+      }
+      if (status.state === "error") {
+        window.clearTimeout(timeout);
+        unsubscribe();
+        reject(new Error(status.message));
+      }
+    });
+  });
 }

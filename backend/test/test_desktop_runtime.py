@@ -5,6 +5,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -34,6 +35,34 @@ class DesktopRuntimeTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, msg=response.text)
         self.assertEqual(response.json(), {"status": "ok"})
+
+    def test_health_endpoint_is_available_before_runtime_initialization_finishes(self) -> None:
+        os.environ["ENABLE_BACKGROUND_WORKERS"] = "1"
+
+        from app.core.config import get_settings
+        import main as main_module
+
+        get_settings.cache_clear()
+        schema_started = False
+
+        async def slow_schema() -> None:
+            nonlocal schema_started
+            schema_started = True
+            await asyncio.Event().wait()
+
+        with (
+            patch.object(main_module, "ensure_database_schema", slow_schema),
+            patch.object(main_module.RuntimeManager, "start", new_callable=AsyncMock) as runtime_start,
+        ):
+            with TestClient(main_module.create_app()) as client:
+                response = client.get("/health")
+                ready_response = client.get("/ready")
+
+        self.assertTrue(schema_started)
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        self.assertEqual(response.json(), {"status": "ok"})
+        self.assertEqual(ready_response.status_code, 503)
+        runtime_start.assert_not_called()
 
     def test_desktop_data_dir_controls_default_storage_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

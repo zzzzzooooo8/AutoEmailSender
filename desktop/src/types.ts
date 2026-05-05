@@ -11,6 +11,7 @@ export type BackendEnvInput = {
 
 export type BackendController = {
   baseUrl: string;
+  ready: Promise<void>;
   stop: () => Promise<void>;
 };
 
@@ -22,6 +23,7 @@ export type BackendExit = {
 export type BackendExitHandler = (exit: BackendExit) => void;
 
 export type BackendStatus =
+  | { state: "starting" }
   | { state: "restarting"; code: number | null; signal: NodeJS.Signals | null }
   | { state: "ready"; baseUrl: string }
   | { state: "error"; message: string };
