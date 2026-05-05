@@ -28,11 +28,25 @@ export type BackendStatus =
   | { state: "ready"; baseUrl: string }
   | { state: "error"; message: string };
 
+export type UpdateDownloadMode = "differential" | "full";
+
+export type UpdateDownloadProgress = {
+  percent: number;
+  transferredBytes: number;
+  totalBytes: number;
+  remainingBytes: number;
+  bytesPerSecond: number;
+  remainingSeconds: number | null;
+  mode: UpdateDownloadMode;
+};
+
 export type UpdateStatus =
   | { state: "idle"; version: string }
   | { state: "checking"; version: string }
-  | { state: "available"; version: string; nextVersion: string }
+  | { state: "available"; version: string; nextVersion: string; fullDownloadBytes?: number }
   | { state: "not_available"; version: string }
-  | { state: "downloading"; version: string; percent: number }
-  | { state: "downloaded"; version: string; nextVersion: string }
+  | ({ state: "downloading"; version: string; nextVersion: string } & UpdateDownloadProgress)
+  | ({ state: "slow_download_offered"; version: string; nextVersion: string; fullDownloadBytes?: number } & UpdateDownloadProgress)
+  | { state: "downloaded_pending_install"; version: string; nextVersion: string; fullDownloadBytes?: number }
+  | { state: "installing"; version: string; nextVersion: string }
   | { state: "error"; version: string; message: string };

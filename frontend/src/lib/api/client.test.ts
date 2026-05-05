@@ -24,6 +24,7 @@ describe("api client desktop base url", () => {
       getVersion: async () => "0.1.0",
       checkForUpdate: async () => ({ state: "not_available", version: "0.1.0" }),
       downloadUpdate: async () => ({ state: "not_available", version: "0.1.0" }),
+      switchToFullDownload: async () => ({ state: "not_available", version: "0.1.0" }),
       quitAndInstall: async () => undefined,
       onUpdateStatus: () => () => undefined,
     };
@@ -38,6 +39,7 @@ describe("api client desktop base url", () => {
       getVersion: async () => "0.1.0",
       checkForUpdate: async () => ({ state: "not_available", version: "0.1.0" }),
       downloadUpdate: async () => ({ state: "not_available", version: "0.1.0" }),
+      switchToFullDownload: async () => ({ state: "not_available", version: "0.1.0" }),
       quitAndInstall: async () => undefined,
       onUpdateStatus: () => () => undefined,
     };
@@ -58,6 +60,7 @@ describe("api client desktop base url", () => {
       getVersion: async () => "0.1.0",
       checkForUpdate: async () => ({ state: "not_available", version: "0.1.0" }),
       downloadUpdate: async () => ({ state: "not_available", version: "0.1.0" }),
+      switchToFullDownload: async () => ({ state: "not_available", version: "0.1.0" }),
       quitAndInstall: async () => undefined,
       onBackendStatus: (callback) => {
         backendStatusCallback = callback as typeof backendStatusCallback;

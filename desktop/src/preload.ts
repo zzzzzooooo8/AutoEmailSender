@@ -20,7 +20,10 @@ contextBridge.exposeInMainWorld("autoEmailSender", {
   getBackendBaseUrl: () => backendBaseUrl,
   getVersion: () => ipcRenderer.invoke("app:get-version") as Promise<string>,
   checkForUpdate: () => ipcRenderer.invoke("update:check") as Promise<UpdateStatus>,
-  downloadUpdate: () => ipcRenderer.invoke("update:download") as Promise<UpdateStatus>,
+  downloadUpdate: (options?: { mode?: "differential" | "full" }) =>
+    ipcRenderer.invoke("update:download", options) as Promise<UpdateStatus>,
+  switchToFullDownload: () =>
+    ipcRenderer.invoke("update:switch-to-full-download") as Promise<UpdateStatus>,
   quitAndInstall: () => ipcRenderer.invoke("update:quit-and-install") as Promise<void>,
   onBackendStatus: (callback: (status: BackendStatus) => void) => {
     backendStatusCallbacks.add(callback);

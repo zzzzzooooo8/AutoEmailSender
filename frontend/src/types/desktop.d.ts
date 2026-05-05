@@ -1,12 +1,26 @@
 export {};
 
+export type DesktopUpdateDownloadMode = "differential" | "full";
+
+export type DesktopUpdateDownloadProgress = {
+  percent: number;
+  transferredBytes: number;
+  totalBytes: number;
+  remainingBytes: number;
+  bytesPerSecond: number;
+  remainingSeconds: number | null;
+  mode: DesktopUpdateDownloadMode;
+};
+
 export type DesktopUpdateStatus =
   | { state: "idle"; version: string }
   | { state: "checking"; version: string }
-  | { state: "available"; version: string; nextVersion: string }
+  | { state: "available"; version: string; nextVersion: string; fullDownloadBytes?: number }
   | { state: "not_available"; version: string }
-  | { state: "downloading"; version: string; percent: number }
-  | { state: "downloaded"; version: string; nextVersion: string }
+  | ({ state: "downloading"; version: string; nextVersion: string } & DesktopUpdateDownloadProgress)
+  | ({ state: "slow_download_offered"; version: string; nextVersion: string; fullDownloadBytes?: number } & DesktopUpdateDownloadProgress)
+  | { state: "downloaded_pending_install"; version: string; nextVersion: string; fullDownloadBytes?: number }
+  | { state: "installing"; version: string; nextVersion: string }
   | { state: "error"; version: string; message: string };
 
 export type DesktopBackendStatus =
@@ -22,7 +36,8 @@ declare global {
       getBackendBaseUrl?: () => string | undefined;
       getVersion: () => Promise<string>;
       checkForUpdate: () => Promise<DesktopUpdateStatus>;
-      downloadUpdate: () => Promise<DesktopUpdateStatus>;
+      downloadUpdate: (options?: { mode?: DesktopUpdateDownloadMode }) => Promise<DesktopUpdateStatus>;
+      switchToFullDownload: () => Promise<DesktopUpdateStatus>;
       quitAndInstall: () => Promise<void>;
       onBackendStatus?: (callback: (status: DesktopBackendStatus) => void) => () => void;
       onUpdateStatus: (callback: (status: DesktopUpdateStatus) => void) => () => void;
