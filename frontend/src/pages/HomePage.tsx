@@ -57,6 +57,68 @@ const hasMatchEvidence = (professor: ProfessorDashboardItemDTO) =>
 const isMatchConflictError = (error: unknown): error is ApiError =>
   error instanceof ApiError && error.status === 409;
 
+const HomePageLoadingSkeleton = () => (
+  <main
+    data-testid="home-page-loading-skeleton"
+    className="mx-auto max-w-7xl px-6 py-8"
+    aria-label="首页内容加载中"
+  >
+    <section className="rounded-3xl border border-stone-200 bg-[#fcfbf8] p-6 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-3">
+          <div className="h-9 w-36 animate-pulse rounded-xl bg-stone-200" />
+          <div className="h-4 w-64 animate-pulse rounded-full bg-stone-100" />
+        </div>
+        <div className="flex flex-wrap gap-3">
+          <div className="h-10 w-24 animate-pulse rounded-2xl bg-stone-200" />
+          <div className="h-10 w-28 animate-pulse rounded-2xl bg-stone-200" />
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(12rem,1fr)_auto_auto]">
+        <div className="h-12 animate-pulse rounded-2xl border border-stone-200 bg-white" />
+        <div className="h-12 animate-pulse rounded-2xl border border-stone-200 bg-white" />
+        <div className="h-12 animate-pulse rounded-2xl border border-stone-200 bg-white" />
+        <div className="h-12 animate-pulse rounded-2xl border border-stone-200 bg-white" />
+      </div>
+    </section>
+
+    <section className="mt-6 overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-sm">
+      <div className="flex items-center gap-3 border-b border-stone-100 px-6 py-4">
+        <div className="h-10 w-36 animate-pulse rounded-2xl bg-stone-100" />
+        <div className="h-4 w-40 animate-pulse rounded-full bg-stone-100" />
+      </div>
+      <div className="divide-y divide-stone-100">
+        {Array.from({ length: 5 }, (_, index) => (
+          <div
+            key={index}
+            className="grid gap-4 px-6 py-5 md:grid-cols-[minmax(0,1.4fr)_minmax(12rem,0.8fr)_auto]"
+          >
+            <div className="space-y-3">
+              <div className="h-5 w-40 animate-pulse rounded-full bg-stone-200" />
+              <div className="h-4 w-full max-w-xl animate-pulse rounded-full bg-stone-100" />
+              <div className="h-4 w-2/3 animate-pulse rounded-full bg-stone-100" />
+            </div>
+            <div className="space-y-3">
+              <div className="h-4 w-28 animate-pulse rounded-full bg-stone-100" />
+              <div className="h-4 w-36 animate-pulse rounded-full bg-stone-100" />
+            </div>
+            <div className="flex items-start gap-2">
+              <div className="h-9 w-9 animate-pulse rounded-2xl bg-stone-100" />
+              <div className="h-9 w-24 animate-pulse rounded-2xl bg-stone-100" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+
+    <div className="mt-4 flex items-center justify-center gap-2 text-sm text-stone-500">
+      <Loader2 className="h-4 w-4 animate-spin" />
+      正在连接后端并加载首页数据...
+    </div>
+  </main>
+);
+
 export const HomePage = () => {
   const navigate = useNavigate();
   const { choose, confirm, dialog: confirmDialog } = useConfirmDialog();
@@ -66,6 +128,7 @@ export const HomePage = () => {
     selectedLlmProfileId,
     selectedIdentity,
     selectedLlmProfile,
+    loading: selectionLoading,
   } = useSelectionContext();
   const [professors, setProfessors] = useState<ProfessorDashboardItemDTO[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -472,6 +535,13 @@ export const HomePage = () => {
       setBulkScoring(false);
     }
   };
+
+  if (
+    selectionLoading ||
+    (professorsRequestKey !== null && !hasLoadedProfessors && loading)
+  ) {
+    return <HomePageLoadingSkeleton />;
+  }
 
   if (
     canEvaluateProfessorOnboarding &&

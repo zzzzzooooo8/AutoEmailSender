@@ -64,6 +64,19 @@ const selectedLlmProfile: LLMProfileDTO = {
   updated_at: "2026-05-01T00:00:00",
 };
 
+const selectionContextValue = {
+  identities: [selectedIdentity],
+  llmProfiles: [selectedLlmProfile],
+  selectedIdentityId: selectedIdentity.id,
+  selectedLlmProfileId: selectedLlmProfile.id,
+  selectedIdentity,
+  selectedLlmProfile,
+  loading: false,
+  setSelectedIdentityId: vi.fn(),
+  setSelectedLlmProfileId: vi.fn(),
+  refreshSelections: vi.fn(),
+};
+
 const dashboardProfessors: ProfessorDashboardItemDTO[] = [
   {
     id: 11,
@@ -112,18 +125,7 @@ vi.mock("@/context/NotificationContext", () => ({
 }));
 
 vi.mock("@/context/SelectionContext", () => ({
-  useSelectionContext: () => ({
-    identities: [selectedIdentity],
-    llmProfiles: [selectedLlmProfile],
-    selectedIdentityId: selectedIdentity.id,
-    selectedLlmProfileId: selectedLlmProfile.id,
-    selectedIdentity,
-    selectedLlmProfile,
-    loading: false,
-    setSelectedIdentityId: vi.fn(),
-    setSelectedLlmProfileId: vi.fn(),
-    refreshSelections: vi.fn(),
-  }),
+  useSelectionContext: () => selectionContextValue,
 }));
 
 vi.mock("@/features/onboarding/client/getOnboardingState", () => ({
@@ -162,6 +164,40 @@ vi.mock("@/lib/api/workspacesApi", () => ({
 describe("selection controls", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.assign(selectionContextValue, {
+      identities: [selectedIdentity],
+      llmProfiles: [selectedLlmProfile],
+      selectedIdentityId: selectedIdentity.id,
+      selectedLlmProfileId: selectedLlmProfile.id,
+      selectedIdentity,
+      selectedLlmProfile,
+      loading: false,
+    });
+  });
+
+  it("shows a skeleton in the content area while the desktop backend is still loading", () => {
+    Object.assign(selectionContextValue, {
+      identities: [],
+      llmProfiles: [],
+      selectedIdentityId: null,
+      selectedLlmProfileId: null,
+      selectedIdentity: null,
+      selectedLlmProfile: null,
+      loading: true,
+    });
+
+    render(
+      <MemoryRouter>
+        <HomePage />
+      </MemoryRouter>,
+    );
+
+    expect(
+      screen.getByTestId("home-page-loading-skeleton"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("导师看板"),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps the home select-current-results action with the list selection area", async () => {
