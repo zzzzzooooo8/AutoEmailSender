@@ -14,4 +14,17 @@ describe("update helpers", () => {
     expect(source).toContain("createRequire");
     expect(source).not.toContain('import { autoUpdater } from "electron-updater"');
   });
+
+  it("publishes GitHub releases directly instead of drafts", () => {
+    const config = readFileSync(path.resolve("electron-builder.yml"), "utf8");
+
+    expect(config).toContain("releaseType: release");
+  });
+
+  it("loads release notes from the generated markdown file", () => {
+    const config = readFileSync(path.resolve("electron-builder.yml"), "utf8");
+
+    expect(config).toContain("releaseInfo:");
+    expect(config).toContain("releaseNotesFile: release-notes.md");
+  });
 });

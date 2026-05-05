@@ -34,3 +34,6 @@ publish:
   provider: github
   owner: JunieXD
   repo: AutoEmailSender
+  releaseType: release
+releaseInfo:
+  releaseNotesFile: release-notes.md
