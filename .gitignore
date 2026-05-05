@@ -13,6 +13,7 @@ frontend/dist/
 website/.vitepress/dist/
 backend/build/
 backend/dist/
+backend/ms-playwright/
 desktop/dist/
 desktop/release/
 .superpowers

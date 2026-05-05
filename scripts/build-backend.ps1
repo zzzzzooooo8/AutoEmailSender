@@ -7,6 +7,7 @@ $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $BackendDir = Join-Path $RepoRoot "backend"
 $AlembicIni = Join-Path $BackendDir "alembic.ini"
 $AlembicDir = Join-Path $BackendDir "alembic"
+$PlaywrightBrowsersDir = Join-Path $BackendDir "ms-playwright"
 
 Push-Location $BackendDir
 try {
@@ -15,6 +16,9 @@ try {
   }
 
   uv sync --dev
+  $env:PLAYWRIGHT_BROWSERS_PATH = $PlaywrightBrowsersDir
+  uv run python -m playwright install chromium
+  uv run python -m patchright install chromium
   uv run pyinstaller `
     --noconfirm `
     --clean `

@@ -6,6 +6,9 @@ export type BackendPathInput = {
 
 export type BackendEnvInput = {
   baseEnv: NodeJS.ProcessEnv;
+  isPackaged: boolean;
+  resourcesPath: string;
+  repoRoot: string;
   userDataPath: string;
 };
 

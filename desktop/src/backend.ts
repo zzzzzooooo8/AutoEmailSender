@@ -33,10 +33,15 @@ export function getFrontendIndexPath(input: BackendPathInput): string {
 }
 
 export function buildBackendEnv(input: BackendEnvInput): NodeJS.ProcessEnv {
+  const browsersPath = input.isPackaged
+    ? path.join(input.resourcesPath, "ms-playwright")
+    : path.join(input.repoRoot, "backend", "ms-playwright");
+
   return {
     ...input.baseEnv,
     AUTO_EMAIL_SENDER_DATA_DIR: input.userDataPath,
     ENABLE_BACKGROUND_WORKERS: "true",
+    PLAYWRIGHT_BROWSERS_PATH: browsersPath,
   };
 }
 
@@ -70,6 +75,9 @@ export async function startBackend(options: {
     port,
     env: buildBackendEnv({
       baseEnv: process.env,
+      isPackaged: options.isPackaged,
+      resourcesPath: options.resourcesPath,
+      repoRoot: options.repoRoot,
       userDataPath: options.userDataPath,
     }),
     repoRoot: options.repoRoot,

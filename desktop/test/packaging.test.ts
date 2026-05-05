@@ -41,6 +41,13 @@ describe("windows installer packaging", () => {
     expect(config).toContain("to: build/icon.ico");
   });
 
+  it("packages Playwright browsers as runtime resources", () => {
+    const config = readFileSync(path.resolve("electron-builder.yml"), "utf8");
+
+    expect(config).toContain("from: ../backend/ms-playwright");
+    expect(config).toContain("to: ms-playwright");
+  });
+
   it("uses a multi-size PNG-backed Windows icon", () => {
     const entries = readIconEntries(path.resolve("build", "icon.ico"));
 
