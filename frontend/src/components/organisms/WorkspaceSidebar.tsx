@@ -1,4 +1,4 @@
-import { AtSign, GraduationCap, Microscope } from "lucide-react";
+import { AtSign, GraduationCap, Microscope, Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
 import { normalizeProfessorTitleDisplay } from "@/lib/professorTitle";
 import type { WorkspaceThreadDTO } from "@/types";
@@ -81,15 +81,126 @@ const ArchiveCard = ({ thread }: WorkspaceSidebarProps) => {
   );
 };
 
+const AnalysisList = ({
+  title,
+  items,
+  emptyText,
+}: {
+  title: string;
+  items: string[];
+  emptyText: string;
+}) => (
+  <div>
+    <div className="text-xs font-semibold text-stone-500">{title}</div>
+    {items.length > 0 ? (
+      <ul className="mt-2 space-y-1.5">
+        {items.map((item) => (
+          <li key={item} className="flex gap-2 text-sm leading-6 text-stone-700">
+            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary/70" />
+            <span className="min-w-0">{item}</span>
+          </li>
+        ))}
+      </ul>
+    ) : (
+      <div className="mt-2 text-sm leading-6 text-stone-400">{emptyText}</div>
+    )}
+  </div>
+);
+
+const MatchAnalysisCard = ({ thread }: WorkspaceSidebarProps) => {
+  const task = thread.current_task;
+  const hasAnalysis =
+    task.match_score !== null ||
+    Boolean(task.match_reason?.trim()) ||
+    task.fit_points.length > 0 ||
+    task.risk_points.length > 0 ||
+    task.match_keywords.length > 0;
+
+  return (
+    <section className="overflow-hidden rounded-[30px] border border-stone-200 bg-white/95 shadow-[0_20px_40px_-32px_rgba(41,37,36,0.25)]">
+      <div className="flex items-center justify-between gap-3 border-b border-stone-200/80 px-5 py-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary/8 text-primary">
+            <Sparkles className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-stone-400">
+              匹配分析
+            </div>
+            <div className="mt-1 text-sm font-semibold text-stone-900">
+              {hasAnalysis ? "分析结果" : "暂无匹配分析"}
+            </div>
+          </div>
+        </div>
+        {task.match_score !== null ? (
+          <div className="shrink-0 rounded-2xl bg-primary px-3 py-2 text-sm font-semibold text-white">
+            {task.match_score} 分
+          </div>
+        ) : null}
+      </div>
+
+      <div className="space-y-4 px-5 py-4">
+        {hasAnalysis ? (
+          <>
+            <div>
+              <div className="text-xs font-semibold text-stone-500">理由</div>
+              <p className="mt-2 text-sm leading-6 text-stone-700">
+                {task.match_reason?.trim() || "暂无匹配理由。"}
+              </p>
+            </div>
+            <AnalysisList
+              title="契合点"
+              items={task.fit_points}
+              emptyText="暂无契合点。"
+            />
+            <AnalysisList
+              title="风险点"
+              items={task.risk_points}
+              emptyText="暂无风险点。"
+            />
+            <div>
+              <div className="text-xs font-semibold text-stone-500">关键词</div>
+              {task.match_keywords.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {task.match_keywords.map((keyword) => (
+                    <span
+                      key={keyword}
+                      className="rounded-full border border-primary/15 bg-primary/6 px-2.5 py-1 text-xs font-medium text-primary"
+                    >
+                      {keyword}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-2 text-sm leading-6 text-stone-400">
+                  暂无关键词。
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <p className="text-sm leading-6 text-stone-500">
+            点击“分析匹配度”后，这里会显示分数、理由和建议。
+          </p>
+        )}
+      </div>
+    </section>
+  );
+};
+
 export const WorkspaceSidebar = (props: WorkspaceSidebarProps) => (
   <>
     <div className="lg:hidden">
       <ArchiveCard {...props} />
+      <div className="mt-3">
+        <MatchAnalysisCard {...props} />
+      </div>
     </div>
 
     <aside className="hidden lg:block">
-      <div className="sticky top-0">
+      <div className="sticky top-0 space-y-3">
         <ArchiveCard {...props} />
+        <MatchAnalysisCard {...props} />
       </div>
     </aside>
   </>
