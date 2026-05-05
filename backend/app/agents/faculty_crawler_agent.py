@@ -444,6 +444,10 @@ def build_trace_event(event: Any) -> dict[str, object]:
 
 def build_faculty_crawler_model(llm_profile: LLMProfile) -> ChatOpenAI:
     """Build the OpenAI-compatible chat model configured by an LLM profile."""
+    model_kwargs: dict[str, object] = {}
+    if _should_disable_deepseek_thinking(llm_profile):
+        model_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+
     return ChatOpenAI(
         model=llm_profile.model_name,
         api_key=llm_profile.api_key,
@@ -453,7 +457,21 @@ def build_faculty_crawler_model(llm_profile: LLMProfile) -> ChatOpenAI:
             if llm_profile.temperature is not None
             else DEFAULT_LLM_TEMPERATURE
         ),
+        **model_kwargs,
     )
+
+
+def _should_disable_deepseek_thinking(llm_profile: LLMProfile) -> bool:
+    provider = (llm_profile.provider or "").strip().lower()
+    if provider == "deepseek":
+        return True
+
+    model_name = (llm_profile.model_name or "").strip().lower()
+    if model_name.startswith("deepseek"):
+        return True
+
+    base_url = resolve_base_url(llm_profile.api_base_url).lower()
+    return "deepseek" in base_url
 
 
 def create_faculty_crawler_agent(ctx: CrawlToolContext, llm_profile: LLMProfile):

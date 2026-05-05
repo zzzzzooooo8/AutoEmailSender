@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.agents.faculty_crawler_agent import (
     FACULTY_CRAWLER_SYSTEM_PROMPT,
     SaveHistoryCompactionMiddleware,
+    build_faculty_crawler_model,
     compact_save_tool_history,
     _format_save_batch_result_for_model,
     _validate_professor_candidate_batch,
 )
+from app.models import LLMProfile
 
 
 class FacultyCrawlerAgentSaveResultTests(unittest.TestCase):
@@ -268,6 +271,37 @@ class FacultyCrawlerAgentMiddlewareTests(unittest.TestCase):
         assert isinstance(result, list)
         self.assertEqual(len(result), 2)
         self.assertIn("1", result[1].content)
+
+
+class FacultyCrawlerAgentModelTests(unittest.TestCase):
+    def test_deepseek_crawler_model_disables_thinking(self) -> None:
+        profile = LLMProfile(
+            name="DeepSeek",
+            provider="deepseek",
+            api_base_url="https://api.deepseek.com/v1",
+            api_key="sk-test",
+            model_name="deepseek-chat",
+        )
+
+        with patch("app.agents.faculty_crawler_agent.ChatOpenAI") as chat_openai:
+            build_faculty_crawler_model(profile)
+
+        kwargs = chat_openai.call_args.kwargs
+        self.assertEqual(kwargs["extra_body"], {"thinking": {"type": "disabled"}})
+
+    def test_openai_crawler_model_does_not_send_deepseek_extra_body(self) -> None:
+        profile = LLMProfile(
+            name="OpenAI",
+            provider="openai",
+            api_base_url="https://api.openai.com/v1",
+            api_key="sk-test",
+            model_name="gpt-4o-mini",
+        )
+
+        with patch("app.agents.faculty_crawler_agent.ChatOpenAI") as chat_openai:
+            build_faculty_crawler_model(profile)
+
+        self.assertNotIn("extra_body", chat_openai.call_args.kwargs)
 
 
 if __name__ == "__main__":
