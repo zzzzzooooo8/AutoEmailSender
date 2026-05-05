@@ -129,6 +129,7 @@ describe("ProfessorsPage crawler job entry", () => {
         }),
       ]),
     );
+    expect(await screen.findByText("任务中心会继续后台抓取，请到任务中心的教师抓取页签查看进度。")).toBeInTheDocument();
   });
 
   it("removes an added crawler url row", async () => {

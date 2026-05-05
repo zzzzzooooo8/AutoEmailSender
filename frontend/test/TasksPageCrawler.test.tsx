@@ -18,6 +18,8 @@ import {
 
 const mockedUseSelectionContext = vi.hoisted(() => vi.fn());
 const confirm = vi.hoisted(() => vi.fn());
+const notifyError = vi.hoisted(() => vi.fn());
+const notifySuccess = vi.hoisted(() => vi.fn());
 
 vi.mock("@/context/SelectionContext", () => ({
   useSelectionContext: mockedUseSelectionContext,
@@ -25,8 +27,8 @@ vi.mock("@/context/SelectionContext", () => ({
 
 vi.mock("@/context/NotificationContext", () => ({
   useNotification: () => ({
-    notifyError: vi.fn(),
-    notifySuccess: vi.fn(),
+    notifyError,
+    notifySuccess,
   }),
 }));
 
@@ -191,6 +193,26 @@ describe("TasksPage crawler jobs tab", () => {
     expect(screen.getByText("候选导师 34")).toBeInTheDocument();
     expect(screen.getByText("正在分析教师列表")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "查看详情" })).toBeEnabled();
+  });
+
+  it("shows crawler jobs even when no sender identity is configured", async () => {
+    mockedUseSelectionContext.mockReturnValue({
+      selectedIdentityId: null,
+      selectedLlmProfileId: 2,
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(listCrawlJobs).toHaveBeenCalled();
+    });
+
+    expect(screen.getByRole("heading", { name: "任务中心" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "教师抓取" })).toHaveTextContent("1");
+    fireEvent.click(screen.getByRole("button", { name: "教师抓取" }));
+    expect(await screen.findByText("示例大学 / 计算机学院")).toBeInTheDocument();
+    expect(listBatchTasks).not.toHaveBeenCalled();
+    expect(listMatchAnalysisJobs).not.toHaveBeenCalled();
   });
 
   it("opens and closes the crawl job log dialog", async () => {

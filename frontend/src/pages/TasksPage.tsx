@@ -512,7 +512,11 @@ export const TasksPage = () => {
   const { selectedIdentityId, selectedLlmProfileId } = useSelectionContext();
   const { notifyError, notifySuccess } = useNotification();
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
-  const [activeTab, setActiveTab] = useState<TasksTab>("batch");
+  const hasTaskSelection =
+    selectedIdentityId !== null && selectedLlmProfileId !== null;
+  const [activeTab, setActiveTab] = useState<TasksTab>(() =>
+    hasTaskSelection ? "batch" : "crawl",
+  );
   const [tasks, setTasks] = useState<BatchTaskCardDTO[]>([]);
   const [selectedBatchTask, setSelectedBatchTask] =
     useState<BatchTaskCardDTO | null>(null);
@@ -713,6 +717,13 @@ export const TasksPage = () => {
       ),
     [reviewableCrawlCandidateIds, selectedReviewableCrawlCandidateIds],
   );
+
+  useEffect(() => {
+    if (hasTaskSelection || activeTab === "crawl") {
+      return;
+    }
+    setActiveTab("crawl");
+  }, [activeTab, hasTaskSelection]);
 
   const loadTasks = useCallback(async () => {
     if (!tasksRequestKey || !selectedIdentityId || !selectedLlmProfileId) {
@@ -1543,22 +1554,6 @@ export const TasksPage = () => {
     lastMatchJobDetailsLoadErrorRef.current = null;
   };
 
-  if (!selectedIdentityId || !selectedLlmProfileId) {
-    return (
-      <main className="mx-auto max-w-4xl px-6 py-10">
-        <div className="rounded-3xl border border-dashed border-stone-300 bg-[#fcfbf8] p-10 text-center">
-          <h1 className="text-2xl font-semibold text-stone-900">
-            选择身份和模型
-          </h1>
-          <p className="mt-3 text-sm text-stone-600">
-            任务中心使用顶部选择的身份和模型。
-          </p>
-        </div>
-        {confirmDialog}
-      </main>
-    );
-  }
-
   return (
     <main className="mx-auto max-w-7xl px-6 py-8">
       <div className="rounded-3xl border border-stone-200 bg-[#fcfbf8] p-6 shadow-sm">
@@ -1567,6 +1562,12 @@ export const TasksPage = () => {
             <h1 className="text-3xl font-semibold text-stone-900">任务中心</h1>
           </div>
         </div>
+
+        {!hasTaskSelection ? (
+          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            还没有选择身份和模型，批量邮件与匹配分析会在配置后显示；教师抓取任务可继续查看。
+          </div>
+        ) : null}
 
         <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-2xl border border-stone-200 bg-white px-4 py-3">
@@ -1612,11 +1613,12 @@ export const TasksPage = () => {
         <button
           type="button"
           aria-label="批量邮件"
+          disabled={!hasTaskSelection}
           onClick={() => setActiveTab("batch")}
           className={
             activeTab === "batch"
               ? "inline-flex min-h-10 items-center gap-2 rounded-xl bg-primary px-5 text-sm font-medium text-white"
-              : "inline-flex min-h-10 items-center gap-2 rounded-xl px-5 text-sm font-medium text-stone-600 hover:bg-stone-50"
+              : "inline-flex min-h-10 items-center gap-2 rounded-xl px-5 text-sm font-medium text-stone-600 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
           }
         >
           <Mail className="h-4 w-4" />
@@ -1652,11 +1654,12 @@ export const TasksPage = () => {
         <button
           type="button"
           aria-label="匹配分析"
+          disabled={!hasTaskSelection}
           onClick={() => setActiveTab("match")}
           className={
             activeTab === "match"
               ? "inline-flex min-h-10 items-center gap-2 rounded-xl bg-primary px-5 text-sm font-medium text-white"
-              : "inline-flex min-h-10 items-center gap-2 rounded-xl px-5 text-sm font-medium text-stone-600 hover:bg-stone-50"
+              : "inline-flex min-h-10 items-center gap-2 rounded-xl px-5 text-sm font-medium text-stone-600 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
           }
         >
           <Sparkles className="h-4 w-4" />

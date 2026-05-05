@@ -714,7 +714,10 @@ export const ProfessorsPage = () => {
       });
       setCrawlerModalOpen(false);
       setCrawlerFormState(emptyCrawlerJobForm());
-      notifySuccess("抓取任务已创建");
+      notifySuccess(
+        "抓取任务已创建",
+        "任务中心会继续后台抓取，请到任务中心的教师抓取页签查看进度。",
+      );
     } catch (crawlerError) {
       safeRecordUserAction({
         eventName: "professors.crawl_job_create_failed",
