@@ -1,4 +1,4 @@
-import type { DesktopUpdateStatus } from "@/types/desktop";
+import type { DesktopUpdateDownloadMode, DesktopUpdateStatus } from "@/types/desktop";
 
 export const isDesktopApp = () => Boolean(window.autoEmailSender);
 
@@ -12,14 +12,23 @@ export async function checkForDesktopUpdate() {
   return api.checkForUpdate();
 }
 
-export async function downloadDesktopUpdate() {
+export async function downloadDesktopUpdate(mode: DesktopUpdateDownloadMode = "differential") {
   const api = getDesktopApi();
-  return api.downloadUpdate();
+  return api.downloadUpdate({ mode });
+}
+
+export async function switchDesktopUpdateToFullDownload() {
+  const api = getDesktopApi();
+  return api.switchToFullDownload();
+}
+
+export async function installDownloadedDesktopUpdate(): Promise<void> {
+  const api = getDesktopApi();
+  await api.quitAndInstall();
 }
 
 export async function quitAndInstallDesktopUpdate(): Promise<void> {
-  const api = getDesktopApi();
-  await api.quitAndInstall();
+  await installDownloadedDesktopUpdate();
 }
 
 export function onDesktopUpdateStatus(callback: (status: DesktopUpdateStatus) => void) {

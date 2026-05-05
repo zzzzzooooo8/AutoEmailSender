@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { useNotification } from "@/context/NotificationContext";
-import { useConfirmDialog } from "@/lib/useConfirmDialog";
 import {
   checkForDesktopUpdate,
   downloadDesktopUpdate,
   getDesktopAppVersion,
+  installDownloadedDesktopUpdate,
   isDesktopApp,
   onDesktopUpdateStatus,
-  quitAndInstallDesktopUpdate,
+  switchDesktopUpdateToFullDownload,
 } from "@/lib/desktopApi";
-import type { DesktopUpdateStatus } from "@/types/desktop";
+import type { DesktopUpdateDownloadMode, DesktopUpdateStatus } from "@/types/desktop";
 
 const PENDING_UPDATE_KEY = "desktop_pending_update_version";
 
@@ -37,64 +37,18 @@ export function DesktopUpdateButton() {
 
 function DesktopUpdateButtonInner() {
   const [version, setVersion] = useState<string>("加载中");
+  const [status, setStatus] = useState<DesktopUpdateStatus | null>(null);
   const [pendingVersion, setPendingVersion] = useState<string | null>(() =>
     typeof window === "undefined" ? null : readPendingVersion(),
   );
   const [checking, setChecking] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const manualCheckRef = useRef(false);
-  const promptingVersionRef = useRef<string | null>(null);
   const { notifyError, notifySuccess } = useNotification();
-  const { confirm, dialog } = useConfirmDialog();
-
-  const offerUpdate = useCallback(
-    async (nextVersion: string) => {
-      if (promptingVersionRef.current === nextVersion) {
-        return;
-      }
-
-      promptingVersionRef.current = nextVersion;
-      try {
-        const shouldUpdate = await confirm({
-          title: "发现新版本",
-          description: `当前版本 v${version}，发现新版本 v${nextVersion}。是否立即下载并安装？`,
-          confirmLabel: "下载并安装",
-          cancelLabel: "暂不更新",
-          tone: "neutral",
-        });
-
-        if (!shouldUpdate) {
-          return;
-        }
-
-        setDownloading(true);
-        try {
-          const downloadStatus = await downloadDesktopUpdate();
-          if (downloadStatus.state === "downloaded") {
-            setPendingVersion(downloadStatus.nextVersion);
-            writePendingVersion(downloadStatus.nextVersion);
-            await quitAndInstallDesktopUpdate();
-            return;
-          }
-
-          if (downloadStatus.state === "error") {
-            notifyError("更新下载失败", downloadStatus.message);
-          }
-        } catch (downloadError) {
-          const message = downloadError instanceof Error ? downloadError.message : "下载更新失败";
-          notifyError("更新下载失败", message);
-        } finally {
-          setDownloading(false);
-        }
-      } finally {
-        promptingVersionRef.current = null;
-      }
-    },
-    [confirm, notifyError, version],
-  );
 
   const handleStatus = useCallback(
     (status: DesktopUpdateStatus) => {
+      setStatus(status);
+
       if (status.state === "checking") {
         setChecking(true);
         return;
@@ -104,7 +58,6 @@ function DesktopUpdateButtonInner() {
         setChecking(false);
         setPendingVersion(status.nextVersion);
         writePendingVersion(status.nextVersion);
-        void offerUpdate(status.nextVersion);
         return;
       }
 
@@ -120,17 +73,23 @@ function DesktopUpdateButtonInner() {
         return;
       }
 
-      if (status.state === "downloading") {
+      if (status.state === "downloading" || status.state === "slow_download_offered") {
         setChecking(false);
         setDownloading(true);
         return;
       }
 
-      if (status.state === "downloaded") {
+      if (status.state === "downloaded_pending_install") {
         setChecking(false);
         setDownloading(false);
         setPendingVersion(status.nextVersion);
         writePendingVersion(status.nextVersion);
+        return;
+      }
+
+      if (status.state === "installing") {
+        setChecking(false);
+        setDownloading(false);
         return;
       }
 
@@ -140,7 +99,7 @@ function DesktopUpdateButtonInner() {
         notifyError("检查更新失败", status.message);
       }
     },
-    [notifyError, notifySuccess, offerUpdate, pendingVersion, version],
+    [notifyError, notifySuccess, pendingVersion, version],
   );
 
   useEffect(() => {
@@ -167,19 +126,7 @@ function DesktopUpdateButtonInner() {
         }
       });
 
-    const unsubscribe = onDesktopUpdateStatus((status) => {
-      if (manualCheckRef.current) {
-        if (status.state === "checking") {
-          setChecking(true);
-        }
-        if (status.state === "downloading") {
-          setChecking(false);
-          setDownloading(true);
-        }
-        return;
-      }
-      handleStatus(status);
-    });
+    const unsubscribe = onDesktopUpdateStatus(handleStatus);
 
     return () => {
       cancelled = true;
@@ -192,59 +139,219 @@ function DesktopUpdateButtonInner() {
     [pendingVersion, version],
   );
 
-  const handleCheckUpdate = useCallback(async () => {
+  const startDownload = useCallback(
+    async (mode: DesktopUpdateDownloadMode) => {
+      if (downloading) {
+        return;
+      }
+
+      setDownloading(true);
+      try {
+        const downloadStatus = await downloadDesktopUpdate(mode);
+        handleStatus(downloadStatus);
+      } catch (downloadError) {
+        const message = downloadError instanceof Error ? downloadError.message : "下载更新失败";
+        notifyError("更新下载失败", message);
+      } finally {
+        setDownloading(false);
+      }
+    },
+    [downloading, handleStatus, notifyError],
+  );
+
+  const switchToFullDownload = useCallback(async () => {
+    setDownloading(true);
+    try {
+      const downloadStatus = await switchDesktopUpdateToFullDownload();
+      handleStatus(downloadStatus);
+    } catch (downloadError) {
+      const message = downloadError instanceof Error ? downloadError.message : "切换全量下载失败";
+      notifyError("切换全量下载失败", message);
+    } finally {
+      setDownloading(false);
+    }
+  }, [handleStatus, notifyError]);
+
+  const installUpdate = useCallback(async () => {
+    try {
+      await installDownloadedDesktopUpdate();
+    } catch (installError) {
+      const message = installError instanceof Error ? installError.message : "启动安装失败";
+      notifyError("启动安装失败", message);
+    }
+  }, [notifyError]);
+
+  const handleCheckUpdateWithInstall = useCallback(async () => {
     if (checking || downloading) {
       return;
     }
 
-    manualCheckRef.current = true;
     setChecking(true);
 
     try {
       const status = await checkForDesktopUpdate();
       handleStatus(status);
+      if (status.state === "downloaded_pending_install") {
+        await installUpdate();
+      }
     } catch (checkError) {
       const message = checkError instanceof Error ? checkError.message : "检查更新失败";
       notifyError("检查更新失败", message);
     } finally {
-      manualCheckRef.current = false;
       setChecking(false);
     }
-  }, [checking, downloading, handleStatus, notifyError]);
+  }, [checking, downloading, handleStatus, installUpdate, notifyError]);
 
   const isBusy = checking || downloading;
 
   return (
     <>
-      {dialog}
-      <button
-        type="button"
-        disabled={isBusy}
-        onClick={() => void handleCheckUpdate()}
-        className="inline-flex min-h-[2.8rem] min-w-[11rem] items-center gap-2 rounded-2xl border border-stone-200/90 bg-white/92 px-3 py-2 text-left text-stone-700 shadow-sm shadow-stone-200/45 backdrop-blur-sm transition hover:border-stone-300 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/15 disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/8 text-primary">
-          {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-        </span>
-        <span className="flex min-w-0 flex-1 flex-col items-start leading-none">
-          <span className="text-[11px] font-medium tracking-[0.03em] text-stone-500">
-            v{version}
+      <span className="inline-flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={isBusy}
+          onClick={() => void handleCheckUpdateWithInstall()}
+          className="inline-flex min-h-[2.8rem] min-w-[11rem] items-center gap-2 rounded-2xl border border-stone-200/90 bg-white/92 px-3 py-2 text-left text-stone-700 shadow-sm shadow-stone-200/45 backdrop-blur-sm transition hover:border-stone-300 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/15 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/8 text-primary">
+            {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           </span>
-          <span className="mt-1 text-[13px] font-medium text-stone-900">
-            检查更新
+          <span className="flex min-w-0 flex-1 flex-col items-start leading-none">
+            <span className="text-[11px] font-medium tracking-[0.03em] text-stone-500">
+              v{version}
+            </span>
+            <span className="mt-1 text-[13px] font-medium text-stone-900">
+              检查更新
+            </span>
           </span>
-        </span>
-        {hasPendingUpdate ? (
-          <span className="shrink-0 rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-semibold tracking-[0.08em] text-white">
-            NEW
-          </span>
-        ) : null}
-        {!hasPendingUpdate && isBusy ? (
-          <span className="shrink-0 rounded-full border border-stone-200 bg-stone-50 px-2 py-0.5 text-[10px] font-medium text-stone-500">
-            ...
-          </span>
-        ) : null}
-      </button>
+          {hasPendingUpdate ? (
+            <span className="shrink-0 rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-semibold tracking-[0.08em] text-white">
+              NEW
+            </span>
+          ) : null}
+          {!hasPendingUpdate && isBusy ? (
+            <span className="shrink-0 rounded-full border border-stone-200 bg-stone-50 px-2 py-0.5 text-[10px] font-medium text-stone-500">
+              ...
+            </span>
+          ) : null}
+        </button>
+        <DesktopUpdateStatusBar
+          status={status}
+          onStartDownload={startDownload}
+          onSwitchToFullDownload={switchToFullDownload}
+          onInstall={installUpdate}
+        />
+      </span>
     </>
   );
+}
+
+function DesktopUpdateStatusBar({
+  status,
+  onStartDownload,
+  onSwitchToFullDownload,
+  onInstall,
+}: {
+  status: DesktopUpdateStatus | null;
+  onStartDownload: (mode: DesktopUpdateDownloadMode) => void;
+  onSwitchToFullDownload: () => void;
+  onInstall: () => void;
+}) {
+  if (status === null) {
+    return null;
+  }
+
+  if (status.state === "available") {
+    return (
+      <span className="inline-flex min-h-[2.8rem] items-center gap-2 rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs text-stone-600 shadow-sm">
+        <span>预计最多 {formatBytes(status.fullDownloadBytes ?? 0)}</span>
+        <button
+          type="button"
+          onClick={() => onStartDownload("differential")}
+          className="rounded-lg border border-stone-200 px-2 py-1 text-stone-700 transition hover:border-primary/40 hover:text-primary"
+        >
+          增量下载
+        </button>
+        <button
+          type="button"
+          onClick={() => onStartDownload("full")}
+          className="rounded-lg bg-primary px-2 py-1 text-white transition hover:bg-primary/90"
+        >
+          全量下载
+        </button>
+      </span>
+    );
+  }
+
+  if (status.state === "downloading" || status.state === "slow_download_offered") {
+    return (
+      <span
+        className="inline-flex min-w-[18rem] flex-col rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs text-stone-600 shadow-sm"
+        aria-label="更新下载进度"
+      >
+        <span className="h-1.5 overflow-hidden rounded-full bg-stone-100">
+          <span className="block h-full bg-primary" style={{ width: `${status.percent}%` }} />
+        </span>
+        <span className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+          <span>{formatBytes(status.transferredBytes)} 已下载</span>
+          <span>{formatBytes(status.remainingBytes)} 剩余</span>
+          <span>{formatBytes(status.bytesPerSecond)}/s</span>
+          <span>{formatEta(status.remainingSeconds)}</span>
+        </span>
+        {status.state === "slow_download_offered" ? (
+          <span className="mt-2 flex flex-wrap items-center gap-2">
+            <span>
+              全量约 {formatBytes(status.fullDownloadBytes ?? status.totalBytes)}，已消耗{" "}
+              {formatBytes(status.transferredBytes)}
+            </span>
+            <button
+              type="button"
+              onClick={onSwitchToFullDownload}
+              className="rounded-lg bg-primary px-2 py-1 text-white transition hover:bg-primary/90"
+            >
+              切换全量下载
+            </button>
+          </span>
+        ) : null}
+      </span>
+    );
+  }
+
+  if (status.state === "downloaded_pending_install") {
+    return (
+      <span className="inline-flex min-h-[2.8rem] items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+        <span>v{status.nextVersion} 已下载，可稍后安装；再次检查更新会直接安装。</span>
+        <button
+          type="button"
+          onClick={onInstall}
+          className="rounded-lg bg-emerald-700 px-2 py-1 text-white transition hover:bg-emerald-800"
+        >
+          立即重启安装
+        </button>
+      </span>
+    );
+  }
+
+  return null;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  const kb = bytes / 1024;
+  if (kb < 1024) {
+    return `${kb.toFixed(1)} KB`;
+  }
+  return `${(kb / 1024).toFixed(1)} MB`;
+}
+
+function formatEta(seconds: number | null): string {
+  if (seconds === null) {
+    return "预计时间未知";
+  }
+  if (seconds < 60) {
+    return `预计 ${seconds} 秒`;
+  }
+  return `预计 ${Math.ceil(seconds / 60)} 分钟`;
 }
