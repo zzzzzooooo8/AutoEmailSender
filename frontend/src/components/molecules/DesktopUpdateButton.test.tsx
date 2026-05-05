@@ -65,7 +65,9 @@ describe("DesktopUpdateButton", () => {
 
     expect(await screen.findByRole("button", { name: /增量下载/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /全量下载/ })).toBeInTheDocument();
-    expect(screen.getByText(/预计最多 200.0 MB/)).toBeInTheDocument();
+    expect(screen.getByText(/增量下载：开始后显示实际大小/)).toBeInTheDocument();
+    expect(screen.getByText(/全量约 200.0 MB/)).toBeInTheDocument();
+    expect(screen.getByText(/v0\.1\.1/)).toBeInTheDocument();
     expect(confirm).not.toHaveBeenCalled();
     expect(await screen.findByText("NEW")).toBeInTheDocument();
     expect(window.localStorage.getItem("desktop_pending_update_version")).toBe("0.1.1");
@@ -94,8 +96,9 @@ describe("DesktopUpdateButton", () => {
       mode: "differential",
     });
 
-    expect(await screen.findByText(/10.0 MB 已下载/)).toBeInTheDocument();
-    expect(screen.getByText(/10.0 MB 剩余/)).toBeInTheDocument();
+    expect(await screen.findByText(/增量包：总计 20.0 MB/)).toBeInTheDocument();
+    expect(screen.getByText(/增量包：已下载 10.0 MB/)).toBeInTheDocument();
+    expect(screen.getByText(/增量包：剩余 10.0 MB/)).toBeInTheDocument();
     expect(screen.getByText(/512.0 KB\/s/)).toBeInTheDocument();
     expect(screen.getByText(/预计 20 秒/)).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

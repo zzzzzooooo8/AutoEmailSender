@@ -281,7 +281,9 @@ function DesktopUpdateStatusBar({
   if (status.state === "available") {
     return (
       <span className="inline-flex min-h-[2.8rem] items-center gap-2 rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs text-stone-600 shadow-sm">
-        <span>预计最多 {formatBytes(status.fullDownloadBytes ?? 0)}</span>
+        <span className="font-medium text-stone-800">发现 v{status.nextVersion}</span>
+        <span>增量下载：开始后显示实际大小</span>
+        <span>全量约 {formatBytes(status.fullDownloadBytes ?? 0)}</span>
         <button
           type="button"
           onClick={() => onStartDownload("differential")}
@@ -301,17 +303,22 @@ function DesktopUpdateStatusBar({
   }
 
   if (status.state === "downloading" || status.state === "slow_download_offered") {
+    const modeLabel = status.mode === "full" ? "全量包" : "增量包";
+
     return (
       <span
         className="inline-flex min-w-[18rem] flex-col rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs text-stone-600 shadow-sm"
         aria-label="更新下载进度"
       >
+        <span className="font-medium text-stone-800">
+          {modeLabel}：总计 {formatBytes(status.totalBytes)}
+        </span>
         <span className="h-1.5 overflow-hidden rounded-full bg-stone-100">
           <span className="block h-full bg-primary" style={{ width: `${status.percent}%` }} />
         </span>
         <span className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
-          <span>{formatBytes(status.transferredBytes)} 已下载</span>
-          <span>{formatBytes(status.remainingBytes)} 剩余</span>
+          <span>{modeLabel}：已下载 {formatBytes(status.transferredBytes)}</span>
+          <span>{modeLabel}：剩余 {formatBytes(status.remainingBytes)}</span>
           <span>{formatBytes(status.bytesPerSecond)}/s</span>
           <span>{formatEta(status.remainingSeconds)}</span>
         </span>
