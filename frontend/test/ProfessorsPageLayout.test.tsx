@@ -215,6 +215,33 @@ describe("ProfessorsPage layout", () => {
     expect(record.queryByRole("button", { name: "移入回收站" })).not.toBeInTheDocument();
   });
 
+  it("guides empty professor lists with three intake cards", async () => {
+    listProfessorsForManagement.mockResolvedValue([]);
+    renderPage();
+
+    await waitFor(() => {
+      expect(listProfessorsForManagement).toHaveBeenCalledWith("active");
+    });
+
+    expect(screen.getByRole("heading", { name: "暂无导师" })).toBeInTheDocument();
+    expect(
+      screen.getByText("选择一种方式建立导师库，后续可继续筛选、编辑和归档。"),
+    ).toBeInTheDocument();
+
+    const emptyState = screen.getByTestId("professor-empty-intake");
+    expect(emptyState).toHaveClass("grid", "lg:grid-cols-3");
+    [
+      ["单个新增", "手动创建一条导师档案，适合临时补充或精修记录。", "新增导师"],
+      ["模板导入", "下载模板后批量导入导师信息，适合已有名单或表格。", "模板导入"],
+      ["智能抓取", "从学院页面自动发现导师，抓取结果进入候选审核。", "智能抓取"],
+    ].forEach(([title, description, buttonName]) => {
+      const card = within(emptyState).getByTestId(`professor-empty-intake-${title}`);
+      expect(within(card).getByRole("heading", { name: title })).toBeInTheDocument();
+      expect(within(card).getByText(description)).toBeInTheDocument();
+      expect(within(card).getByRole("button", { name: buttonName })).toBeInTheDocument();
+    });
+  });
+
   it("filters professors by title and school pair from the management toolbar", async () => {
     listProfessorsForManagement.mockResolvedValue([professor, anotherProfessor]);
     renderPage();

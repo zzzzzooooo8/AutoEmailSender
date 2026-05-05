@@ -758,77 +758,79 @@ export const ProfessorsPage = () => {
             </div>
           </div>
 
-          <section
-            data-testid="professor-intake-panel"
-            aria-labelledby="professor-intake-title"
-            className="rounded-[30px] border border-stone-200 bg-white/86 p-3 shadow-sm"
-          >
-            <div className="mb-3 mt-1 pl-1 flex flex-wrap items-end justify-between gap-3">
-              <div>
-                <h2
-                  id="professor-intake-title"
-                  className="text-lg font-semibold text-stone-900"
-                >
-                  导师录入方式
-                </h2>
+          {professors.length > 0 ? (
+            <section
+              data-testid="professor-intake-panel"
+              aria-labelledby="professor-intake-title"
+              className="rounded-[30px] border border-stone-200 bg-white/86 p-3 shadow-sm"
+            >
+              <div className="mb-3 mt-1 pl-1 flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <h2
+                    id="professor-intake-title"
+                    className="text-lg font-semibold text-stone-900"
+                  >
+                    导师录入方式
+                  </h2>
+                </div>
               </div>
-            </div>
-            <div className="grid gap-3 lg:grid-cols-3">
-              <IntakeActionCard
-                label="智能抓取"
-                icon={<Bot className="h-5 w-5" />}
-                tone="primary"
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    safeRecordUserAction({
-                      eventName: "professors.crawler_dialog_opened",
-                    });
-                    setCrawlerModalOpen(true);
-                  }}
-                  className="ui-btn-primary h-10 rounded-2xl px-4"
+              <div className="grid gap-3 lg:grid-cols-3">
+                <IntakeActionCard
+                  label="智能抓取"
+                  icon={<Bot className="h-5 w-5" />}
+                  tone="primary"
                 >
-                  <Bot className="h-4 w-4" />
-                  智能抓取
-                </button>
-              </IntakeActionCard>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      safeRecordUserAction({
+                        eventName: "professors.crawler_dialog_opened",
+                      });
+                      setCrawlerModalOpen(true);
+                    }}
+                    className="ui-btn-primary h-10 rounded-2xl px-4"
+                  >
+                    <Bot className="h-4 w-4" />
+                    智能抓取
+                  </button>
+                </IntakeActionCard>
 
-              <IntakeActionCard
-                label="模板批量新增"
-                icon={<FileSpreadsheet className="h-5 w-5" />}
-                tone="amber"
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    setImportFile(null);
-                    setImportResult(null);
-                    setImportModalOpen(true);
-                  }}
-                  className="ui-btn-secondary h-10 rounded-2xl"
+                <IntakeActionCard
+                  label="模板批量新增"
+                  icon={<FileSpreadsheet className="h-5 w-5" />}
+                  tone="amber"
                 >
-                  <Upload className="h-4 w-4" />
-                  模板导入
-                </button>
-              </IntakeActionCard>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setImportFile(null);
+                      setImportResult(null);
+                      setImportModalOpen(true);
+                    }}
+                    className="ui-btn-secondary h-10 rounded-2xl"
+                  >
+                    <Upload className="h-4 w-4" />
+                    模板导入
+                  </button>
+                </IntakeActionCard>
 
-              <IntakeActionCard
-                label="单个新增"
-                icon={<Plus className="h-5 w-5" />}
-                tone="stone"
-              >
-                <button
-                  type="button"
-                  onClick={openCreateModal}
-                  className="ui-btn-secondary h-10 rounded-2xl"
+                <IntakeActionCard
+                  label="单个新增"
+                  icon={<Plus className="h-5 w-5" />}
+                  tone="stone"
                 >
-                  <Plus className="h-4 w-4" />
-                  新增导师
-                </button>
-              </IntakeActionCard>
-            </div>
-          </section>
+                  <button
+                    type="button"
+                    onClick={openCreateModal}
+                    className="ui-btn-secondary h-10 rounded-2xl"
+                  >
+                    <Plus className="h-4 w-4" />
+                    新增导师
+                  </button>
+                </IntakeActionCard>
+              </div>
+            </section>
+          ) : null}
 
           <div className="flex flex-wrap items-center gap-2 rounded-3xl border border-stone-200/80 bg-white/92 p-1.5 shadow-sm">
             {(Object.keys(archiveFilterLabels) as ArchiveFilter[]).map(
@@ -1055,29 +1057,93 @@ export const ProfessorsPage = () => {
               暂无导师
             </h2>
             <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-stone-500">
-              可通过模板导入批量新增，也可手动新增。
+              选择一种方式建立导师库，后续可继续筛选、编辑和归档。
             </p>
-            <div className="mt-6 flex flex-wrap justify-center gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setImportFile(null);
-                  setImportResult(null);
-                  setImportModalOpen(true);
-                }}
-                className="ui-btn-secondary"
+            <div
+              data-testid="professor-empty-intake"
+              className="mx-auto mt-6 grid max-w-4xl gap-3 text-left lg:grid-cols-3"
+            >
+              <article
+                data-testid="professor-empty-intake-单个新增"
+                className="flex min-h-full flex-col justify-between rounded-[28px] border border-stone-200 bg-white p-4 shadow-sm"
               >
-                <Upload className="h-4 w-4" />
-                模板导入
-              </button>
-              <button
-                type="button"
-                onClick={openCreateModal}
-                className="ui-btn-primary"
+                <div>
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-stone-200 bg-stone-100 text-stone-700">
+                    <Plus className="h-5 w-5" />
+                  </div>
+                  <h3 className="mt-3 text-base font-semibold text-stone-900">
+                    单个新增
+                  </h3>
+                  <p className="mt-2 text-sm leading-6 text-stone-500">
+                    手动创建一条导师档案，适合临时补充或精修记录。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={openCreateModal}
+                  className="ui-btn-primary mt-4 w-full justify-center"
+                >
+                  <Plus className="h-4 w-4" />
+                  新增导师
+                </button>
+              </article>
+              <article
+                data-testid="professor-empty-intake-模板导入"
+                className="flex min-h-full flex-col justify-between rounded-[28px] border border-amber-200 bg-[linear-gradient(135deg,#fffbeb,#ffffff)] p-4 shadow-sm"
               >
-                <Plus className="h-4 w-4" />
-                新增导师
-              </button>
+                <div>
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-amber-200 bg-amber-100 text-amber-700">
+                    <FileSpreadsheet className="h-5 w-5" />
+                  </div>
+                  <h3 className="mt-3 text-base font-semibold text-stone-900">
+                    模板导入
+                  </h3>
+                  <p className="mt-2 text-sm leading-6 text-stone-500">
+                    下载模板后批量导入导师信息，适合已有名单或表格。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImportFile(null);
+                    setImportResult(null);
+                    setImportModalOpen(true);
+                  }}
+                  className="ui-btn-secondary mt-4 w-full justify-center"
+                >
+                  <Upload className="h-4 w-4" />
+                  模板导入
+                </button>
+              </article>
+              <article
+                data-testid="professor-empty-intake-智能抓取"
+                className="flex min-h-full flex-col justify-between rounded-[28px] border border-primary/25 bg-[linear-gradient(135deg,#fff7ed,#fff1f2)] p-4 shadow-sm"
+              >
+                <div>
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-primary/15 bg-primary text-white shadow-sm shadow-primary/20">
+                    <Bot className="h-5 w-5" />
+                  </div>
+                  <h3 className="mt-3 text-base font-semibold text-stone-900">
+                    智能抓取
+                  </h3>
+                  <p className="mt-2 text-sm leading-6 text-stone-500">
+                    从学院页面自动发现导师，抓取结果进入候选审核。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    safeRecordUserAction({
+                      eventName: "professors.crawler_dialog_opened",
+                    });
+                    setCrawlerModalOpen(true);
+                  }}
+                  className="ui-btn-primary mt-4 w-full justify-center"
+                >
+                  <Bot className="h-4 w-4" />
+                  智能抓取
+                </button>
+              </article>
             </div>
           </div>
         ) : (
