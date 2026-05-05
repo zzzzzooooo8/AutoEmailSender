@@ -1,20 +1,65 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, Menu, Tray, dialog, ipcMain } from "electron";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { getFrontendIndexPath, startBackend } from "./backend.js";
 import { checkForUpdatesOnStartup, registerUpdateIpc } from "./updates.js";
+import { shouldHideWindowOnClose } from "./windowLifecycle.js";
 import { getWindowIconPath } from "./windowIcon.js";
 import type { BackendController, BackendExit, BackendStatus } from "./types.js";
 
 let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
 let backend: BackendController | null = null;
 let restartingBackend = false;
+let isQuitting = false;
 let currentBackendStatus: BackendStatus = { state: "starting" };
 
 const repoRoot = path.resolve(app.getAppPath(), "..");
 
+function showMainWindow(): void {
+  if (mainWindow === null) {
+    void createWindow();
+    return;
+  }
+
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function quitFromTray(): void {
+  isQuitting = true;
+  app.quit();
+}
+
+function ensureTray(): void {
+  if (tray !== null) {
+    return;
+  }
+
+  tray = new Tray(
+    getWindowIconPath({
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      repoRoot,
+    }),
+  );
+  tray.setToolTip("Auto Email Sender");
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: "打开窗口", click: showMainWindow },
+      { type: "separator" },
+      { label: "退出", click: quitFromTray },
+    ]),
+  );
+  tray.on("click", showMainWindow);
+}
+
 async function createWindow(): Promise<void> {
   backend = await startDesktopBackend();
+  ensureTray();
 
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -34,6 +79,14 @@ async function createWindow(): Promise<void> {
   });
   mainWindow.webContents.on("did-finish-load", () => {
     mainWindow?.webContents.send("backend:status", currentBackendStatus);
+  });
+  mainWindow.on("close", (event) => {
+    if (!shouldHideWindowOnClose({ isQuitting })) {
+      return;
+    }
+
+    event.preventDefault();
+    mainWindow?.hide();
   });
   publishBackendReady(backend);
 
@@ -126,10 +179,13 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
-  app.quit();
+  if (isQuitting) {
+    app.quit();
+  }
 });
 
 app.on("before-quit", (event) => {
+  isQuitting = true;
   if (backend === null) {
     return;
   }
