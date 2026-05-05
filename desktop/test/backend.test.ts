@@ -3,6 +3,7 @@ import {
   buildBackendEnv,
   getBackendExecutablePath,
   getFrontendIndexPath,
+  notifyBackendExit,
   normalizePort,
 } from "../src/backend.js";
 
@@ -52,5 +53,35 @@ describe("desktop backend helpers", () => {
 
   it("normalizes valid ports", () => {
     expect(normalizePort("48123")).toBe(48123);
+  });
+
+  it("notifies when backend exits unexpectedly", () => {
+    const exits: Array<{ code: number | null; signal: NodeJS.Signals | null }> = [];
+
+    notifyBackendExit(
+      {
+        intentionalStop: false,
+        onUnexpectedExit: (exit) => exits.push(exit),
+      },
+      1,
+      null,
+    );
+
+    expect(exits).toEqual([{ code: 1, signal: null }]);
+  });
+
+  it("does not notify when backend exits during intentional stop", () => {
+    const exits: Array<{ code: number | null; signal: NodeJS.Signals | null }> = [];
+
+    notifyBackendExit(
+      {
+        intentionalStop: true,
+        onUnexpectedExit: (exit) => exits.push(exit),
+      },
+      0,
+      null,
+    );
+
+    expect(exits).toEqual([]);
   });
 });

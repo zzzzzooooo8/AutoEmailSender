@@ -9,6 +9,11 @@ export type DesktopUpdateStatus =
   | { state: "downloaded"; version: string; nextVersion: string }
   | { state: "error"; version: string; message: string };
 
+export type DesktopBackendStatus =
+  | { state: "restarting"; code: number | null; signal: string | null }
+  | { state: "ready"; baseUrl: string }
+  | { state: "error"; message: string };
+
 declare global {
   interface Window {
     autoEmailSender?: {
@@ -17,6 +22,7 @@ declare global {
       checkForUpdate: () => Promise<DesktopUpdateStatus>;
       downloadUpdate: () => Promise<DesktopUpdateStatus>;
       quitAndInstall: () => Promise<void>;
+      onBackendStatus?: (callback: (status: DesktopBackendStatus) => void) => () => void;
       onUpdateStatus: (callback: (status: DesktopUpdateStatus) => void) => () => void;
     };
   }

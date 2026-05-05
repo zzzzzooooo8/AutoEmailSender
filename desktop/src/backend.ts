@@ -2,7 +2,13 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import type { BackendController, BackendEnvInput, BackendPathInput } from "./types.js";
+import type {
+  BackendController,
+  BackendEnvInput,
+  BackendExit,
+  BackendExitHandler,
+  BackendPathInput,
+} from "./types.js";
 
 export function normalizePort(value: string): number {
   const port = Number(value);
@@ -48,6 +54,7 @@ export async function startBackend(options: {
   resourcesPath: string;
   repoRoot: string;
   userDataPath: string;
+  onUnexpectedExit?: BackendExitHandler;
 }): Promise<BackendController> {
   const port = await findAvailablePort();
   const baseUrl = `http://127.0.0.1:${port}`;
@@ -67,13 +74,36 @@ export async function startBackend(options: {
     }),
     repoRoot: options.repoRoot,
   });
+  const lifecycle: BackendLifecycle = {
+    intentionalStop: false,
+    onUnexpectedExit: options.onUnexpectedExit,
+  };
+  child.once("exit", (code, signal) => {
+    notifyBackendExit(lifecycle, code, signal);
+  });
 
   await waitForHealth(baseUrl, child);
 
   return {
     baseUrl,
-    stop: () => stopBackend(child),
+    stop: () => stopBackend(child, lifecycle),
   };
+}
+
+type BackendLifecycle = {
+  intentionalStop: boolean;
+  onUnexpectedExit?: BackendExitHandler;
+};
+
+export function notifyBackendExit(
+  lifecycle: BackendLifecycle,
+  code: number | null,
+  signal: NodeJS.Signals | null,
+): void {
+  if (lifecycle.intentionalStop) {
+    return;
+  }
+  lifecycle.onUnexpectedExit?.({ code, signal } satisfies BackendExit);
 }
 
 function spawnBackend(input: {
@@ -149,7 +179,11 @@ async function canListen(port: number): Promise<boolean> {
   });
 }
 
-async function stopBackend(child: ChildProcessWithoutNullStreams): Promise<void> {
+async function stopBackend(
+  child: ChildProcessWithoutNullStreams,
+  lifecycle: BackendLifecycle,
+): Promise<void> {
+  lifecycle.intentionalStop = true;
   if (child.exitCode !== null) {
     return;
   }

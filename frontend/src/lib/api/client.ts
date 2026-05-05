@@ -1,5 +1,7 @@
 import { recordDiagnosticEvent } from "@/lib/diagnostics";
 
+let desktopBackendBaseUrlOverride: string | null = null;
+
 export class ApiError extends Error {
   status: number;
 
@@ -22,6 +24,11 @@ export const buildApiPath = (
     url.searchParams.set(key, String(value));
   });
   return baseUrl ? url.toString() : `${url.pathname}${url.search}`;
+};
+
+export const updateDesktopBackendBaseUrl = (baseUrl: string | null | undefined): void => {
+  const normalized = baseUrl?.trim().replace(/\/+$/, "");
+  desktopBackendBaseUrlOverride = normalized || null;
 };
 
 export const buildApiUrl = (
@@ -261,6 +268,6 @@ function stripUrlQueryAndHash(value: string): string {
 }
 
 function getDesktopBackendBaseUrl(): string | null {
-  const baseUrl = window.autoEmailSender?.backendBaseUrl?.trim();
+  const baseUrl = desktopBackendBaseUrlOverride ?? window.autoEmailSender?.backendBaseUrl?.trim();
   return baseUrl ? baseUrl.replace(/\/+$/, "") : null;
 }

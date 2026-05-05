@@ -14,6 +14,18 @@ export type BackendController = {
   stop: () => Promise<void>;
 };
 
+export type BackendExit = {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+};
+
+export type BackendExitHandler = (exit: BackendExit) => void;
+
+export type BackendStatus =
+  | { state: "restarting"; code: number | null; signal: NodeJS.Signals | null }
+  | { state: "ready"; baseUrl: string }
+  | { state: "error"; message: string };
+
 export type UpdateStatus =
   | { state: "idle"; version: string }
   | { state: "checking"; version: string }

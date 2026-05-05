@@ -1,8 +1,11 @@
+import { useEffect } from 'react';
 import { BrowserRouter, HashRouter, Route, Routes } from 'react-router-dom';
 import { RouteScrollRestoration } from '@/components/organisms/RouteScrollRestoration';
 import { TopNavBar } from '@/components/organisms/TopNavBar';
 import { NotificationProvider } from '@/context/NotificationContext';
 import { SelectionProvider } from '@/context/SelectionContext';
+import { recordDiagnosticEvent } from '@/lib/diagnostics';
+import { updateDesktopBackendBaseUrl } from '@/lib/api/client';
 import { CreateTaskPage } from '@/pages/CreateTaskPage';
 import { HomePage } from '@/pages/HomePage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
@@ -14,6 +17,29 @@ import { WorkspacePage } from '@/pages/WorkspacePage';
 
 function App() {
   const Router = window.autoEmailSender ? HashRouter : BrowserRouter;
+
+  useEffect(() => {
+    const unsubscribe = window.autoEmailSender?.onBackendStatus?.((status) => {
+      if (status.state === 'ready') {
+        updateDesktopBackendBaseUrl(status.baseUrl);
+      }
+
+      try {
+        recordDiagnosticEvent({
+          level: status.state === 'error' ? 'error' : 'info',
+          category: 'system',
+          eventName: `desktop.backend_${status.state}`,
+          data: status,
+        });
+      } catch {
+        // Diagnostics should never affect app startup.
+      }
+    });
+
+    return () => {
+      unsubscribe?.();
+    };
+  }, []);
 
   return (
     <Router>

@@ -4,20 +4,16 @@ import { pathToFileURL } from "node:url";
 import { getFrontendIndexPath, startBackend } from "./backend.js";
 import { checkForUpdatesOnStartup, registerUpdateIpc } from "./updates.js";
 import { getWindowIconPath } from "./windowIcon.js";
-import type { BackendController } from "./types.js";
+import type { BackendController, BackendExit } from "./types.js";
 
 let mainWindow: BrowserWindow | null = null;
 let backend: BackendController | null = null;
+let restartingBackend = false;
 
 const repoRoot = path.resolve(app.getAppPath(), "..");
 
 async function createWindow(): Promise<void> {
-  backend = await startBackend({
-    isPackaged: app.isPackaged,
-    resourcesPath: process.resourcesPath,
-    repoRoot,
-    userDataPath: app.getPath("userData"),
-  });
+  backend = await startDesktopBackend();
 
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -50,6 +46,48 @@ async function createWindow(): Promise<void> {
   });
   await mainWindow.loadURL(pathToFileURL(indexPath).toString());
   checkForUpdatesOnStartup();
+}
+
+async function startDesktopBackend(): Promise<BackendController> {
+  return startBackend({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    repoRoot,
+    userDataPath: app.getPath("userData"),
+    onUnexpectedExit: (exit) => {
+      void restartBackendAfterUnexpectedExit(exit);
+    },
+  });
+}
+
+async function restartBackendAfterUnexpectedExit(exit: BackendExit): Promise<void> {
+  if (restartingBackend || backend === null) {
+    return;
+  }
+
+  restartingBackend = true;
+  backend = null;
+  mainWindow?.webContents.send("backend:status", {
+    state: "restarting",
+    code: exit.code,
+    signal: exit.signal,
+  });
+
+  try {
+    backend = await startDesktopBackend();
+    mainWindow?.webContents.send("backend:status", {
+      state: "ready",
+      baseUrl: backend.baseUrl,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    mainWindow?.webContents.send("backend:status", {
+      state: "error",
+      message,
+    });
+  } finally {
+    restartingBackend = false;
+  }
 }
 
 ipcMain.handle("app:get-version", () => app.getVersion());
