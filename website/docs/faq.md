@@ -16,6 +16,14 @@
 
 [GitHub Releases](https://github.com/JunieXD/AutoEmailSender/releases)
 
+## 数据默认保存在哪里
+
+如果你使用的是 Windows 安装版，应用会把数据库、上传文件和运行日志保存到当前用户的数据目录，通常是：
+
+`C:\Users\<你的用户名>\AppData\Roaming\Auto Email Sender`
+
+如果你是本地运行源码，默认数据目录是仓库根目录下的 `data/`。后端也支持通过 `AUTO_EMAIL_SENDER_DATA_DIR` 自定义这个路径。
+
 ## 为什么安装时提示未知发布者
 
 当前安装包暂未购买 Windows 代码签名证书，因此 Windows 可能提示「未知发布者」或 SmartScreen 拦截。
@@ -40,6 +48,8 @@
 - SMTP 和 IMAP 主机、端口是否正确。
 - 邮箱服务商是否限制第三方客户端登录。
 - 网络是否能访问邮箱服务器。
+
+如果你还不知道 SMTP、IMAP 或授权码是什么，先看 [首次配置](./first-run#1-创建发件身份) 和 [个人配置](./profile#发件身份) 的说明，那里会先讲清楚这些概念。
 
 ## 匹配分析结果不准怎么办
 
