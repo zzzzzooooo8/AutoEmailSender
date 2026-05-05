@@ -27,6 +27,23 @@ const writePendingVersion = (version: string | null) => {
   window.localStorage.removeItem(PENDING_UPDATE_KEY);
 };
 
+const CONNECTION_ERROR_PATTERNS = [
+  "connection error",
+  "econnreset",
+  "econnrefused",
+  "etimedout",
+  "enotfound",
+  "network offline",
+];
+
+function formatUpdateCheckErrorMessage(message: string): string {
+  const normalizedMessage = message.toLowerCase();
+  if (!CONNECTION_ERROR_PATTERNS.some((pattern) => normalizedMessage.includes(pattern))) {
+    return message;
+  }
+  return `${message}。请检查系统代理是否已开启，或确认当前网络可以访问 GitHub。`;
+}
+
 export function DesktopUpdateButton() {
   if (!isDesktopApp()) {
     return null;
@@ -96,7 +113,7 @@ function DesktopUpdateButtonInner() {
       if (status.state === "error") {
         setChecking(false);
         setDownloading(false);
-        notifyError("检查更新失败", status.message);
+        notifyError("检查更新失败", formatUpdateCheckErrorMessage(status.message));
       }
     },
     [notifyError, notifySuccess, pendingVersion, version],
@@ -196,7 +213,7 @@ function DesktopUpdateButtonInner() {
       }
     } catch (checkError) {
       const message = checkError instanceof Error ? checkError.message : "检查更新失败";
-      notifyError("检查更新失败", message);
+      notifyError("检查更新失败", formatUpdateCheckErrorMessage(message));
     } finally {
       setChecking(false);
     }

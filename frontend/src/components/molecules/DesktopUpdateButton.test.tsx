@@ -204,7 +204,7 @@ describe("DesktopUpdateButton", () => {
   it("shows an error notification when update check fails", async () => {
     window.autoEmailSender = buildDesktopApi({
       checkForUpdate: async () => {
-        throw new Error("network offline");
+        throw new Error("invalid update metadata");
       },
     });
 
@@ -212,9 +212,27 @@ describe("DesktopUpdateButton", () => {
     fireEvent.click(await screen.findByRole("button", { name: /检查更新/ }));
 
     await waitFor(() => {
-      expect(notifyError).toHaveBeenCalledWith("检查更新失败", "network offline");
+      expect(notifyError).toHaveBeenCalledWith("检查更新失败", "invalid update metadata");
     });
     expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("suggests checking the system proxy when update check hits a connection error", async () => {
+    window.autoEmailSender = buildDesktopApi({
+      checkForUpdate: async () => {
+        throw new Error("connection error");
+      },
+    });
+
+    render(<DesktopUpdateButton />);
+    fireEvent.click(await screen.findByRole("button", { name: /检查更新/ }));
+
+    await waitFor(() => {
+      expect(notifyError).toHaveBeenCalledWith(
+        "检查更新失败",
+        "connection error。请检查系统代理是否已开启，或确认当前网络可以访问 GitHub。",
+      );
+    });
   });
 });
 
