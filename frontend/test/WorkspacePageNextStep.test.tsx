@@ -268,6 +268,26 @@ const renderPage = () =>
     </MemoryRouter>,
   );
 
+type MockComposerDockProps = {
+  nextStepTitle: string;
+  nextStepDescription: string;
+  draftReady: boolean;
+  subject: string;
+  canSubmitDraft: boolean;
+  content: string;
+  contentHtml: string;
+  canCalculateMatch: boolean;
+  canGenerateDraft: boolean;
+  canContinueManually: boolean;
+  canStartFollowUp: boolean;
+  currentTaskMode: OutreachGenerationMode;
+};
+
+const latestComposerDockProps = () => {
+  expect(mockedWorkspaceComposerDock.mock.calls.length).toBeGreaterThan(0);
+  return mockedWorkspaceComposerDock.mock.calls.at(-1)?.[0] as MockComposerDockProps;
+};
+
 describe("WorkspacePage next-step", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -406,10 +426,17 @@ describe("WorkspacePage next-step", () => {
 
     renderPage();
 
-    expect(await screen.findByText("检查后发送")).toBeInTheDocument();
-    expect(screen.getByText("检查主题、正文和附件后发送。")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(latestComposerDockProps()).toEqual(
+        expect.objectContaining({
+          draftReady: true,
+          canSubmitDraft: true,
+          content: "仅有 HTML 草稿",
+          contentHtml: "<p>仅有 HTML 草稿</p>",
+        }),
+      );
+    });
     expect(screen.getByText("draft-ready")).toBeInTheDocument();
-    expect(screen.queryByText("生成邮件草稿")).not.toBeInTheDocument();
   });
 
   it("shows sent relationship status when a follow-up draft is the current task", async () => {
@@ -482,10 +509,17 @@ describe("WorkspacePage next-step", () => {
 
     renderPage();
 
-    expect(await screen.findByText("生成邮件草稿")).toBeInTheDocument();
-    expect(screen.getByText("生成草稿后再人工检查。")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(latestComposerDockProps()).toEqual(
+        expect.objectContaining({
+          subject: "只有主题",
+          draftReady: false,
+          content: "",
+          contentHtml: "",
+        }),
+      );
+    });
     expect(screen.getByText("draft-empty")).toBeInTheDocument();
-    expect(screen.queryByText("检查后发送")).not.toBeInTheDocument();
   });
 
   it("passes the configured template into the composer before a draft is generated", async () => {
@@ -510,7 +544,13 @@ describe("WorkspacePage next-step", () => {
     expect(await screen.findByText("draft-subject:测试主题")).toBeInTheDocument();
     expect(screen.getByText("draft-content:测试正文")).toBeInTheDocument();
     expect(screen.getByText("draft-ready")).toBeInTheDocument();
-    expect(screen.getByText("检查后发送")).toBeInTheDocument();
+    expect(latestComposerDockProps()).toEqual(
+      expect.objectContaining({
+        currentTaskMode: "template",
+        draftReady: true,
+        canSubmitDraft: true,
+      }),
+    );
     expect(screen.getByRole("button", { name: "mock-send-now" })).toBeInTheDocument();
   });
 
@@ -542,8 +582,15 @@ describe("WorkspacePage next-step", () => {
 
     renderPage();
 
-    expect(await screen.findByText("选择分析材料")).toBeInTheDocument();
-    expect(screen.getByText("选择材料后可分析匹配度。")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(latestComposerDockProps()).toEqual(
+        expect.objectContaining({
+          canCalculateMatch: false,
+          canGenerateDraft: false,
+          draftReady: false,
+        }),
+      );
+    });
     expect(screen.getByText("draft-empty")).toBeInTheDocument();
   });
 
@@ -584,9 +631,15 @@ describe("WorkspacePage next-step", () => {
 
     renderPage();
 
-    expect(await screen.findByText("写跟进邮件")).toBeInTheDocument();
-    expect(screen.getByText("基于当前沟通记录起草下一封跟进邮件。")).toBeInTheDocument();
-    expect(screen.queryByText("选择分析材料")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(latestComposerDockProps()).toEqual(
+        expect.objectContaining({
+          canStartFollowUp: true,
+          canContinueManually: false,
+          canGenerateDraft: false,
+        }),
+      );
+    });
   });
 
   it("continues a batch-stopped task manually from the workspace action", async () => {
@@ -602,7 +655,15 @@ describe("WorkspacePage next-step", () => {
 
     renderPage();
 
-    expect(await screen.findByText("作为单独联系继续")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(latestComposerDockProps()).toEqual(
+        expect.objectContaining({
+          canContinueManually: true,
+          canSubmitDraft: false,
+          draftReady: false,
+        }),
+      );
+    });
     expect(screen.getByText("draft-empty")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "mock-send-now" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "mock-schedule-send" })).not.toBeInTheDocument();
@@ -625,7 +686,14 @@ describe("WorkspacePage next-step", () => {
 
     renderPage();
 
-    expect(await screen.findByText("写跟进邮件")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(latestComposerDockProps()).toEqual(
+        expect.objectContaining({
+          canStartFollowUp: true,
+          canGenerateDraft: false,
+        }),
+      );
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "mock-start-follow-up" }));
 
@@ -645,10 +713,15 @@ describe("WorkspacePage next-step", () => {
 
     renderPage();
 
-    expect(await screen.findByText("写跟进邮件")).toBeInTheDocument();
-    expect(screen.getByText("基于当前沟通记录起草下一封跟进邮件。")).toBeInTheDocument();
-    expect(screen.queryByText("选择分析材料")).not.toBeInTheDocument();
-    expect(screen.queryByText("生成邮件草稿")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(latestComposerDockProps()).toEqual(
+        expect.objectContaining({
+          canStartFollowUp: true,
+          canContinueManually: false,
+          canGenerateDraft: false,
+        }),
+      );
+    });
   });
 
   it("prefers continue-manually guidance in the UI whenever can_continue_manually is true, without relying on canceled status", async () => {
@@ -662,9 +735,15 @@ describe("WorkspacePage next-step", () => {
 
     renderPage();
 
-    expect(await screen.findByText("作为单独联系继续")).toBeInTheDocument();
-    expect(screen.getByText("从这条批量任务记录中拆出一条单独联系继续推进。")).toBeInTheDocument();
-    expect(screen.queryByText("选择分析材料")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(latestComposerDockProps()).toEqual(
+        expect.objectContaining({
+          canContinueManually: true,
+          canStartFollowUp: false,
+          canGenerateDraft: false,
+        }),
+      );
+    });
   });
 
   it("fills a non-empty body_text when sending an HTML-only draft", async () => {
@@ -676,7 +755,9 @@ describe("WorkspacePage next-step", () => {
 
     renderPage();
 
-    await screen.findByText("检查后发送");
+    await waitFor(() => {
+      expect(latestComposerDockProps().canSubmitDraft).toBe(true);
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "mock-send-now" }));
 
@@ -711,7 +792,9 @@ describe("WorkspacePage next-step", () => {
 
     renderPage();
 
-    await screen.findByText("检查后发送");
+    await waitFor(() => {
+      expect(latestComposerDockProps().canSubmitDraft).toBe(true);
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "mock-schedule-send" }));
 

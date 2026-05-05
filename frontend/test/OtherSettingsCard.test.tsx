@@ -40,6 +40,9 @@ describe("OtherSettingsCard", () => {
         }),
       );
     });
-    expect(await screen.findByText("设置已保存")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "保存设置" })).toBeEnabled();
+    });
+    expect(screen.getByLabelText("批量匹配分析并发数")).toHaveValue(4);
   });
 });

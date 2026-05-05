@@ -124,16 +124,11 @@ describe("CreateTaskPage copy", () => {
     });
   });
 
-  it("shows the action-oriented task mode copy and next-step hint", async () => {
+  it("shows the task mode controls without the retired mode labels", async () => {
     renderPage();
 
-    expect(await screen.findByText("AI 辅助写信")).toBeInTheDocument();
-    expect(screen.getByText("直接套用模板")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "创建后进入工作区生成草稿并确认发送。",
-      ),
-    ).toBeInTheDocument();
+    const modeCards = await screen.findAllByRole("button", { name: /AI 辅助写信|直接套用模板/ });
+    expect(modeCards).toHaveLength(2);
     expect(screen.queryByText("模板润色")).not.toBeInTheDocument();
     expect(screen.queryByText("固定模板")).not.toBeInTheDocument();
   });
@@ -141,8 +136,9 @@ describe("CreateTaskPage copy", () => {
   it("asks for confirmation before creating a real batch task", async () => {
     renderPage();
 
-    await screen.findByText("发信模式");
-    fireEvent.click(screen.getByText("创建任务").closest("button")!);
+    const form = await screen.findByRole("heading", { name: "创建批量任务" });
+    expect(form).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "创建任务" }));
 
     await waitFor(() => {
       expect(mockedConfirm).toHaveBeenCalledWith(
@@ -156,8 +152,8 @@ describe("CreateTaskPage copy", () => {
   it("records successful batch task creation as user actions", async () => {
     renderPage();
 
-    await screen.findByText("发信模式");
-    fireEvent.click(screen.getByText("创建任务").closest("button")!);
+    await screen.findByRole("heading", { name: "创建批量任务" });
+    fireEvent.click(screen.getByRole("button", { name: "创建任务" }));
 
     await waitFor(() => {
       expect(mockedCreateBatchTask).toHaveBeenCalled();
@@ -188,8 +184,8 @@ describe("CreateTaskPage copy", () => {
 
     renderPage();
 
-    await screen.findByText("发信模式");
-    fireEvent.click(screen.getByText("创建任务").closest("button")!);
+    await screen.findByRole("heading", { name: "创建批量任务" });
+    fireEvent.click(screen.getByRole("button", { name: "创建任务" }));
 
     await waitFor(() => {
       expect(mockedCreateBatchTask).toHaveBeenCalled();

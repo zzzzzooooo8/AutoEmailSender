@@ -3,7 +3,8 @@ param(
   [ValidatePattern('^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$')]
   [string]$Version,
 
-  [switch]$DryRun
+  [switch]$DryRun,
+  [switch]$SkipVerify
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,6 +36,40 @@ function Assert-CleanRepository {
   }
 }
 
+function Invoke-Verification {
+  if ($SkipVerify) {
+    Write-Host "[skip] 跳过发布前验证"
+    return
+  }
+
+  Write-Host "=== 验证 frontend ==="
+  Push-Location (Join-Path $RepoRoot "frontend")
+  try {
+    npm test
+    npm run lint
+    npm run build
+  } finally {
+    Pop-Location
+  }
+
+  Write-Host "=== 验证 backend ==="
+  Push-Location (Join-Path $RepoRoot "backend")
+  try {
+    uv sync --dev
+    uv run python -m unittest test.test_desktop_runtime
+  } finally {
+    Pop-Location
+  }
+
+  Write-Host "=== 验证 desktop ==="
+  Push-Location (Join-Path $RepoRoot "desktop")
+  try {
+    npm test
+  } finally {
+    Pop-Location
+  }
+}
+
 function Set-NpmVersion {
   param([string]$Directory)
   Push-Location (Join-Path $RepoRoot $Directory)
@@ -50,6 +85,7 @@ function Set-NpmVersion {
 }
 
 Assert-CleanRepository
+Invoke-Verification
 Set-NpmVersion "desktop"
 Set-NpmVersion "frontend"
 

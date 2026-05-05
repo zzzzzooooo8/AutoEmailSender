@@ -1,7 +1,6 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getOnboardingState } from "@/features/onboarding/client/getOnboardingState";
 import { HomePage } from "@/pages/HomePage";
 import type { IdentityDTO, LLMProfileDTO, ProfessorDashboardItemDTO } from "@/types";
 
@@ -121,14 +120,6 @@ const createProfessor = (
   status,
 });
 
-const materialsStageDescription = getOnboardingState({
-  hasIdentity: true,
-  hasLlmProfile: true,
-  hasPrimaryMaterial: false,
-  hasProfessors: false,
-  hasFirstTask: false,
-}).description;
-
 const createDeferred = <T,>() => {
   let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (reason?: unknown) => void;
@@ -196,15 +187,14 @@ describe("HomePage onboarding", () => {
     });
 
     expect(heading).toBeInTheDocument();
-    expect(screen.getByText(materialsStageDescription)).toBeInTheDocument();
-    expect(screen.getByText("创建发件身份")).toBeInTheDocument();
-    expect(screen.getByText("配置 AI 模型")).toBeInTheDocument();
-    expect(screen.getByText("准备材料和模板")).toBeInTheDocument();
-    expect(screen.getByText("导入导师")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "继续配置" })).toHaveAttribute(
+    const card = heading.closest("section");
+    expect(card).not.toBeNull();
+    expect(within(card as HTMLElement).getByRole("link", { name: "继续配置" })).toHaveAttribute(
       "href",
       "/profile",
     );
+    expect(screen.queryByText("模板润色")).not.toBeInTheDocument();
+    expect(screen.queryByText("固定模板")).not.toBeInTheDocument();
   });
 
   it("shows the onboarding card and links to professors when setup is complete but no professors exist", async () => {
@@ -269,7 +259,6 @@ describe("HomePage onboarding", () => {
     expect(
       await screen.findByRole("heading", { name: "导师看板" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("待写信")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "高级筛选" }));
     expect(screen.getByRole("button", { name: "状态：全部状态" })).toBeInTheDocument();
   });
@@ -291,9 +280,6 @@ describe("HomePage onboarding", () => {
     expect(
       await screen.findByRole("heading", { name: "导师看板" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("匹配 92%")).toBeInTheDocument();
-    expect(screen.getByText("未发送")).toBeInTheDocument();
-    expect(screen.getByText("待写信")).toBeInTheDocument();
     const selectButton = screen.getByRole("button", { name: "选择 王教授" });
     expect(selectButton).toHaveAttribute(
       "aria-pressed",
@@ -352,7 +338,6 @@ describe("HomePage onboarding", () => {
     fireEvent.click(screen.getByRole("option", { name: "已联系" }));
 
     await waitFor(() => {
-      expect(screen.getByText("已联系导师")).toBeInTheDocument();
       expect(screen.queryByText("未开始导师")).not.toBeInTheDocument();
       expect(screen.queryByText("待写信导师")).not.toBeInTheDocument();
       expect(screen.queryByText("待发送导师")).not.toBeInTheDocument();

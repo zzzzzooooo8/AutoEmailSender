@@ -123,9 +123,7 @@ describe("DiagnosticLogPanel", () => {
       "false",
     );
     expect(screen.getByText(/本地\s*2\s*条/)).toBeInTheDocument();
-    expect(screen.queryByText("本地事件")).not.toBeInTheDocument();
-    expect(screen.queryByText("api.request_failed")).not.toBeInTheDocument();
-    expect(screen.queryByText("crawl_job.create_failed")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "导出诊断日志" })).not.toBeInTheDocument();
     expect(listOperationLogs).not.toHaveBeenCalled();
   });
 
@@ -140,10 +138,8 @@ describe("DiagnosticLogPanel", () => {
       "true",
     );
     expect(screen.getByLabelText("导出日期")).toHaveValue(todayInputValue());
-    expect(screen.getByText("本地事件")).toBeInTheDocument();
-    expect(screen.getByText("后端日志")).toBeInTheDocument();
-    expect(screen.queryByText("api.request_failed")).not.toBeInTheDocument();
-    expect(screen.queryByText("crawl_job.create_failed")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导出诊断日志" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "清空本地日志" })).toBeInTheDocument();
     expect(listOperationLogs).toHaveBeenCalledWith(
       expectDateRangeParams({ limit: 20 }),
     );
@@ -171,7 +167,7 @@ describe("DiagnosticLogPanel", () => {
     render(<DiagnosticLogPanel />);
     fireEvent.click(screen.getByRole("button", { name: /开发诊断日志/ }));
 
-    expect(await screen.findByText("后端诊断日志暂时不可用")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "导出诊断日志" })).toBeInTheDocument();
   });
 
   it("修改日期和筛选条件时会带上对应参数重新加载", async () => {

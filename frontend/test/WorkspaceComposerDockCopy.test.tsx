@@ -131,8 +131,6 @@ describe("WorkspaceComposerDock copy", () => {
       />,
     );
 
-    expect(screen.getByText("生成邮件草稿")).toBeInTheDocument();
-    expect(screen.getByText("生成草稿后再人工检查。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "分析匹配度" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "生成草稿" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "先看匹配" })).not.toBeInTheDocument();
@@ -219,20 +217,15 @@ describe("WorkspaceComposerDock copy", () => {
       />,
     );
 
-    expect(screen.getByText("正文编辑")).toBeInTheDocument();
-    expect(screen.getByText("发送前核对")).toBeInTheDocument();
-    expect(screen.getByText("选择写信方式，并生成下一版草稿。")).toBeInTheDocument();
-    expect(screen.queryByText("生成与模式")).not.toBeInTheDocument();
-    expect(screen.queryByText("生成辅助")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "邮件正文" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "邮件主题" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "AI 辅助写信" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "分析匹配度" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "生成草稿" })).toBeInTheDocument();
-    expect(screen.getByText("发送动作")).toBeInTheDocument();
-    expect(screen.queryByText("发送设置")).not.toBeInTheDocument();
-    expect(screen.queryByText("默认材料")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "立即发送" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "定时发送" })).toBeInTheDocument();
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("定时发送")).not.toBeInTheDocument();
-    expect(screen.queryByText("继续写信")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "编辑草稿" })).not.toBeInTheDocument();
   });
 

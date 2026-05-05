@@ -114,11 +114,11 @@ describe("NotificationViewport", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "长报错" }));
 
-    expect(screen.getByText("复制这条报错")).toBeInTheDocument();
+    expect(screen.getByTestId("notification-card")).toBeInTheDocument();
 
     vi.advanceTimersByTime(10000);
 
-    expect(screen.queryByText("复制这条报错")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("notification-card")).not.toBeInTheDocument();
   });
 
   it("pauses the timer while hovered and resumes countdown after mouse leave", () => {
@@ -134,12 +134,12 @@ describe("NotificationViewport", () => {
     fireEvent.mouseEnter(card);
     vi.advanceTimersByTime(10000);
 
-    expect(screen.getByText("复制这条报错")).toBeInTheDocument();
+    expect(screen.getByTestId("notification-card")).toBeInTheDocument();
 
     fireEvent.mouseLeave(card);
     vi.advanceTimersByTime(10000);
 
-    expect(screen.queryByText("复制这条报错")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("notification-card")).not.toBeInTheDocument();
   });
 
   it("does not force manual dismiss after clicking the notification body", () => {
@@ -151,9 +151,9 @@ describe("NotificationViewport", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "长报错" }));
 
-    fireEvent.click(screen.getByText("复制这条报错"));
+    fireEvent.click(screen.getByTestId("notification-card"));
     vi.advanceTimersByTime(10000);
 
-    expect(screen.queryByText("复制这条报错")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("notification-card")).not.toBeInTheDocument();
   });
 });

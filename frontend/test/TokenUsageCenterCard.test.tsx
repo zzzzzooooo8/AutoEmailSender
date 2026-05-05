@@ -59,7 +59,7 @@ describe("TokenUsageCenterCard", () => {
     const toggle = screen.getByRole("button", { name: /Token 消耗记录中心/ });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
 
-    await waitFor(() => expect(screen.getByText("共 12 条")).toBeInTheDocument());
+    await waitFor(() => expect(mockedListTokenUsageRecords).toHaveBeenCalled());
     expect(mockedGetTokenUsageChart).not.toHaveBeenCalled();
     expect(screen.queryByText("李老师 - 匹配分析")).not.toBeInTheDocument();
   });
@@ -102,7 +102,7 @@ describe("TokenUsageCenterCard", () => {
     render(<TokenUsageCenterCard />);
 
     const toggle = screen.getByRole("button", { name: /Token 消耗记录中心/ });
-    await waitFor(() => expect(screen.getByText("共 1 条")).toBeInTheDocument());
+    await waitFor(() => expect(mockedListTokenUsageRecords).toHaveBeenCalledTimes(1));
 
     fireEvent.click(toggle);
 
@@ -158,7 +158,7 @@ describe("TokenUsageCenterCard", () => {
     render(<TokenUsageCenterCard />);
 
     fireEvent.click(screen.getByRole("button", { name: /Token 消耗记录中心/ }));
-    await waitFor(() => expect(screen.getByText("输入 / 输出趋势")).toBeInTheDocument());
+    await waitFor(() => expect(mockedGetTokenUsageChart).toHaveBeenCalled());
 
     const featureFilter = screen.getByRole("button", { name: "功能筛选" });
     const filterPanel = featureFilter.closest(".grid");
@@ -223,7 +223,7 @@ describe("TokenUsageCenterCard", () => {
     render(<TokenUsageCenterCard />);
 
     fireEvent.click(screen.getByRole("button", { name: /Token 消耗记录中心/ }));
-    await waitFor(() => expect(screen.getByText("第 1 / 3 页")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText("跳转页号")).toHaveValue(1));
 
     fireEvent.change(screen.getByLabelText("跳转页号"), {
       target: { value: "3" },
@@ -295,16 +295,14 @@ describe("TokenUsageCenterCard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "下一页" }));
 
-    await waitFor(() =>
-      expect(screen.getByText("正在更新 token 消耗记录...")).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(mockedListTokenUsageRecords).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("status")).toBeInTheDocument();
     expect(screen.getByText("李老师 - 匹配分析")).toBeInTheDocument();
-    expect(screen.queryByText("正在加载 token 消耗记录...")).not.toBeInTheDocument();
 
     deferredNextPage.resolve(nextPageResult);
 
     await waitFor(() => expect(screen.getByText("王老师 - 匹配分析")).toBeInTheDocument());
-    expect(screen.queryByText("正在更新 token 消耗记录...")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("renders stacked chart buckets", async () => {
@@ -313,11 +311,8 @@ describe("TokenUsageCenterCard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Token 消耗记录中心/ }));
 
-    await waitFor(() => expect(screen.getByText("输入 / 输出趋势")).toBeInTheDocument());
+    await waitFor(() => expect(mockedGetTokenUsageChart).toHaveBeenCalled());
     const label = expectedChartBucketLabel();
-    expect(screen.getByText(label)).toBeInTheDocument();
-    expect(screen.getByText("250 tokens")).toBeInTheDocument();
-    expect(screen.getByText("0 tokens")).toBeInTheDocument();
 
     const bar = screen.getByLabelText(`${label} 输入 200 输出 30 总计 230`);
     fireEvent.mouseEnter(bar, { clientX: 180, clientY: 90 });

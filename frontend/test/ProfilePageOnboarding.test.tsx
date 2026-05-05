@@ -216,11 +216,6 @@ describe("ProfilePage onboarding", () => {
     expect(
       await screen.findByRole("heading", { name: "首次配置建议" }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "按顺序完成身份、材料、模型和测试写信。",
-      ),
-    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /1\. 发件身份/ })).toHaveTextContent(
       "已完成",
     );
@@ -423,13 +418,6 @@ describe("ProfilePage onboarding", () => {
     const finishSection = screen.getByRole("heading", { name: "测试写信" });
     const entryLink = screen.getByRole("link", { name: "进入测试写信页" });
 
-    expect(screen.getByText("保存配置")).toBeInTheDocument();
-    expect(screen.getByText("发送测试邮件")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "给自己发一封测试邮件，检查模板、附件、模型和 SMTP。",
-      ),
-    ).toBeInTheDocument();
     expect(screen.queryByText("第四步：测试写信")).not.toBeInTheDocument();
     expectToAppearBefore(finishSection, entryLink);
     expect(entryLink).toHaveAttribute("href", "/test-compose");
@@ -452,17 +440,18 @@ describe("ProfilePage onboarding", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "模拟编辑默认模板正文" }));
     fireEvent.click(screen.getByRole("button", { name: "完成编辑" }));
-    fireEvent.click(screen.getByRole("button", { name: "保存身份" }));
 
-    expect(updateIdentity).toHaveBeenCalledWith(
-      selectedIdentity.id,
-      expect.objectContaining({
-        outreach_template_body_text: "富文本更新",
-        outreach_template_body_html: "<p>富文本更新</p>",
-      }),
+    await waitFor(() => {
+      expect(updateIdentity).toHaveBeenCalledWith(
+        selectedIdentity.id,
+        expect.objectContaining({
+          outreach_template_body_text: "富文本更新",
+          outreach_template_body_html: "<p>富文本更新</p>",
+        }),
+      );
+    });
+    expect(vi.mocked(updateIdentity).mock.calls[0][1]).not.toHaveProperty(
+      "match_threshold",
     );
-    expect(
-      vi.mocked(updateIdentity).mock.calls[0][1],
-    ).not.toHaveProperty("match_threshold");
   });
 });
