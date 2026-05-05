@@ -289,6 +289,60 @@ describe("TasksPage crawler jobs tab", () => {
     expect(document.body.style.overflow).toBe("");
   });
 
+  it("shows the crawl enrichment failure reason in the candidate detail dialog", async () => {
+    vi.mocked(listCrawlCandidates).mockResolvedValue([
+      {
+        id: 21,
+        job_id: 7,
+        professor_id: null,
+        name: "张教授",
+        email: null,
+        title: "教授",
+        university: "示例大学",
+        school: "计算机学院",
+        department: null,
+        research_direction: null,
+        recent_papers: [],
+        profile_url: "https://example.edu/faculty/zhang",
+        source_url: "https://example.edu/faculty",
+        confidence: 0.86,
+        field_confidence: null,
+        evidence: null,
+        review_status: "pending",
+        created_at: "2026-04-26T10:02:00Z",
+        updated_at: "2026-04-26T10:02:00Z",
+      },
+    ]);
+    vi.mocked(getCrawlJobEvents).mockResolvedValue([
+      {
+        id: "evt-1",
+        job_id: 7,
+        event_type: "enrichment",
+        message: "候选导师详情补全失败：张教授",
+        created_at: "2026-04-26T08:34:00",
+        raw: {
+          candidate_id: 21,
+          profile_url: "https://example.edu/faculty/zhang",
+          status: "failed",
+          error_message:
+            "Crawl4AI browser fetch failed: FileNotFoundError: [WinError 2] 系统找不到指定的文件。",
+        },
+      },
+    ]);
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "教师抓取" }));
+    fireEvent.click(await screen.findByRole("button", { name: "查看详情" }));
+
+    const crawlDialog = await screen.findByRole("dialog", { name: "抓取任务详情" });
+    fireEvent.click(within(crawlDialog).getByRole("button", { name: "查看详情" }));
+
+    const candidateDialog = await screen.findByRole("dialog", { name: "候选导师详情" });
+    expect(candidateDialog).toHaveTextContent("补全失败原因");
+    expect(candidateDialog).toHaveTextContent("WinError 2");
+  });
+
   it("keeps crawl log and crawled page pagination aligned in the detail dialog", async () => {
     vi.mocked(getCrawlJobEvents).mockResolvedValue(
       Array.from({ length: 6 }, (_, index) => ({

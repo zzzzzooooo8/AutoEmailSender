@@ -143,6 +143,39 @@ const SCHEDULE_DATE_PATTERN = /^\d{4}-(\d{2})-(\d{2})$/;
 const TASKS_PAGE_SIZE = 8;
 const MONITOR_SECTION_PAGE_SIZE = 5;
 
+function getCandidateEnrichmentFailureMessage(
+  candidate: CrawlCandidateDTO,
+  events: CrawlJobEventDTO[],
+): string | null {
+  const failedEvent = [...events]
+    .reverse()
+    .find((event) => {
+      if (event.event_type !== "enrichment") {
+        return false;
+      }
+      const raw = event.raw;
+      if (!raw || typeof raw !== "object") {
+        return false;
+      }
+      const rawCandidateId = (raw as Record<string, unknown>).candidate_id;
+      const rawStatus = (raw as Record<string, unknown>).status;
+      const rawErrorMessage = (raw as Record<string, unknown>).error_message;
+      return (
+        rawCandidateId === candidate.id &&
+        rawStatus === "failed" &&
+        typeof rawErrorMessage === "string" &&
+        rawErrorMessage.trim().length > 0
+      );
+    });
+
+  if (!failedEvent || !failedEvent.raw) {
+    return null;
+  }
+
+  const errorMessage = (failedEvent.raw as Record<string, unknown>).error_message;
+  return typeof errorMessage === "string" ? errorMessage : null;
+}
+
 const formatScheduleDate = (value: string) => {
   const match = SCHEDULE_DATE_PATTERN.exec(value);
   if (!match) {
@@ -2788,6 +2821,22 @@ export const TasksPage = () => {
                   </div>
                 </div>
               </div>
+              {getCandidateEnrichmentFailureMessage(
+                selectedCandidateDetail,
+                crawlJobEvents,
+              ) ? (
+                <div className="rounded-2xl border border-red-200 bg-red-50/70 px-4 py-3 md:col-span-2">
+                  <div className="text-xs font-medium text-red-700">
+                    补全失败原因
+                  </div>
+                  <div className="mt-2 text-sm leading-6 text-red-900">
+                    {getCandidateEnrichmentFailureMessage(
+                      selectedCandidateDetail,
+                      crawlJobEvents,
+                    )}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </section>
         </div>
