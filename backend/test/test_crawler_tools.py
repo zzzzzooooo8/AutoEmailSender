@@ -162,6 +162,8 @@ class CrawlerToolTests(unittest.TestCase):
         config = crawler_tools._browser_config_for_crawl4ai()
 
         self.assertIn("--disable-features=HttpsUpgrades", config.extra_args)
+        self.assertEqual(config.channel, "")
+        self.assertEqual(config.chrome_channel, "")
 
     def test_is_allowed_crawl_url_allows_same_host(self) -> None:
         with patch(

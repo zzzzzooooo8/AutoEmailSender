@@ -1107,7 +1107,11 @@ def _browser_run_config_for_goal(goal: str) -> "CrawlerRunConfig":
 def _browser_config_for_crawl4ai() -> "BrowserConfig":
     from crawl4ai import BrowserConfig
 
-    return BrowserConfig(extra_args=list(CRAWL4AI_BROWSER_EXTRA_ARGS))
+    config = BrowserConfig(extra_args=list(CRAWL4AI_BROWSER_EXTRA_ARGS))
+    # 保持只使用 playwright 的 headless shell，避免回退到完整 Chromium。
+    config.channel = ""
+    config.chrome_channel = ""
+    return config
 
 
 async def _crawl_page_with_crawl4ai_browser(
