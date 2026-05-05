@@ -7,9 +7,11 @@ import {
   recordDiagnosticEvent,
 } from "@/lib/diagnostics";
 import {
+  exportCrawlerDebugLog,
   exportOperationLogs,
   listOperationLogs,
 } from "@/lib/api/diagnosticsApi";
+import { listCrawlJobs } from "@/lib/api/crawlJobsApi";
 
 const notificationApi = vi.hoisted(() => ({
   notifyError: vi.fn(),
@@ -21,8 +23,13 @@ vi.mock("@/context/NotificationContext", () => ({
 }));
 
 vi.mock("@/lib/api/diagnosticsApi", () => ({
+  exportCrawlerDebugLog: vi.fn(),
   exportOperationLogs: vi.fn(),
   listOperationLogs: vi.fn(),
+}));
+
+vi.mock("@/lib/api/crawlJobsApi", () => ({
+  listCrawlJobs: vi.fn(),
 }));
 
 const backendLogs = [
@@ -43,6 +50,31 @@ const backendLogs = [
     request_id: null,
     message: "保存配置成功",
     created_at: "2026-04-25T09:50:00Z",
+  },
+];
+
+const crawlJobs = [
+  {
+    id: 42,
+    university: "示例大学",
+    school: "计算机学院",
+    start_url: "https://example.edu/faculty",
+    start_urls: ["https://example.edu/faculty"],
+    entry_type: "list",
+    llm_profile_id: null,
+    status: "canceled",
+    progress_current: 0,
+    progress_total: 0,
+    error_message: null,
+    created_at: "2026-04-25T10:00:00Z",
+    updated_at: "2026-04-25T10:30:00Z",
+    page_count: 2,
+    candidate_count: 5,
+    latest_event_message: "任务已取消",
+    input_tokens: 10,
+    output_tokens: 5,
+    total_tokens: 15,
+    duration_seconds: 30,
   },
 ];
 
@@ -102,6 +134,10 @@ describe("DiagnosticLogPanel", () => {
       total: 2,
       filters: {},
     });
+    vi.mocked(listCrawlJobs).mockResolvedValue(crawlJobs);
+    vi.mocked(exportCrawlerDebugLog).mockResolvedValue(
+      new Blob(['{"job_id":42}\n'], { type: "application/jsonl" }),
+    );
     vi.stubGlobal("URL", {
       createObjectURL: vi.fn(() => "blob:diagnostics"),
       revokeObjectURL: vi.fn(),
@@ -139,10 +175,12 @@ describe("DiagnosticLogPanel", () => {
     );
     expect(screen.getByLabelText("导出日期")).toHaveValue(todayInputValue());
     expect(screen.getByRole("button", { name: "导出诊断日志" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导出抓取日志" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "清空本地日志" })).toBeInTheDocument();
     expect(listOperationLogs).toHaveBeenCalledWith(
       expectDateRangeParams({ limit: 20 }),
     );
+    expect(listCrawlJobs).toHaveBeenCalledWith({ limit: 50 });
   });
 
   it("展开和收起诊断内容时使用过渡容器", async () => {
@@ -236,6 +274,24 @@ describe("DiagnosticLogPanel", () => {
         }),
       ]),
     );
+  });
+
+  it("选择抓取任务后可以导出该任务 JSONL", async () => {
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined);
+
+    render(<DiagnosticLogPanel />);
+    await expandPanel();
+
+    fireEvent.change(screen.getByLabelText("智能抓取任务"), {
+      target: { value: "42" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "导出抓取日志" }));
+
+    await waitFor(() => expect(exportCrawlerDebugLog).toHaveBeenCalledWith(42));
+    await waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(1));
+    expect(notificationApi.notifySuccess).toHaveBeenCalledWith("抓取日志已导出");
   });
 
   it("导出失败时会记录本地诊断事件", async () => {

@@ -50,6 +50,10 @@ def append_crawler_debug_event(job_id: int, event: Any) -> Path | None:
     return debug_file
 
 
+def crawler_debug_file_path(job_id: int) -> Path:
+    return get_settings().crawler_debug_dir / f"crawl-job-{job_id}.jsonl"
+
+
 def _safe_debug_json(value: object | None) -> object | None:
     if value is None:
         return None

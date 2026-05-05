@@ -7,6 +7,7 @@ import { listMatchAnalysisJobs } from "@/lib/api/matchAnalysisJobsApi";
 import { clearDiagnosticEvents, getDiagnosticEvents } from "@/lib/diagnostics";
 import { formatApiDateTime } from "@/lib/dateTime";
 import {
+  approveCrawlCandidates,
   cancelCrawlJob,
   getCrawlJob,
   getCrawlJobEvents,
@@ -25,6 +26,7 @@ vi.mock("@/context/SelectionContext", () => ({
 vi.mock("@/context/NotificationContext", () => ({
   useNotification: () => ({
     notifyError: vi.fn(),
+    notifySuccess: vi.fn(),
   }),
 }));
 
@@ -52,6 +54,7 @@ vi.mock("@/lib/api/matchAnalysisJobsApi", () => ({
 
 vi.mock("@/lib/api/crawlJobsApi", () => ({
   listCrawlJobs: vi.fn(),
+  approveCrawlCandidates: vi.fn(),
   cancelCrawlJob: vi.fn(),
   getCrawlJob: vi.fn(),
   listCrawlPages: vi.fn(),
@@ -107,6 +110,12 @@ describe("TasksPage crawler jobs tab", () => {
     vi.mocked(listBatchTaskItems).mockResolvedValue([]);
     vi.mocked(listMatchAnalysisJobs).mockResolvedValue([]);
     vi.mocked(listCrawlJobs).mockResolvedValue([runningJob]);
+    vi.mocked(approveCrawlCandidates).mockResolvedValue({
+      inserted_count: 1,
+      updated_count: 0,
+      skipped_count: 0,
+      message: "审核完成",
+    });
     vi.mocked(cancelCrawlJob).mockResolvedValue(runningJob);
     vi.mocked(getCrawlJob).mockResolvedValue(runningJob);
     vi.mocked(listCrawlPages).mockResolvedValue([
@@ -387,5 +396,54 @@ describe("TasksPage crawler jobs tab", () => {
         }),
       ]),
     );
+  });
+
+  it("allows reviewing saved candidates from a canceled crawl job", async () => {
+    const canceledJob = {
+      ...runningJob,
+      status: "canceled",
+    } as const;
+    vi.mocked(listCrawlJobs).mockResolvedValue([canceledJob]);
+    vi.mocked(getCrawlJob).mockResolvedValue(canceledJob);
+    vi.mocked(listCrawlCandidates).mockResolvedValue([
+      {
+        id: 21,
+        job_id: 7,
+        professor_id: null,
+        name: "张教授",
+        email: "zhang@example.edu",
+        title: null,
+        university: "示例大学",
+        school: "计算机学院",
+        department: null,
+        research_direction: null,
+        recent_papers: [],
+        profile_url: null,
+        source_url: "https://example.edu/faculty",
+        confidence: 0.86,
+        field_confidence: null,
+        evidence: null,
+        review_status: "pending",
+        created_at: "2026-04-26T10:02:00Z",
+        updated_at: "2026-04-26T10:02:00Z",
+      },
+    ]);
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "教师抓取" }));
+    fireEvent.click(await screen.findByRole("button", { name: "查看详情" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "抓取任务详情" });
+    fireEvent.click(
+      within(dialog).getByRole("checkbox", { name: "选择候选导师 张教授" }),
+    );
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "审核通过并导入" }),
+    );
+
+    await waitFor(() => {
+      expect(approveCrawlCandidates).toHaveBeenCalledWith(7, [21]);
+    });
   });
 });

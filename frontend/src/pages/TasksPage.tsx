@@ -636,6 +636,9 @@ export const TasksPage = () => {
     [crawlCandidatePage, crawlJobCandidates],
   );
   const selectedCrawlJobId = selectedCrawlJob?.id ?? null;
+  const selectedCrawlJobCanReview =
+    selectedCrawlJob?.status === "needs_review" ||
+    selectedCrawlJob?.status === "canceled";
   const reviewableCrawlCandidateIds = useMemo(
     () => getReviewableCandidateIds(crawlJobCandidates),
     [crawlJobCandidates],
@@ -1358,7 +1361,9 @@ export const TasksPage = () => {
     const confirmed = await confirm({
       title: `确认通过并导入这 ${selectedReviewableCrawlCandidateIds.length} 位候选导师吗？`,
       description:
-        "通过后，这些候选导师会写入导师库，当前抓取任务会标记为已完成。",
+        selectedCrawlJob?.status === "canceled"
+          ? "通过后，这些候选导师会写入导师库，当前抓取任务会保留已取消状态。"
+          : "通过后，这些候选导师会写入导师库，当前抓取任务会标记为已完成。",
       confirmLabel: "确认导入",
       cancelLabel: "先保留",
       tone: "danger",
@@ -2421,7 +2426,7 @@ export const TasksPage = () => {
                   候选导师
                 </h3>
                 <div className="mt-3 space-y-2">
-                  {selectedCrawlJob.status === "needs_review" ? (
+                  {selectedCrawlJobCanReview ? (
                     <div className="rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div className="text-sm text-amber-900">
@@ -2483,7 +2488,7 @@ export const TasksPage = () => {
                       >
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div className="flex min-w-0 items-center gap-3">
-                            {selectedCrawlJob.status === "needs_review" ? (
+                            {selectedCrawlJobCanReview ? (
                               <input
                                 type="checkbox"
                                 checked={selectedReviewableCrawlCandidateIds.includes(

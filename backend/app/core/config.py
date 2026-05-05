@@ -111,7 +111,7 @@ def get_settings() -> Settings:
         imap_lookback_hours=_get_int_env("IMAP_LOOKBACK_HOURS", 72),
         operation_log_retention_days=_get_int_env("OPERATION_LOG_RETENTION_DAYS", 30),
         enable_background_workers=_get_bool_env("ENABLE_BACKGROUND_WORKERS", True),
-        crawler_debug_enabled=_get_bool_env("CRAWLER_DEBUG", False),
+        crawler_debug_enabled=_get_bool_env("CRAWLER_DEBUG", True),
     )
 
 

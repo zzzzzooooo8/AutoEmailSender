@@ -17,7 +17,10 @@ export const createCrawlJob = (payload: CrawlJobCreatePayloadDTO) =>
     body: JSON.stringify(payload),
   });
 
-export const listCrawlJobs = () => apiFetch<CrawlJobSummaryDTO[]>('/api/crawl-jobs');
+export const listCrawlJobs = (params: { limit?: number } = {}) =>
+  params.limit === undefined
+    ? apiFetch<CrawlJobSummaryDTO[]>('/api/crawl-jobs')
+    : apiFetch<CrawlJobSummaryDTO[]>('/api/crawl-jobs', undefined, params);
 
 export const getCrawlJob = (jobId: number) =>
   apiFetch<CrawlJobSummaryDTO>(`/api/crawl-jobs/${jobId}`);
