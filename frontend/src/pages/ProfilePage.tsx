@@ -162,7 +162,7 @@ const PROFILE_SETUP_STAGES = [
     id: "test",
     label: "4. 测试写信",
     title: "测试写信",
-    description: "保存配置后，发送一封测试邮件。",
+    description: "用当前身份和模型发送一封测试邮件。",
   },
 ] as const satisfies ReadonlyArray<{
   id: ProfileSetupSectionId;
@@ -1041,8 +1041,10 @@ const OutreachTemplateSummaryCard = ({
 const OutreachTemplateModal = ({
   open,
   importingTemplateFile,
+  savingTemplate,
   form,
   onClose,
+  onComplete,
   onImport,
   onModeChange,
   onSubjectChange,
@@ -1050,8 +1052,10 @@ const OutreachTemplateModal = ({
 }: {
   open: boolean;
   importingTemplateFile: boolean;
+  savingTemplate: boolean;
   form: IdentityFormState;
   onClose: () => void;
+  onComplete: () => void;
   onImport: (file: File) => void;
   onModeChange: (value: OutreachGenerationMode) => void;
   onSubjectChange: (value: string) => void;
@@ -1237,14 +1241,16 @@ const OutreachTemplateModal = ({
         <div className="border-t border-stone-200/80 bg-white/80 px-6 py-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="text-xs leading-6 text-stone-500">
-              保存身份后生效。
+              完成编辑会保存到当前身份。
             </div>
             <button
               type="button"
-              onClick={onClose}
-              className="ui-btn-secondary"
+              onClick={onComplete}
+              disabled={savingTemplate}
+              className="ui-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
             >
-              完成编辑
+              {savingTemplate && <Loader2 className="h-4 w-4 animate-spin" />}
+              {savingTemplate ? "正在保存" : "完成编辑"}
             </button>
           </div>
         </div>
@@ -2114,10 +2120,10 @@ export const ProfilePage = () => {
     }));
   };
 
-  const saveIdentity = async () => {
+  const saveIdentity = async (): Promise<IdentityDTO | null> => {
     if (!identityForm.profile_name.trim() || !identityForm.sender_name.trim()) {
       notifyFormErrors("请检查表单", ["请填写配置名称和发件人姓名"]);
-      return;
+      return null;
     }
     if (
       !identityForm.email_address.trim() ||
@@ -2127,13 +2133,13 @@ export const ProfilePage = () => {
       !identityForm.imap_port.trim()
     ) {
       notifyFormErrors("请检查表单", ["请先填写所有带红色星号的身份必填项"]);
-      return;
+      return null;
     }
     const templateValidationMessage =
       getTemplateValidationMessage(identityForm);
     if (templateValidationMessage) {
       notifyFormErrors("请检查表单", [templateValidationMessage]);
-      return;
+      return null;
     }
 
     setSubmittingIdentity(true);
@@ -2150,11 +2156,13 @@ export const ProfilePage = () => {
         "身份保存成功",
         isCreatingIdentity ? "身份已创建。" : "身份已保存。",
       );
+      return saved;
     } catch (saveError) {
       notifyError(
         "身份保存失败",
         getActionErrorMessage(saveError, "身份保存失败"),
       );
+      return null;
     } finally {
       setSubmittingIdentity(false);
     }
@@ -2652,6 +2660,8 @@ export const ProfilePage = () => {
               </label>
             </div>
 
+            {identityActionButtons}
+
             {editingIdentity ? (
               <div className="mt-6">
                 <IdentityConnectionCard
@@ -3026,7 +3036,7 @@ export const ProfilePage = () => {
           <ProfileSetupSection
             sectionId="test"
             title="测试写信"
-            description="保存配置后，发送一封测试邮件。"
+            description="用当前身份和模型发送一封测试邮件。"
             open={openSetupSections.test}
             renderContent={renderedSetupSections.test}
             onToggle={() => toggleSetupSection("test")}
@@ -3038,37 +3048,22 @@ export const ProfilePage = () => {
               </span>
             }
           >
-            <div className="mt-6 grid gap-6 lg:grid-cols-[1fr,0.95fr] lg:items-start">
-              <div>
-                <div className="flex items-center gap-2 text-sm font-semibold text-stone-900">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                  保存配置
-                </div>
-                <p className="mt-2 text-sm leading-6 text-stone-600">
-                  保存身份和模型，测试会使用最新配置。
-                </p>
-                <div className="mt-4 flex flex-wrap gap-3">
-                  {identityActionButtons}
-                </div>
+            <div className="mt-6">
+              <div className="flex items-center gap-2 text-sm font-semibold text-stone-900">
+                <Send className="h-4 w-4 text-primary" />
+                发送测试邮件
               </div>
-
-              <div className="lg:border-l lg:border-stone-200 lg:pl-6">
-                <div className="flex items-center gap-2 text-sm font-semibold text-stone-900">
-                  <Send className="h-4 w-4 text-primary" />
-                  发送测试邮件
-                </div>
-                <p className="mt-2 text-sm leading-6 text-stone-600">
-                  给自己发一封测试邮件，检查模板、附件、模型和 SMTP。
-                </p>
-                <p className="mt-2 text-sm leading-6 text-stone-500">
-                  仅发送到当前身份邮箱，不写入导师任务。
-                </p>
-                <div className="mt-4">
-                  <Link to="/test-compose" className="ui-btn-primary">
-                    <Send className="h-4 w-4" />
-                    进入测试写信页
-                  </Link>
-                </div>
+              <p className="mt-2 text-sm leading-6 text-stone-600">
+                给自己发一封测试邮件，检查模板、附件、模型和 SMTP。
+              </p>
+              <p className="mt-2 text-sm leading-6 text-stone-500">
+                仅发送到当前身份邮箱，不写入导师任务。
+              </p>
+              <div className="mt-4">
+                <Link to="/test-compose" className="ui-btn-primary">
+                  <Send className="h-4 w-4" />
+                  进入测试写信页
+                </Link>
               </div>
             </div>
 
@@ -3087,8 +3082,16 @@ export const ProfilePage = () => {
       <OutreachTemplateModal
         open={templateModalOpen}
         importingTemplateFile={importingTemplateFile}
+        savingTemplate={submittingIdentity}
         form={identityForm}
         onClose={() => setTemplateModalOpen(false)}
+        onComplete={() =>
+          void saveIdentity().then((saved) => {
+            if (saved) {
+              setTemplateModalOpen(false);
+            }
+          })
+        }
         onImport={(file) => void handleTemplateFileImport(file)}
         onModeChange={(value) =>
           setIdentityForm((previous) => ({
