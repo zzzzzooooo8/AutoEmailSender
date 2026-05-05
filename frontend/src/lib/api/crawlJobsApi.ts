@@ -76,3 +76,8 @@ export const retryCrawlJob = (jobId: number, payload: CrawlJobRetryPayloadDTO) =
     method: 'POST',
     body: JSON.stringify(payload),
   });
+
+export const resumeCrawlJobReview = (jobId: number) =>
+  apiFetch<CrawlJobDTO>(`/api/crawl-jobs/${jobId}/resume-review`, {
+    method: 'POST',
+  });

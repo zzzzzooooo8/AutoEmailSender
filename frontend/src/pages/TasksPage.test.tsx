@@ -41,11 +41,13 @@ describe("CrawlJobCard", () => {
         pausingCrawlJobId={null}
         resumingCrawlJobId={null}
         retryingCrawlJobId={null}
+        resumingCrawlJobReviewId={null}
         onOpenDetails={vi.fn()}
         onPause={vi.fn()}
         onResume={vi.fn()}
         onCancel={vi.fn()}
         onRetry={vi.fn()}
+        onResumeReview={vi.fn()}
         formatUpdatedAt={() => "05/01 14:49:02"}
       />,
     );

@@ -7,6 +7,7 @@ import {
   getCrawlJobEvents,
   listCrawlJobs,
   listCrawlPages,
+  resumeCrawlJobReview,
 } from '@/lib/api/crawlJobsApi';
 import type { CrawlJobCreatePayloadDTO, CrawlJobDTO, CrawlJobSummaryDTO } from '@/types';
 
@@ -156,6 +157,30 @@ describe('crawlJobsApi', () => {
     expect(mockedApiFetch).toHaveBeenCalledWith('/api/crawl-jobs/7/enrich', {
       method: 'POST',
       body: JSON.stringify({ candidate_ids: [11, 12] }),
+    });
+  });
+
+  it('resumes crawl job review with the expected URL', async () => {
+    const job = {
+      id: 7,
+      university: '测试大学',
+      school: '计算机学院',
+      start_url: 'https://example.edu/faculty',
+      entry_type: 'list',
+      llm_profile_id: 3,
+      status: 'needs_review',
+      progress_current: 0,
+      progress_total: 0,
+      error_message: null,
+      created_at: '2026-04-26T10:00:00Z',
+      updated_at: '2026-04-26T10:02:00Z',
+    } satisfies CrawlJobDTO;
+    mockedApiFetch.mockResolvedValue(job);
+
+    await expect(resumeCrawlJobReview(7)).resolves.toBe(job);
+
+    expect(mockedApiFetch).toHaveBeenCalledWith('/api/crawl-jobs/7/resume-review', {
+      method: 'POST',
     });
   });
 });

@@ -394,6 +394,52 @@ async def enrich_crawl_candidates(
     )
 
 
+@router.post("/{job_id}/resume-review", response_model=CrawlJobRead)
+async def resume_crawl_job_review(
+    job_id: int,
+    session: AsyncSession = Depends(get_async_session),
+) -> CrawlJob:
+    job = await _get_crawl_job_or_404(session, job_id)
+    original_status = job.status
+    if job.status not in {
+        CrawlJobStatus.CANCELED.value,
+        CrawlJobStatus.FAILED.value,
+    }:
+        raise HTTPException(status_code=409, detail="仅允许已取消或失败的抓取任务转入待审核")
+
+    candidate_count = await session.scalar(
+        select(func.count())
+        .select_from(CrawlCandidate)
+        .where(CrawlCandidate.job_id == job_id),
+    )
+    if int(candidate_count or 0) <= 0:
+        raise HTTPException(status_code=400, detail="当前任务没有可审核的候选导师")
+
+    now = datetime.now(UTC)
+    job.status = CrawlJobStatus.NEEDS_REVIEW.value
+    job.error_message = None
+    job.updated_at = now
+
+    if job.current_run is not None:
+        job.current_run.status = CrawlJobStatus.NEEDS_REVIEW.value
+        job.current_run.updated_at = now
+
+    await record_operation_log(
+        session,
+        category="crawler",
+        event_name="crawl_job.review_resumed",
+        entity_type="crawl_job",
+        entity_id=str(job.id),
+        metadata={
+            "from_status": original_status,
+            "candidate_count": int(candidate_count or 0),
+        },
+    )
+    await session.commit()
+    await session.refresh(job)
+    return job
+
+
 @router.post("/{job_id}/cancel", response_model=CrawlJobRead)
 async def cancel_crawl_job(
     job_id: int,

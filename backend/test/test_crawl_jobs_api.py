@@ -594,6 +594,45 @@ class CrawlJobsApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["detail"], "候选信息正在补全中，请稍后再试")
 
+    def test_resume_review_allows_canceled_job_with_candidates(self) -> None:
+        create_response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "llm_profile_id": None,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        job_id = create_response.json()["id"]
+        self._seed_page_and_candidates(job_id)
+        self._set_job_status(job_id, "canceled")
+
+        response = self.client.post(f"/api/crawl-jobs/{job_id}/resume-review")
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        self.assertEqual(response.json()["status"], "needs_review")
+
+    def test_resume_review_rejects_failed_job_without_candidates(self) -> None:
+        create_response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "llm_profile_id": None,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        job_id = create_response.json()["id"]
+        self._set_job_status(job_id, "failed")
+
+        response = self.client.post(f"/api/crawl-jobs/{job_id}/resume-review")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "当前任务没有可审核的候选导师")
+
     def test_enrich_selected_candidates_requires_candidate_ids(self) -> None:
         create_response = self.client.post(
             "/api/crawl-jobs",

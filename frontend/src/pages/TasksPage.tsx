@@ -44,6 +44,7 @@ import {
   listCrawlPages,
   pauseCrawlJob,
   retryCrawlJob,
+  resumeCrawlJobReview,
   resumeCrawlJob,
 } from "@/lib/api/crawlJobsApi";
 import {
@@ -183,11 +184,13 @@ type CrawlJobCardProps = {
   pausingCrawlJobId: number | null;
   resumingCrawlJobId: number | null;
   retryingCrawlJobId: number | null;
+  resumingCrawlJobReviewId: number | null;
   onOpenDetails: (job: CrawlJobSummaryDTO) => void;
   onPause: (jobId: number) => void;
   onResume: (jobId: number) => void;
   onCancel: (jobId: number) => void;
   onRetry: (jobId: number) => void;
+  onResumeReview: (jobId: number) => void;
   formatUpdatedAt: (value: string) => string;
 };
 
@@ -196,11 +199,13 @@ export const CrawlJobCard = ({
   pausingCrawlJobId,
   resumingCrawlJobId,
   retryingCrawlJobId,
+  resumingCrawlJobReviewId,
   onOpenDetails,
   onPause,
   onResume,
   onCancel,
   onRetry,
+  onResumeReview,
   formatUpdatedAt,
 }: CrawlJobCardProps) => (
   <article className="rounded-2xl border border-stone-200 bg-white px-5 py-5 shadow-sm">
@@ -329,15 +334,28 @@ export const CrawlJobCard = ({
           </>
         ) : null}
         {job.status === "failed" || job.status === "canceled" ? (
-          <button
-            type="button"
-            onClick={() => onRetry(job.id)}
-            disabled={retryingCrawlJobId === job.id}
-            className="ui-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <Play className="h-4 w-4" />
-            {retryingCrawlJobId === job.id ? "重启中..." : "重启抓取"}
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={() => onRetry(job.id)}
+              disabled={retryingCrawlJobId === job.id}
+              className="ui-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Play className="h-4 w-4" />
+              {retryingCrawlJobId === job.id ? "重启中..." : "重启抓取"}
+            </button>
+            <button
+              type="button"
+              onClick={() => onResumeReview(job.id)}
+              disabled={resumingCrawlJobReviewId === job.id}
+              className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              {resumingCrawlJobReviewId === job.id
+                ? "转入中..."
+                : "转入待审核"}
+            </button>
+          </>
         ) : null}
       </div>
     </div>
@@ -504,6 +522,9 @@ export const TasksPage = () => {
   const [retryingCrawlJobId, setRetryingCrawlJobId] = useState<number | null>(
     null,
   );
+  const [resumingCrawlJobReviewId, setResumingCrawlJobReviewId] = useState<
+    number | null
+  >(null);
   const [cancelingMatchJobId, setCancelingMatchJobId] = useState<number | null>(
     null,
   );
@@ -640,7 +661,8 @@ export const TasksPage = () => {
   const selectedCrawlJobId = selectedCrawlJob?.id ?? null;
   const selectedCrawlJobCanReview =
     selectedCrawlJob?.status === "needs_review" ||
-    selectedCrawlJob?.status === "canceled";
+    selectedCrawlJob?.status === "canceled" ||
+    selectedCrawlJob?.status === "failed";
   const reviewableCrawlCandidateIds = useMemo(
     () => getReviewableCandidateIds(crawlJobCandidates),
     [crawlJobCandidates],
@@ -1063,6 +1085,7 @@ export const TasksPage = () => {
     setSelectedCrawlCandidateIds([]);
     setCrawlJobApproveLoading(false);
     setCrawlJobEnrichLoading(false);
+    setResumingCrawlJobReviewId(null);
     setSelectedCandidateDetail(null);
     setCrawlEventPage(1);
     setCrawlDetailPagePage(1);
@@ -1286,6 +1309,37 @@ export const TasksPage = () => {
       notifyError("抓取任务操作失败", message);
     } finally {
       setRetryingCrawlJobId((currentJobId) =>
+        currentJobId === jobId ? null : currentJobId,
+      );
+    }
+  };
+
+  const handleResumeCrawlJobReview = async (jobId: number) => {
+    const confirmed = await confirm({
+      title: "确认转入待审核？",
+      description:
+        "任务不会重新抓取，只会把已有候选导师转入待审核，随后可以继续补全或导入。",
+      confirmLabel: "转入待审核",
+      cancelLabel: "先保留",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    setResumingCrawlJobReviewId(jobId);
+    try {
+      await resumeCrawlJobReview(jobId);
+      notifySuccess("已转入待审核", "可以继续选择候选并补全信息。");
+      await loadCrawlJobs({ showLoading: false });
+      await loadCrawlJobDetails(jobId, { showLoading: false });
+    } catch (actionError) {
+      const message =
+        actionError instanceof Error
+          ? actionError.message
+          : "转入待审核失败";
+      notifyError("转入待审核失败", message);
+    } finally {
+      setResumingCrawlJobReviewId((currentJobId) =>
         currentJobId === jobId ? null : currentJobId,
       );
     }
@@ -1824,6 +1878,7 @@ export const TasksPage = () => {
                 pausingCrawlJobId={pausingCrawlJobId}
                 resumingCrawlJobId={resumingCrawlJobId}
                 retryingCrawlJobId={retryingCrawlJobId}
+                resumingCrawlJobReviewId={resumingCrawlJobReviewId}
                 onOpenDetails={(currentJob) => {
                   safeRecordUserAction({
                     eventName: "tasks.crawl_job_detail_opened",
@@ -1835,6 +1890,7 @@ export const TasksPage = () => {
                 onResume={(jobId) => void handleResumeCrawlJob(jobId)}
                 onCancel={(jobId) => void handleCancelCrawlJob(jobId)}
                 onRetry={(jobId) => void handleRetryCrawlJob(jobId)}
+                onResumeReview={(jobId) => void handleResumeCrawlJobReview(jobId)}
                 formatUpdatedAt={(value) =>
                   formatDisplayTime(value, { withSeconds: true })
                 }
