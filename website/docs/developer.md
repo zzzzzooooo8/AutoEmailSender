@@ -17,7 +17,7 @@
 cd backend
 uv sync
 uv run alembic upgrade head
-uv run uvicorn main:app --reload
+uv run python dev_entry.py
 ```
 
 启动前端：

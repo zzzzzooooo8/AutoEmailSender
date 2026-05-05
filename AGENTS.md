@@ -17,7 +17,7 @@
 - `cd frontend && npm run build`: run TypeScript compilation and create the production bundle.
 - `cd frontend && npm run lint`: run ESLint across TS/TSX files.
 - `cd backend && uv sync`: create or refresh the Python environment.
-- `cd backend && uv run uvicorn main:app --reload`: run the FastAPI API locally on `http://127.0.0.1:8000`.
+- `cd backend && uv run python dev_entry.py`: run the FastAPI API locally on `http://127.0.0.1:8010`.
 - `cd backend && uv run python -m unittest discover test/Plan_B/faculty-directory-crawler/tests`: run crawler unit tests.
 
 ## Coding Style & Naming Conventions

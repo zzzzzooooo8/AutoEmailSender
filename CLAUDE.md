@@ -25,7 +25,7 @@ npm run lint       # Run ESLint
 ### Backend (FastAPI)
 ```bash
 cd backend
-uv run uvicorn main:app --reload   # Start dev server on port 8000
+uv run python dev_entry.py   # Start dev server on port 8010
 ```
 
 ### Backend Testing (Scraper)

@@ -66,6 +66,15 @@ class DesktopRuntimeTests(unittest.TestCase):
         self.assertEqual(options["port"], 48123)
         self.assertIs(options["reload"], False)
 
+    def test_dev_entry_uses_port_8010_by_default(self) -> None:
+        from dev_entry import build_uvicorn_options
+
+        options = build_uvicorn_options([])
+
+        self.assertEqual(options["host"], "127.0.0.1")
+        self.assertEqual(options["port"], 8010)
+        self.assertIs(options["reload"], True)
+
 
 if __name__ == "__main__":
     unittest.main()
