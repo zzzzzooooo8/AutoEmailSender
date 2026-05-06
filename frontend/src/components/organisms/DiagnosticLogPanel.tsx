@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Trash2,
 } from "lucide-react";
+import { NativeSelectField } from "@/components/atoms/NativeSelectField";
 import { useNotification } from "@/context/NotificationContext";
 import { safeRecordUserAction } from "@/lib/diagnosticUserActions";
 import {
@@ -329,25 +330,23 @@ export const DiagnosticLogPanel = () => {
               <SummaryMetric label="导出日期" value={exportDate || "全部"} />
             </div>
 
-            <div className="mt-5 flex flex-wrap items-end gap-3">
-              <label className="block min-w-72">
-                <span className="mb-2 block text-xs font-medium text-stone-500">
-                  智能抓取任务
-                </span>
-                <select
-                  value={selectedCrawlJobId}
-                  onChange={(event) => setSelectedCrawlJobId(event.target.value)}
-                  className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
-                >
-                  <option value="">选择最近 50 次抓取任务</option>
-                  {crawlJobs.map((job) => (
-                    <option key={job.id} value={String(job.id)}>
-                      {formatCrawlJobOption(job)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block min-w-40">
+            <div className="mt-5 flex min-w-0 flex-wrap items-end gap-3">
+              <NativeSelectField
+                label="智能抓取任务"
+                ariaLabel="智能抓取任务"
+                wrapperClassName="min-w-0 max-w-full flex-1 basis-72"
+                shellClassName="h-10 min-w-0"
+                value={selectedCrawlJobId}
+                onChange={(event) => setSelectedCrawlJobId(event.target.value)}
+              >
+                <option value="">选择最近 50 次抓取任务</option>
+                {crawlJobs.map((job) => (
+                  <option key={job.id} value={String(job.id)}>
+                    {formatCrawlJobOption(job)}
+                  </option>
+                ))}
+              </NativeSelectField>
+              <label className="block min-w-0 max-w-48 flex-1 basis-40">
                 <span className="mb-2 block text-xs font-medium text-stone-500">
                   导出日期
                 </span>
@@ -358,40 +357,36 @@ export const DiagnosticLogPanel = () => {
                   className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
                 />
               </label>
-              <label className="block min-w-36">
-                <span className="mb-2 block text-xs font-medium text-stone-500">
-                  Level
-                </span>
-                <select
-                  value={level}
-                  onChange={(event) => setLevel(event.target.value)}
-                  className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
-                >
-                  <option value="">全部</option>
-                  {levelOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block min-w-44">
-                <span className="mb-2 block text-xs font-medium text-stone-500">
-                  Category
-                </span>
-                <select
-                  value={category}
-                  onChange={(event) => setCategory(event.target.value)}
-                  className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
-                >
-                  <option value="">全部</option>
-                  {categoryOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <NativeSelectField
+                label="Level"
+                ariaLabel="Level"
+                wrapperClassName="min-w-0 max-w-48 flex-1 basis-36"
+                shellClassName="h-10 min-w-0"
+                value={level}
+                onChange={(event) => setLevel(event.target.value)}
+              >
+                <option value="">全部</option>
+                {levelOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </NativeSelectField>
+              <NativeSelectField
+                label="Category"
+                ariaLabel="Category"
+                wrapperClassName="min-w-0 max-w-56 flex-1 basis-44"
+                shellClassName="h-10 min-w-0"
+                value={category}
+                onChange={(event) => setCategory(event.target.value)}
+              >
+                <option value="">全部</option>
+                {categoryOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </NativeSelectField>
               <button
                 type="button"
                 onClick={handleRefresh}

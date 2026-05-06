@@ -118,6 +118,11 @@ async function expandPanel() {
   });
 }
 
+function chooseSelectOption(label: string, optionName: string | RegExp) {
+  fireEvent.click(screen.getByRole("button", { name: label }));
+  fireEvent.click(screen.getByRole("option", { name: optionName }));
+}
+
 describe("DiagnosticLogPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -183,6 +188,21 @@ describe("DiagnosticLogPanel", () => {
     expect(listCrawlJobs).toHaveBeenCalledWith({ limit: 50 });
   });
 
+  it("诊断过滤下拉框在窄容器内可以收缩，避免菜单超出卡片", async () => {
+    render(<DiagnosticLogPanel />);
+    await expandPanel();
+
+    const crawlJobSelect = screen.getByRole("button", { name: "智能抓取任务" });
+    const crawlJobWrapper = crawlJobSelect.closest("label");
+    const filterToolbar = crawlJobWrapper?.parentElement;
+
+    expect(filterToolbar).toHaveClass("min-w-0");
+    expect(crawlJobWrapper).toHaveClass("min-w-0");
+    expect(crawlJobWrapper).toHaveClass("flex-1");
+    expect(crawlJobWrapper).toHaveClass("max-w-full");
+    expect(crawlJobSelect).toHaveClass("min-w-0");
+  });
+
   it("展开和收起诊断内容时使用过渡容器", async () => {
     render(<DiagnosticLogPanel />);
     await expandPanel();
@@ -215,12 +235,8 @@ describe("DiagnosticLogPanel", () => {
     fireEvent.change(screen.getByLabelText("导出日期"), {
       target: { value: "2026-04-25" },
     });
-    fireEvent.change(screen.getByLabelText("Level"), {
-      target: { value: "warning" },
-    });
-    fireEvent.change(screen.getByLabelText("Category"), {
-      target: { value: "crawler" },
-    });
+    chooseSelectOption("Level", "warning（后端）");
+    chooseSelectOption("Category", "crawler（后端）");
 
     await waitFor(() =>
       expect(listOperationLogs).toHaveBeenCalledWith(
@@ -284,9 +300,7 @@ describe("DiagnosticLogPanel", () => {
     render(<DiagnosticLogPanel />);
     await expandPanel();
 
-    fireEvent.change(screen.getByLabelText("智能抓取任务"), {
-      target: { value: "42" },
-    });
+    chooseSelectOption("智能抓取任务", /示例大学/);
     fireEvent.click(screen.getByRole("button", { name: "导出抓取日志" }));
 
     await waitFor(() => expect(exportCrawlerDebugLog).toHaveBeenCalledWith(42));
