@@ -2,6 +2,7 @@ import { app, BrowserWindow, Menu, Tray, dialog, ipcMain } from "electron";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { getFrontendIndexPath, startBackend } from "./backend.js";
+import { registerFileSelectionIpc } from "./fileSelection.js";
 import { checkForUpdatesOnStartup, registerUpdateIpc } from "./updates.js";
 import { restoreExistingWindow, shouldHideWindowOnClose } from "./windowLifecycle.js";
 import { getWindowIconPath } from "./windowIcon.js";
@@ -61,12 +62,14 @@ function ensureTray(): void {
 async function createWindow(): Promise<void> {
   backend = await startDesktopBackend();
   ensureTray();
+  Menu.setApplicationMenu(null);
 
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
     minWidth: 1024,
     minHeight: 700,
+    autoHideMenuBar: true,
     icon: getWindowIconPath({
       isPackaged: app.isPackaged,
       resourcesPath: process.resourcesPath,
@@ -78,6 +81,7 @@ async function createWindow(): Promise<void> {
       nodeIntegration: false,
     },
   });
+  mainWindow.setMenuBarVisibility(false);
   mainWindow.webContents.on("did-finish-load", () => {
     mainWindow?.webContents.send("backend:status", currentBackendStatus);
   });
@@ -170,6 +174,7 @@ function publishBackendStatus(status: typeof currentBackendStatus): void {
 
 ipcMain.handle("app:get-version", () => app.getVersion());
 registerUpdateIpc(() => mainWindow);
+registerFileSelectionIpc();
 
 if (hasSingleInstanceLock) {
   app.on("second-instance", showMainWindow);
