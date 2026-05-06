@@ -7,6 +7,16 @@ export const getReviewableCandidateIds = (
     .filter((candidate) => candidate.review_status !== 'rejected')
     .map((candidate) => candidate.id);
 
+export const getReviewableCandidateIdsWithoutEmail = (
+  candidates: CrawlCandidateDTO[],
+): number[] =>
+  candidates
+    .filter(
+      (candidate) =>
+        candidate.review_status !== 'rejected' && !candidate.email?.trim(),
+    )
+    .map((candidate) => candidate.id);
+
 export const pruneSelectedCandidateIds = (
   selectedCandidateIds: number[],
   candidates: CrawlCandidateDTO[],

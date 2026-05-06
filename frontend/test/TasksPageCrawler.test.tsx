@@ -9,6 +9,7 @@ import { formatApiDateTime } from "@/lib/dateTime";
 import {
   approveCrawlCandidates,
   cancelCrawlJob,
+  enrichCrawlCandidates,
   getCrawlJob,
   getCrawlJobEvents,
   listCrawlCandidates,
@@ -58,6 +59,7 @@ vi.mock("@/lib/api/crawlJobsApi", () => ({
   listCrawlJobs: vi.fn(),
   approveCrawlCandidates: vi.fn(),
   cancelCrawlJob: vi.fn(),
+  enrichCrawlCandidates: vi.fn(),
   getCrawlJob: vi.fn(),
   listCrawlPages: vi.fn(),
   listCrawlCandidates: vi.fn(),
@@ -117,6 +119,11 @@ describe("TasksPage crawler jobs tab", () => {
       updated_count: 0,
       skipped_count: 0,
       message: "审核完成",
+    });
+    vi.mocked(enrichCrawlCandidates).mockResolvedValue({
+      updated_count: 2,
+      failed_count: 0,
+      message: "补全完成",
     });
     vi.mocked(cancelCrawlJob).mockResolvedValue(runningJob);
     vi.mocked(getCrawlJob).mockResolvedValue(runningJob);
@@ -520,6 +527,116 @@ describe("TasksPage crawler jobs tab", () => {
 
     await waitFor(() => {
       expect(approveCrawlCandidates).toHaveBeenCalledWith(7, [21]);
+    });
+  });
+
+  it("selects only reviewable candidates without email for enrichment", async () => {
+    const reviewJob = {
+      ...runningJob,
+      status: "needs_review",
+    } as const;
+    vi.mocked(listCrawlJobs).mockResolvedValue([reviewJob]);
+    vi.mocked(getCrawlJob).mockResolvedValue(reviewJob);
+    vi.mocked(listCrawlCandidates).mockResolvedValue([
+      {
+        id: 21,
+        job_id: 7,
+        professor_id: null,
+        name: "张教授",
+        email: null,
+        title: null,
+        university: "示例大学",
+        school: "计算机学院",
+        department: null,
+        research_direction: null,
+        recent_papers: [],
+        profile_url: null,
+        source_url: "https://example.edu/faculty",
+        confidence: 0.86,
+        field_confidence: null,
+        evidence: null,
+        review_status: "pending",
+        created_at: "2026-04-26T10:02:00Z",
+        updated_at: "2026-04-26T10:02:00Z",
+      },
+      {
+        id: 22,
+        job_id: 7,
+        professor_id: null,
+        name: "李教授",
+        email: "li@example.edu",
+        title: null,
+        university: "示例大学",
+        school: "计算机学院",
+        department: null,
+        research_direction: null,
+        recent_papers: [],
+        profile_url: null,
+        source_url: "https://example.edu/faculty",
+        confidence: 0.86,
+        field_confidence: null,
+        evidence: null,
+        review_status: "pending",
+        created_at: "2026-04-26T10:02:00Z",
+        updated_at: "2026-04-26T10:02:00Z",
+      },
+      {
+        id: 23,
+        job_id: 7,
+        professor_id: null,
+        name: "王教授",
+        email: "",
+        title: null,
+        university: "示例大学",
+        school: "计算机学院",
+        department: null,
+        research_direction: null,
+        recent_papers: [],
+        profile_url: null,
+        source_url: "https://example.edu/faculty",
+        confidence: 0.86,
+        field_confidence: null,
+        evidence: null,
+        review_status: "pending",
+        created_at: "2026-04-26T10:02:00Z",
+        updated_at: "2026-04-26T10:02:00Z",
+      },
+      {
+        id: 24,
+        job_id: 7,
+        professor_id: null,
+        name: "赵教授",
+        email: null,
+        title: null,
+        university: "示例大学",
+        school: "计算机学院",
+        department: null,
+        research_direction: null,
+        recent_papers: [],
+        profile_url: null,
+        source_url: "https://example.edu/faculty",
+        confidence: 0.86,
+        field_confidence: null,
+        evidence: null,
+        review_status: "rejected",
+        created_at: "2026-04-26T10:02:00Z",
+        updated_at: "2026-04-26T10:02:00Z",
+      },
+    ]);
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "教师抓取" }));
+    fireEvent.click(await screen.findByRole("button", { name: "查看详情" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "抓取任务详情" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "全选无邮箱" }));
+    expect(within(dialog).getByText(/已选\s+2\s+位/)).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "补全缺失信息" }));
+
+    await waitFor(() => {
+      expect(enrichCrawlCandidates).toHaveBeenCalledWith(7, [21, 23]);
     });
   });
 });

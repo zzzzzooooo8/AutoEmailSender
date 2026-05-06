@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CrawlCandidateDTO } from '@/types';
 import {
+  getReviewableCandidateIdsWithoutEmail,
   getReviewableCandidateIds,
   pruneSelectedCandidateIds,
 } from './reviewCandidates';
@@ -39,6 +40,17 @@ describe('reviewCandidates', () => {
     ];
 
     expect(getReviewableCandidateIds(candidates)).toEqual([1, 3]);
+  });
+
+  it('returns only reviewable candidate ids without email', () => {
+    const candidates = [
+      buildCandidate({ id: 1, email: null, review_status: 'pending' }),
+      buildCandidate({ id: 2, email: '', review_status: 'pending' }),
+      buildCandidate({ id: 3, email: 'alice@example.edu', review_status: 'pending' }),
+      buildCandidate({ id: 4, email: null, review_status: 'rejected' }),
+    ];
+
+    expect(getReviewableCandidateIdsWithoutEmail(candidates)).toEqual([1, 2]);
   });
 
   it('prunes selected ids that no longer exist or were rejected', () => {

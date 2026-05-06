@@ -48,6 +48,7 @@ import {
   resumeCrawlJob,
 } from "@/lib/api/crawlJobsApi";
 import {
+  getReviewableCandidateIdsWithoutEmail,
   getReviewableCandidateIds,
   pruneSelectedCandidateIds,
 } from "@/features/crawl-review/client/reviewCandidates";
@@ -704,6 +705,10 @@ export const TasksPage = () => {
     () => getReviewableCandidateIds(crawlJobCandidates),
     [crawlJobCandidates],
   );
+  const reviewableCrawlCandidateIdsWithoutEmail = useMemo(
+    () => getReviewableCandidateIdsWithoutEmail(crawlJobCandidates),
+    [crawlJobCandidates],
+  );
   const selectedReviewableCrawlCandidateIds = useMemo(
     () =>
       pruneSelectedCandidateIds(selectedCrawlCandidateIds, crawlJobCandidates),
@@ -716,6 +721,17 @@ export const TasksPage = () => {
         selectedReviewableCrawlCandidateIds.includes(candidateId),
       ),
     [reviewableCrawlCandidateIds, selectedReviewableCrawlCandidateIds],
+  );
+  const allReviewableCrawlCandidatesWithoutEmailSelected = useMemo(
+    () =>
+      reviewableCrawlCandidateIdsWithoutEmail.length > 0 &&
+      reviewableCrawlCandidateIdsWithoutEmail.every((candidateId) =>
+        selectedReviewableCrawlCandidateIds.includes(candidateId),
+      ),
+    [
+      reviewableCrawlCandidateIdsWithoutEmail,
+      selectedReviewableCrawlCandidateIds,
+    ],
   );
 
   useEffect(() => {
@@ -2556,7 +2572,8 @@ export const TasksPage = () => {
                           可导入 {reviewableCrawlCandidateIds.length} 位，已选{" "}
                           {selectedReviewableCrawlCandidateIds.length} 位
                           <span className="mt-1 block text-xs text-amber-700">
-                            可反复选择候选补全缺失信息，补全后仍可继续审核。
+                            无邮箱 {reviewableCrawlCandidateIdsWithoutEmail.length}{" "}
+                            位，可反复选择候选补全缺失信息，补全后仍可继续审核。
                           </span>
                         </div>
                         <div className="flex flex-wrap gap-2">
@@ -2576,6 +2593,24 @@ export const TasksPage = () => {
                             className="ui-btn-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             全选可导入
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedCrawlCandidateIds(
+                                reviewableCrawlCandidateIdsWithoutEmail,
+                              )
+                            }
+                            disabled={
+                              reviewableCrawlCandidateIdsWithoutEmail.length ===
+                                0 ||
+                              allReviewableCrawlCandidatesWithoutEmailSelected ||
+                              crawlJobApproveLoading ||
+                              crawlJobEnrichLoading
+                            }
+                            className="ui-btn-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            全选无邮箱
                           </button>
                           <button
                             type="button"
