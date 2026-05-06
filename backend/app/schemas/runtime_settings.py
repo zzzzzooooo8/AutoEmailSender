@@ -1,8 +1,17 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
+
+
+DraftRewriteIntensity = Literal["light", "moderate", "strong"]
+DraftRewriteTone = Literal["polite", "professional", "friendly"]
+DraftRewriteFormality = Literal["natural", "balanced", "formal"]
+DraftRewriteLength = Literal["shorter", "default", "more_detailed"]
+DraftRewriteSpecificity = Literal["concise", "balanced", "detailed"]
+DraftTemplatePreservation = Literal["structure_first", "balanced", "content_first"]
 
 
 class RuntimeSettingsRead(BaseModel):
@@ -12,6 +21,12 @@ class RuntimeSettingsRead(BaseModel):
     crawler_worker_count: int
     crawler_profile_enrichment_concurrency: int
     crawler_host_concurrency: int
+    draft_rewrite_intensity: DraftRewriteIntensity
+    draft_rewrite_tone: DraftRewriteTone
+    draft_rewrite_formality: DraftRewriteFormality
+    draft_rewrite_length: DraftRewriteLength
+    draft_rewrite_specificity: DraftRewriteSpecificity
+    draft_template_preservation: DraftTemplatePreservation
     updated_at: datetime
 
 
@@ -22,3 +37,9 @@ class RuntimeSettingsUpdate(BaseModel):
     crawler_worker_count: int = Field(ge=1, le=8)
     crawler_profile_enrichment_concurrency: int = Field(ge=1, le=20)
     crawler_host_concurrency: int = Field(ge=1, le=8)
+    draft_rewrite_intensity: DraftRewriteIntensity
+    draft_rewrite_tone: DraftRewriteTone
+    draft_rewrite_formality: DraftRewriteFormality
+    draft_rewrite_length: DraftRewriteLength
+    draft_rewrite_specificity: DraftRewriteSpecificity
+    draft_template_preservation: DraftTemplatePreservation

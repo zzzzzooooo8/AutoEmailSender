@@ -51,6 +51,12 @@ class RuntimeSettingsApiTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["match_analysis_job_item_concurrency"], 3)
         self.assertEqual(payload["crawler_host_concurrency"], 1)
+        self.assertEqual(payload["draft_rewrite_intensity"], "moderate")
+        self.assertEqual(payload["draft_rewrite_tone"], "polite")
+        self.assertEqual(payload["draft_rewrite_formality"], "balanced")
+        self.assertEqual(payload["draft_rewrite_length"], "default")
+        self.assertEqual(payload["draft_rewrite_specificity"], "balanced")
+        self.assertEqual(payload["draft_template_preservation"], "structure_first")
 
     def test_patch_runtime_settings_updates_values_and_records_log(self) -> None:
         response = self.client.patch(
@@ -62,11 +68,23 @@ class RuntimeSettingsApiTests(unittest.TestCase):
                 "crawler_worker_count": 3,
                 "crawler_profile_enrichment_concurrency": 4,
                 "crawler_host_concurrency": 2,
+                "draft_rewrite_intensity": "strong",
+                "draft_rewrite_tone": "professional",
+                "draft_rewrite_formality": "formal",
+                "draft_rewrite_length": "more_detailed",
+                "draft_rewrite_specificity": "detailed",
+                "draft_template_preservation": "content_first",
             },
         )
 
         self.assertEqual(response.status_code, 200, msg=response.text)
         self.assertEqual(response.json()["match_analysis_job_item_concurrency"], 4)
+        self.assertEqual(response.json()["draft_rewrite_intensity"], "strong")
+        self.assertEqual(response.json()["draft_rewrite_tone"], "professional")
+        self.assertEqual(response.json()["draft_rewrite_formality"], "formal")
+        self.assertEqual(response.json()["draft_rewrite_length"], "more_detailed")
+        self.assertEqual(response.json()["draft_rewrite_specificity"], "detailed")
+        self.assertEqual(response.json()["draft_template_preservation"], "content_first")
         logs = self.client.get(
             "/api/diagnostics/operation-logs",
             params={"event_name": "runtime_settings.updated"},
@@ -84,6 +102,33 @@ class RuntimeSettingsApiTests(unittest.TestCase):
                 "crawler_worker_count": 3,
                 "crawler_profile_enrichment_concurrency": 4,
                 "crawler_host_concurrency": 2,
+                "draft_rewrite_intensity": "moderate",
+                "draft_rewrite_tone": "polite",
+                "draft_rewrite_formality": "balanced",
+                "draft_rewrite_length": "default",
+                "draft_rewrite_specificity": "balanced",
+                "draft_template_preservation": "structure_first",
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_patch_runtime_settings_rejects_invalid_draft_rewrite_preference(self) -> None:
+        response = self.client.patch(
+            "/api/runtime-settings",
+            json={
+                "match_analysis_job_worker_count": 1,
+                "match_analysis_job_item_concurrency": 4,
+                "match_analysis_job_interval_seconds": 5,
+                "crawler_worker_count": 3,
+                "crawler_profile_enrichment_concurrency": 4,
+                "crawler_host_concurrency": 2,
+                "draft_rewrite_intensity": "rewrite_everything",
+                "draft_rewrite_tone": "polite",
+                "draft_rewrite_formality": "balanced",
+                "draft_rewrite_length": "default",
+                "draft_rewrite_specificity": "balanced",
+                "draft_template_preservation": "structure_first",
             },
         )
 

@@ -18,6 +18,12 @@ def serialize_runtime_settings(settings: AppSetting) -> RuntimeSettingsRead:
         crawler_worker_count=settings.crawler_worker_count,
         crawler_profile_enrichment_concurrency=settings.crawler_profile_enrichment_concurrency,
         crawler_host_concurrency=settings.crawler_host_concurrency,
+        draft_rewrite_intensity=settings.draft_rewrite_intensity,
+        draft_rewrite_tone=settings.draft_rewrite_tone,
+        draft_rewrite_formality=settings.draft_rewrite_formality,
+        draft_rewrite_length=settings.draft_rewrite_length,
+        draft_rewrite_specificity=settings.draft_rewrite_specificity,
+        draft_template_preservation=settings.draft_template_preservation,
         updated_at=settings.updated_at,
     )
 
