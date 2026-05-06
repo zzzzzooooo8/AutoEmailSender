@@ -80,8 +80,14 @@ EMAIL_FULLWIDTH_TRANSLATION = str.maketrans(
 )
 EMAIL_INVISIBLE_PATTERN = re.compile(r"[\u200b\u200c\u200d\ufeff]")
 EMAIL_CHINESE_EMAIL_SYMBOL_PATTERN = re.compile(r"邮箱符号")
-EMAIL_AT_PATTERN = re.compile(r"[\(\[\s]*at[\)\]\s]*", re.IGNORECASE)
-EMAIL_DOT_PATTERN = re.compile(r"[\(\[\s]*dot[\)\]\s]*", re.IGNORECASE)
+EMAIL_AT_PATTERN = re.compile(
+    r"(?:[\(\[]\s*at\s*[\)\]]|(?:(?<=^)|(?<=\s))at(?=$|\s))",
+    re.IGNORECASE,
+)
+EMAIL_DOT_PATTERN = re.compile(
+    r"(?:[\(\[]\s*dot\s*[\)\]]|(?:(?<=^)|(?<=\s))dot(?=$|\s))",
+    re.IGNORECASE,
+)
 EMAIL_CHINESE_DOT_PATTERN = re.compile(r"(?<=[A-Za-z0-9])\s*点\s*(?=[A-Za-z0-9])")
 TITLE_SPLIT_PATTERN = re.compile(r"[、，,/／|｜；;\s]+")
 ALLOWED_TITLES = (

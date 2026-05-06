@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import DateTime, Integer, text
+from sqlalchemy import DateTime, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -63,4 +63,34 @@ class AppSetting(Base):
         Integer,
         nullable=False,
         server_default=text("3600"),
+    )
+    draft_rewrite_intensity: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        server_default=text("'moderate'"),
+    )
+    draft_rewrite_tone: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        server_default=text("'polite'"),
+    )
+    draft_rewrite_formality: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        server_default=text("'balanced'"),
+    )
+    draft_rewrite_length: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        server_default=text("'default'"),
+    )
+    draft_rewrite_specificity: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        server_default=text("'balanced'"),
+    )
+    draft_template_preservation: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        server_default=text("'structure_first'"),
     )

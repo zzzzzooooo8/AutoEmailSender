@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "b6f1a2c3d4e5"
+HEAD_REVISION = "d7a8c9e1f2b3"
 
 
 class ApiEndpointTests(unittest.TestCase):
@@ -1615,6 +1615,72 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(response.json()["current_task"]["status"], "review_required")
         self.assertEqual(response.json()["messages"][-1]["direction"], "draft")
         mocked_generate.assert_not_awaited()
+
+    def test_draft_preview_returns_content_without_persisting_changes(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        self._upload_material(
+            identity_id,
+            filename="resume.txt",
+            content=b"My background covers agent systems.",
+            material_type="resume",
+        )
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "预览导师",
+                "email": "preview-research@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Agent systems",
+                "recent_papers": ["Agent paper"],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        workspace = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(workspace.status_code, 200, msg=workspace.text)
+        task_id = workspace.json()["current_task"]["id"]
+
+        with patch(
+            "app.services.task_runtime.llm_runtime.generate_draft_content",
+            AsyncMock(
+                return_value=self._build_draft_generation_result(
+                    subject="预览主题",
+                    body_text="预览正文",
+                    body_html="<p>预览正文</p>",
+                    prompt_tokens=120,
+                    completion_tokens=30,
+                ),
+            ),
+        ) as mocked_generate:
+            response = self.client.post(f"/api/email-tasks/{task_id}/draft-preview")
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        preview = response.json()
+        self.assertEqual(preview["subject"], "预览主题")
+        self.assertEqual(preview["body_text"], "预览正文")
+        self.assertEqual(preview["usage"]["prompt_tokens"], 120)
+        mocked_generate.assert_awaited_once()
+
+        refreshed = self.client.get(
+            f"/api/workspaces/{professor_id}",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(refreshed.status_code, 200, msg=refreshed.text)
+        self.assertIsNone(refreshed.json()["current_task"]["generated_subject"])
+        self.assertFalse(
+            any(message["direction"] == "draft" for message in refreshed.json()["messages"]),
+        )
 
     def test_calculate_match_keeps_low_score_task_in_matched_state(self) -> None:
         identity_id = self._create_identity(with_imap=False)

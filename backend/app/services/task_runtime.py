@@ -322,6 +322,14 @@ async def generate_task_draft(
 
                 current_match = _build_match_result_from_task(task)
                 runtime_settings = await get_runtime_settings(session)
+                rewrite_preferences = llm_runtime.DraftRewritePreferences(
+                    draft_rewrite_intensity=runtime_settings.draft_rewrite_intensity,
+                    draft_rewrite_tone=runtime_settings.draft_rewrite_tone,
+                    draft_rewrite_formality=runtime_settings.draft_rewrite_formality,
+                    draft_rewrite_length=runtime_settings.draft_rewrite_length,
+                    draft_rewrite_specificity=runtime_settings.draft_rewrite_specificity,
+                    draft_template_preservation=runtime_settings.draft_template_preservation,
+                )
                 generation = await llm_runtime.generate_draft_content(
                     identity=task.identity,
                     primary_material=task.primary_material,
@@ -332,6 +340,7 @@ async def generate_task_draft(
                     custom_body=template_body,
                     current_match=current_match,
                     max_tokens=runtime_settings.draft_max_tokens,
+                    rewrite_preferences=rewrite_preferences,
                 )
                 subject = generation.result.subject
                 body_text = generation.result.body_text
@@ -517,6 +526,60 @@ async def regenerate_task_draft(
     task_id: int,
 ) -> tuple[int, int, int]:
     return await generate_task_draft(session_factory, task_id, force=True)
+
+
+async def preview_task_draft(
+    session_factory: async_sessionmaker[AsyncSession],
+    task_id: int,
+) -> llm_runtime.GeneratedDraftContent:
+    async with session_factory() as session:
+        task = await _load_email_task(session, task_id)
+        if not task:
+            raise ValueError(f"EmailTask {task_id} 不存在")
+
+        outreach_config = _resolve_task_outreach_config(task)
+        if outreach_config.generation_mode == OUTREACH_GENERATION_MODE_TEMPLATE:
+            raise ValueError("模板模式不需要 AI 草稿预览")
+        if task.primary_material is None:
+            raise ValueError("请先选择用于匹配的默认材料")
+        if not _has_professor_research_direction(task.professor):
+            raise ValueError("请先补充导师研究方向，再使用 AI 生成草稿")
+
+        ensure_material_extracted_text(task.primary_material)
+        template_subject = _normalize_nullable_text(outreach_config.subject_template) or (
+            _normalize_nullable_text(task.batch_task.email_subject) if task.batch_task else None
+        )
+        template_body = _normalize_nullable_text(outreach_config.body_text_template) or (
+            _normalize_nullable_text(task.batch_task.email_body) if task.batch_task else None
+        )
+        detail = get_outreach_template_defaults_validation_error(
+            template_subject,
+            template_body,
+        )
+        if detail:
+            raise ValueError(detail)
+
+        current_match = _build_match_result_from_task(task)
+        runtime_settings = await get_runtime_settings(session)
+        rewrite_preferences = llm_runtime.DraftRewritePreferences(
+            draft_rewrite_intensity=runtime_settings.draft_rewrite_intensity,
+            draft_rewrite_tone=runtime_settings.draft_rewrite_tone,
+            draft_rewrite_formality=runtime_settings.draft_rewrite_formality,
+            draft_rewrite_length=runtime_settings.draft_rewrite_length,
+            draft_rewrite_specificity=runtime_settings.draft_rewrite_specificity,
+            draft_template_preservation=runtime_settings.draft_template_preservation,
+        )
+        return await llm_runtime.generate_draft_content(
+            identity=task.identity,
+            primary_material=task.primary_material,
+            llm_profile=task.llm_profile,
+            professor=task.professor,
+            available_materials=list(task.identity.materials),
+            custom_subject=template_subject,
+            custom_body=template_body,
+            current_match=current_match,
+            rewrite_preferences=rewrite_preferences,
+        )
 
 
 def _match_usage_summary(

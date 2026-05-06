@@ -50,6 +50,9 @@ class ProfessorManagementServiceTests(unittest.TestCase):
             "wjchen＠sei．ecnu．edu．cn": "wjchen@sei.ecnu.edu.cn",
             "wjchen\u200b@sei.ecnu.edu.cn": "wjchen@sei.ecnu.edu.cn",
             "wjchen @ sei . ecnu . edu . cn": "wjchen@sei.ecnu.edu.cn",
+            "template@example.edu": "template@example.edu",
+            "wjchen AT sei DOT ecnu DOT edu DOT cn": "wjchen@sei.ecnu.edu.cn",
+            "wjchen[at]sei[dot]ecnu[dot]edu[dot]cn": "wjchen@sei.ecnu.edu.cn",
         }
 
         for value, expected in cases.items():

@@ -3,6 +3,7 @@ import clsx from "clsx";
 import { ChevronDown, Loader2, Save, Settings } from "lucide-react";
 
 import {
+  defaultDraftRewritePreferences,
   getRuntimeSettings,
   updateRuntimeSettings,
   type RuntimeSettingsDTO,
@@ -10,10 +11,14 @@ import {
 } from "@/lib/api/runtimeSettings";
 
 type RuntimeSettingsKey = keyof RuntimeSettingsUpdateDTO;
+type NumberSettingsKey = {
+  [Key in RuntimeSettingsKey]: RuntimeSettingsUpdateDTO[Key] extends number ? Key : never;
+}[RuntimeSettingsKey];
+type PreferenceSettingsKey = Exclude<RuntimeSettingsKey, NumberSettingsKey>;
 type FormState = Record<RuntimeSettingsKey, string>;
 
-const fields: Array<{
-  key: RuntimeSettingsKey;
+const numberFields: Array<{
+  key: NumberSettingsKey;
   label: string;
   hint: string;
   min: number;
@@ -74,7 +79,75 @@ const fields: Array<{
   },
 ];
 
-const emptyForm = fields.reduce((state, field) => {
+const preferenceFields: Array<{
+  key: PreferenceSettingsKey;
+  label: string;
+  hint: string;
+  options: Array<{ value: string; label: string }>;
+}> = [
+  {
+    key: "draft_rewrite_intensity",
+    label: "改写强度",
+    hint: "控制 AI 对模板措辞的调整幅度。",
+    options: [
+      { value: "light", label: "轻微" },
+      { value: "moderate", label: "中等" },
+      { value: "strong", label: "明显" },
+    ],
+  },
+  {
+    key: "draft_rewrite_tone",
+    label: "语气",
+    hint: "控制邮件表达的沟通气质。",
+    options: [
+      { value: "polite", label: "礼貌" },
+      { value: "professional", label: "专业" },
+      { value: "friendly", label: "亲和" },
+    ],
+  },
+  {
+    key: "draft_rewrite_formality",
+    label: "正式程度",
+    hint: "控制句式接近自然表达还是正式学术邮件。",
+    options: [
+      { value: "natural", label: "更自然" },
+      { value: "balanced", label: "默认" },
+      { value: "formal", label: "更正式" },
+    ],
+  },
+  {
+    key: "draft_rewrite_length",
+    label: "长度",
+    hint: "控制 AI 是否压缩或展开模板内容。",
+    options: [
+      { value: "shorter", label: "更短" },
+      { value: "default", label: "默认" },
+      { value: "more_detailed", label: "更详细" },
+    ],
+  },
+  {
+    key: "draft_rewrite_specificity",
+    label: "具体性",
+    hint: "控制匹配理由的细节密度。",
+    options: [
+      { value: "concise", label: "概括" },
+      { value: "balanced", label: "平衡" },
+      { value: "detailed", label: "细节更足" },
+    ],
+  },
+  {
+    key: "draft_template_preservation",
+    label: "模板保留度",
+    hint: "控制 AI 对模板结构和主要话术的保留程度。",
+    options: [
+      { value: "structure_first", label: "优先保留结构" },
+      { value: "balanced", label: "平衡" },
+      { value: "content_first", label: "更重内容表达" },
+    ],
+  },
+];
+
+const emptyForm = [...numberFields, ...preferenceFields].reduce((state, field) => {
   state[field.key] = "";
   return state;
 }, {} as FormState);
@@ -114,7 +187,9 @@ export function OtherSettingsCard() {
     const matchConcurrency = form.match_analysis_job_item_concurrency || "3";
     const crawlConcurrency = form.crawler_profile_enrichment_concurrency || "3";
     const draftMaxTokens = form.draft_max_tokens || "3600";
-    return `草稿 ${draftMaxTokens} / 匹配 ${matchConcurrency} / 抓取 ${crawlConcurrency}`;
+    const draftMode =
+      getPreferenceOptionLabel("draft_rewrite_intensity", form.draft_rewrite_intensity) || "默认";
+    return `草稿 ${draftMaxTokens} / 偏好 ${draftMode} / 匹配 ${matchConcurrency} / 抓取 ${crawlConcurrency}`;
   }, [form]);
 
   const toggleOpen = () => {
@@ -139,6 +214,14 @@ export function OtherSettingsCard() {
     setForm((current) => ({
       ...current,
       [key]: value,
+    }));
+  };
+
+  const resetDraftPreferences = () => {
+    setSavedMessage(null);
+    setForm((current) => ({
+      ...current,
+      ...defaultDraftRewritePreferences,
     }));
   };
 
@@ -176,7 +259,7 @@ export function OtherSettingsCard() {
             </span>
           </div>
           <p className="mt-2 text-sm leading-6 text-stone-600">
-            调整 AI 草稿 token 上限、批量匹配和智能抓取的并发限制。
+            调整 AI 草稿 token 上限、改写偏好、批量匹配和智能抓取的并发限制。
           </p>
         </div>
         <ChevronDown
@@ -203,7 +286,7 @@ export function OtherSettingsCard() {
             ) : (
               <div className="mt-5 space-y-5">
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  {fields.map((field) => (
+                  {numberFields.map((field) => (
                     <label
                       key={field.key}
                       className="block rounded-2xl border border-stone-200 bg-[#fcfbf8] px-4 py-4"
@@ -230,6 +313,59 @@ export function OtherSettingsCard() {
                       </span>
                     </label>
                   ))}
+                </div>
+
+                <div className="space-y-4 border-t border-stone-200 pt-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-base font-semibold text-stone-900">草稿改写偏好</h3>
+                      <p className="mt-1 text-sm leading-6 text-stone-600">
+                        调整 AI 润色模板时的表达方式。
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={resetDraftPreferences}
+                      className="ui-btn-secondary"
+                    >
+                      恢复草稿默认
+                    </button>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {preferenceFields.map((field) => (
+                      <label
+                        key={field.key}
+                        className="block rounded-2xl border border-stone-200 bg-[#fcfbf8] px-4 py-4"
+                      >
+                        <span className="text-sm font-semibold text-stone-900">
+                          {field.label}
+                        </span>
+                        <select
+                          aria-label={field.label}
+                          value={form[field.key]}
+                          onChange={(event) => handleChange(field.key, event.target.value)}
+                          className="mt-3 h-10 w-full rounded-xl border border-stone-200 bg-white px-3 text-sm text-stone-800 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                        >
+                          {field.options.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                        <span className="mt-2 block text-xs leading-5 text-stone-500">
+                          {field.hint}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+
+                  <div className="rounded-2xl border border-stone-200 bg-white px-4 py-4">
+                    <h4 className="text-sm font-semibold text-stone-900">示例效果</h4>
+                    <p className="mt-2 text-sm leading-6 text-stone-600">
+                      {buildDraftPreferencePreview(form)}
+                    </p>
+                  </div>
                 </div>
 
                 {error ? (
@@ -274,18 +410,49 @@ export function OtherSettingsCard() {
 }
 
 function toFormState(settings: RuntimeSettingsDTO): FormState {
-  return fields.reduce((state, field) => {
+  const state = { ...emptyForm };
+  for (const field of numberFields) {
     state[field.key] = String(settings[field.key]);
-    return state;
-  }, {} as FormState);
+  }
+  for (const field of preferenceFields) {
+    state[field.key] = String(settings[field.key]);
+  }
+  return state;
 }
 
 function toUpdatePayload(form: FormState): RuntimeSettingsUpdateDTO {
-  return fields.reduce((payload, field) => {
+  const payload = {} as RuntimeSettingsUpdateDTO;
+  for (const field of numberFields) {
     const value = Number(form[field.key]);
     payload[field.key] = Number.isFinite(value) ? value : field.min;
-    return payload;
-  }, {} as RuntimeSettingsUpdateDTO);
+  }
+  for (const field of preferenceFields) {
+    const defaultValue = defaultDraftRewritePreferences[field.key];
+    const value = field.options.some((option) => option.value === form[field.key])
+      ? form[field.key]
+      : defaultValue;
+    payload[field.key] = value as RuntimeSettingsUpdateDTO[typeof field.key];
+  }
+  return payload;
+}
+
+function getPreferenceOptionLabel(key: PreferenceSettingsKey, value: string): string | null {
+  const field = preferenceFields.find((candidate) => candidate.key === key);
+  return field?.options.find((option) => option.value === value)?.label ?? null;
+}
+
+function buildDraftPreferencePreview(form: FormState): string {
+  const intensity = form.draft_rewrite_intensity;
+  const tone = form.draft_rewrite_tone;
+  const length = form.draft_rewrite_length;
+
+  if (intensity === "strong" && tone === "professional") {
+    return "更主动：我认真关注了您在人工智能方向的研究，尤其希望结合自己的项目经历，进一步了解课题组当前关注的问题。";
+  }
+  if (length === "shorter") {
+    return "我关注到您的人工智能研究方向，希望有机会进一步交流。";
+  }
+  return "我对您在人工智能方向的研究很感兴趣，希望结合自己的经历，进一步了解课题组的研究机会。";
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {

@@ -100,6 +100,14 @@ async def generate_test_compose_draft(
         ensure_material_extracted_text(primary_material)
         pseudo_professor = _build_self_recipient_professor(identity)
         runtime_settings = await get_runtime_settings(session)
+        rewrite_preferences = llm_runtime.DraftRewritePreferences(
+            draft_rewrite_intensity=runtime_settings.draft_rewrite_intensity,
+            draft_rewrite_tone=runtime_settings.draft_rewrite_tone,
+            draft_rewrite_formality=runtime_settings.draft_rewrite_formality,
+            draft_rewrite_length=runtime_settings.draft_rewrite_length,
+            draft_rewrite_specificity=runtime_settings.draft_rewrite_specificity,
+            draft_template_preservation=runtime_settings.draft_template_preservation,
+        )
         generation = await llm_runtime.generate_draft_content(
             identity=identity,
             primary_material=primary_material,
@@ -110,6 +118,7 @@ async def generate_test_compose_draft(
             custom_body=template_body,
             current_match=None,
             max_tokens=runtime_settings.draft_max_tokens,
+            rewrite_preferences=rewrite_preferences,
         )
         compose_session.subject = generation.result.subject
         compose_session.body_text = generation.result.body_text

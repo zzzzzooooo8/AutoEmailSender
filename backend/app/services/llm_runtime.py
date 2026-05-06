@@ -280,6 +280,16 @@ class DraftGenerationResult(BaseModel):
     suggested_material_ids: list[int] = Field(default_factory=list)
 
 
+@dataclass(slots=True)
+class DraftRewritePreferences:
+    draft_rewrite_intensity: str = "moderate"
+    draft_rewrite_tone: str = "polite"
+    draft_rewrite_formality: str = "balanced"
+    draft_rewrite_length: str = "default"
+    draft_rewrite_specificity: str = "balanced"
+    draft_template_preservation: str = "structure_first"
+
+
 class LLMProbeResult(BaseModel):
     ok: bool
     message: str
@@ -334,6 +344,43 @@ class GeneratedMatchEvaluation:
 class GeneratedDraftContent:
     result: DraftGenerationResult
     usage: ChatCompletionUsage | None = None
+
+
+DRAFT_REWRITE_INTENSITY_TEXT = {
+    "light": "轻微，只做必要个性化，最大限度保留原文。",
+    "moderate": "中等，在保留模板结构的基础上优化表达。",
+    "strong": "明显，更主动地优化措辞和连接句，但不从零重写。",
+}
+
+DRAFT_REWRITE_TONE_TEXT = {
+    "polite": "礼貌，更重视谦逊、尊重和边界感。",
+    "professional": "专业，更突出研究表达和学术沟通。",
+    "friendly": "亲和，表达更自然，减少生硬套话。",
+}
+
+DRAFT_REWRITE_FORMALITY_TEXT = {
+    "natural": "更自然，句式更口语化，但保持礼貌。",
+    "balanced": "默认，兼顾自然和正式。",
+    "formal": "更正式，更接近正式学术邮件。",
+}
+
+DRAFT_REWRITE_LENGTH_TEXT = {
+    "shorter": "更短，压缩冗余表达，避免过长段落。",
+    "default": "默认，保持接近模板长度。",
+    "more_detailed": "更详细，允许补充更具体的匹配理由，但不堆砌。",
+}
+
+DRAFT_REWRITE_SPECIFICITY_TEXT = {
+    "concise": "概括，匹配理由更简洁。",
+    "balanced": "平衡，兼顾简洁和具体。",
+    "detailed": "细节更足，更强调导师方向、论文和材料经历的具体连接。",
+}
+
+DRAFT_TEMPLATE_PRESERVATION_TEXT = {
+    "structure_first": "优先保留结构，尽量保持段落顺序和原有话术。",
+    "balanced": "平衡，保留结构，同时允许优化表达。",
+    "content_first": "更重内容表达，允许较多改写个性化内容，但仍不能从零重写。",
+}
 
 
 StructuredResultT = TypeVar(
@@ -494,6 +541,7 @@ async def generate_draft_content(
     custom_body: str | None = None,
     current_match: MatchEvaluationResult | None = None,
     max_tokens: int | None = None,
+    rewrite_preferences: DraftRewritePreferences | None = None,
 ) -> GeneratedDraftContent:
     prompt = build_draft_prompt(
         identity=identity,
@@ -503,6 +551,7 @@ async def generate_draft_content(
         custom_subject=custom_subject,
         custom_body=custom_body,
         current_match=current_match,
+        rewrite_preferences=rewrite_preferences,
     )
     completion = await request_chat_completion(
         llm_profile,
@@ -1006,6 +1055,7 @@ def build_draft_prompt(
     custom_subject: str | None,
     custom_body: str | None,
     current_match: MatchEvaluationResult | None,
+    rewrite_preferences: DraftRewritePreferences | None = None,
 ) -> str:
     match_context = ""
     if current_match is not None:
@@ -1019,6 +1069,7 @@ def build_draft_prompt(
             - keywords: {current_match.keywords}
             """
         ).strip()
+    rewrite_preferences_block = build_draft_rewrite_preferences(rewrite_preferences)
 
     return _build_base_generation_prompt(
         identity=identity,
@@ -1029,6 +1080,8 @@ def build_draft_prompt(
         custom_body=custom_body,
         extra_requirements=f"""
         {match_context or "当前还没有单独计算过匹配，请你自己综合判断邮件内容。"}
+
+        {rewrite_preferences_block}
 
         任务要求：
         1. 必须以提供的套磁信模板为基础润色，不要从零重写。
@@ -1044,6 +1097,47 @@ def build_draft_prompt(
         """,
         current_match=current_match,
     )
+
+
+def build_draft_rewrite_preferences(preferences: DraftRewritePreferences | None) -> str:
+    preferences = preferences or DraftRewritePreferences()
+    intensity = DRAFT_REWRITE_INTENSITY_TEXT.get(
+        preferences.draft_rewrite_intensity,
+        DRAFT_REWRITE_INTENSITY_TEXT["moderate"],
+    )
+    tone = DRAFT_REWRITE_TONE_TEXT.get(
+        preferences.draft_rewrite_tone,
+        DRAFT_REWRITE_TONE_TEXT["polite"],
+    )
+    formality = DRAFT_REWRITE_FORMALITY_TEXT.get(
+        preferences.draft_rewrite_formality,
+        DRAFT_REWRITE_FORMALITY_TEXT["balanced"],
+    )
+    length = DRAFT_REWRITE_LENGTH_TEXT.get(
+        preferences.draft_rewrite_length,
+        DRAFT_REWRITE_LENGTH_TEXT["default"],
+    )
+    specificity = DRAFT_REWRITE_SPECIFICITY_TEXT.get(
+        preferences.draft_rewrite_specificity,
+        DRAFT_REWRITE_SPECIFICITY_TEXT["balanced"],
+    )
+    preservation = DRAFT_TEMPLATE_PRESERVATION_TEXT.get(
+        preferences.draft_template_preservation,
+        DRAFT_TEMPLATE_PRESERVATION_TEXT["structure_first"],
+    )
+    return dedent(
+        f"""
+        草稿改写偏好：
+        - 改写强度：{intensity}
+        - 语气：{tone}
+        - 正式程度：{formality}
+        - 长度：{length}
+        - 具体性：{specificity}
+        - 模板保留度：{preservation}
+
+        这些偏好只影响表达方式，不得覆盖系统要求、JSON 输出结构、富文本 schema、模板保留硬约束和导师研究方向个性化要求。
+        """
+    ).strip()
 
 
 def build_match_and_draft_prompt(
