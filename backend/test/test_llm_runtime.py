@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from app.models import LLMProfile
 from app.services.llm_runtime import (
+    DEFAULT_LLM_MAX_TOKENS,
     build_match_prompt_parts,
     build_draft_prompt,
     build_draft_rewrite_preferences,
@@ -62,6 +63,9 @@ class _FakeAsyncClient:
 
 
 class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    def test_default_llm_max_tokens_is_6000(self) -> None:
+        self.assertEqual(DEFAULT_LLM_MAX_TOKENS, 6000)
+
     def test_build_draft_rewrite_preferences_describes_selected_options(self) -> None:
         preferences = DraftRewritePreferences(
             draft_rewrite_intensity="strong",
@@ -428,20 +432,75 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("套磁信模板正文", prompt)
         self.assertIn("必须以提供的套磁信模板为基础润色", prompt)
         self.assertIn("只允许改动：称呼、匹配理由、个性化一段、结尾、主题", prompt)
-        self.assertIn("不得改写整体结构、段落顺序和主要话术风格", prompt)
+        self.assertIn("模板结构要求", prompt)
+        self.assertIn("保持段落顺序、信息顺序和主要话术", prompt)
         self.assertIn("导师研究方向", prompt)
         self.assertIn("Information Extraction", prompt)
         self.assertIn("围绕导师研究方向", prompt)
-        self.assertIn("轻微", prompt)
+        self.assertIn("改写幅度要求", prompt)
+        self.assertIn("中等", prompt)
         self.assertIn("保留可表达的富文本标记", prompt)
         self.assertIn("加粗", prompt)
         self.assertIn("链接", prompt)
+
+    def test_build_draft_prompt_uses_dynamic_rewrite_constraints_for_strong_preferences(self) -> None:
+        from app.models import IdentityMaterial, IdentityProfile, Professor
+
+        identity = IdentityProfile(
+            name="张三",
+            email_address="sender@example.com",
+            smtp_host="smtp.example.com",
+            smtp_port=465,
+            smtp_username="sender@example.com",
+            smtp_password="secret",
+            default_language="zh-CN",
+            outreach_generation_mode="llm",
+        )
+        primary_material = IdentityMaterial(
+            id=12,
+            identity_id=1,
+            display_name="简历",
+            file_path="data/materials/resume.txt",
+            original_filename="resume.txt",
+            material_type="resume",
+            extracted_text="我做过信息抽取与智能体相关研究。",
+        )
+        professor = Professor(
+            name="李老师",
+            email="prof@example.edu",
+            title="Professor",
+            university="Example University",
+            school="Computer Science",
+            department="AI",
+            research_direction="Information Extraction",
+            recent_papers=[],
+        )
+
+        prompt = build_draft_prompt(
+            identity=identity,
+            primary_material=primary_material,
+            professor=professor,
+            available_materials=[primary_material],
+            custom_subject="申请与{{name}}老师交流",
+            custom_body="老师您好，我是{{sender_name}}。",
+            current_match=None,
+            rewrite_preferences=DraftRewritePreferences(
+                draft_rewrite_intensity="strong",
+                draft_template_preservation="content_first",
+            ),
+        )
+
+        self.assertIn("改写幅度要求：明显", prompt)
+        self.assertIn("模板结构要求：更重内容表达", prompt)
+        self.assertIn("允许在可改动范围内重排信息重心", prompt)
+        self.assertNotIn("只做轻微修改", prompt)
+        self.assertIn("不要从零重写", prompt)
 
     def test_system_draft_prompt_requires_research_direction_and_format_preservation(self) -> None:
         from app.services.llm_runtime import SYSTEM_DRAFT_PROMPT
 
         self.assertIn("导师研究方向", SYSTEM_DRAFT_PROMPT)
-        self.assertIn("轻微", SYSTEM_DRAFT_PROMPT)
+        self.assertIn("改写幅度", SYSTEM_DRAFT_PROMPT)
         self.assertIn("不要从零重写", SYSTEM_DRAFT_PROMPT)
         self.assertIn("保留", SYSTEM_DRAFT_PROMPT)
         self.assertIn("加粗", SYSTEM_DRAFT_PROMPT)

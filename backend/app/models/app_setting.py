@@ -62,7 +62,7 @@ class AppSetting(Base):
     draft_max_tokens: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
-        server_default=text("3600"),
+        server_default=text("6000"),
     )
     draft_rewrite_intensity: Mapped[str] = mapped_column(
         String(32),

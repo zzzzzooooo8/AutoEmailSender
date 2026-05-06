@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "d7a8c9e1f2b3"
+HEAD_REVISION = "e8f2a4b6c9d0"
 
 
 class ApiEndpointTests(unittest.TestCase):
@@ -3740,7 +3740,7 @@ class ApiEndpointTests(unittest.TestCase):
         async def _fake_generate_draft_content(**kwargs):
             self.assertEqual(kwargs["custom_subject"], batch_subject)
             self.assertEqual(kwargs["custom_body"], batch_body_text)
-            self.assertEqual(kwargs["max_tokens"], 3600)
+            self.assertEqual(kwargs["max_tokens"], 6000)
             return self._build_draft_generation_result(
                 subject=f"润色后: {kwargs['custom_subject']}",
                 body_text=f"润色后正文: {kwargs['custom_body']}",

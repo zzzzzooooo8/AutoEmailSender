@@ -26,7 +26,7 @@ from app.services.rich_text import (
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_LLM_TEMPERATURE = 0.2
-DEFAULT_LLM_MAX_TOKENS = 3600
+DEFAULT_LLM_MAX_TOKENS = 6000
 SYSTEM_MATCH_AND_DRAFT_PROMPT = dedent(
     """
     你是研究生套磁助理。你必须只输出 JSON，不要输出任何解释、Markdown 代码块或多余文字。
@@ -182,10 +182,10 @@ SYSTEM_DRAFT_PROMPT = dedent(
 
     额外要求：
     - 只能输出一个 JSON 对象。
-    - 必须保留模板的整体结构、段落顺序和主要话术风格。
+    - 默认应保留模板的整体结构、段落顺序和主要话术风格；具体改写幅度以用户消息中的“草稿改写偏好”和“任务要求”为准。
     - 只允许改动：称呼、匹配理由、个性化一段、结尾、主题。
     - 必须围绕导师研究方向进行个性化改写，不能只写泛泛的“我关注您的研究”。
-    - 只做轻微修改，不要从零重写整封邮件。
+    - 不要从零重写整封邮件；即使偏好要求更强改写，也必须基于模板、导师信息和可见材料。
     - 尽量保留模板中可表达的富文本标记，例如加粗、斜体、链接和列表。
     - 如果模板包含表格，尽量保留其中的信息顺序和语义，但仍按允许的 rich_body 结构输出。
     - rich_body 根节点必须是 {"type":"doc","blocks":[...]}。
@@ -380,6 +380,18 @@ DRAFT_TEMPLATE_PRESERVATION_TEXT = {
     "structure_first": "优先保留结构，尽量保持段落顺序和原有话术。",
     "balanced": "平衡，保留结构，同时允许优化表达。",
     "content_first": "更重内容表达，允许较多改写个性化内容，但仍不能从零重写。",
+}
+
+DRAFT_REWRITE_INTENSITY_REQUIREMENT_TEXT = {
+    "light": "轻微，只做必要个性化和语句顺滑，最大限度保留原文。",
+    "moderate": "中等，在保留模板骨架的基础上优化表达、连接句和个性化内容。",
+    "strong": "明显，可以更主动优化措辞、连接句和个性化段，但必须基于模板与可见材料，不要从零重写。",
+}
+
+DRAFT_TEMPLATE_STRUCTURE_REQUIREMENT_TEXT = {
+    "structure_first": "优先保留结构，保持段落顺序、信息顺序和主要话术。",
+    "balanced": "平衡保留结构，可优化段落内部表达和句间衔接，但不改变模板骨架。",
+    "content_first": "更重内容表达，允许在可改动范围内重排信息重心，但仍需保留模板骨架和原始沟通目的。",
 }
 
 
@@ -1069,7 +1081,9 @@ def build_draft_prompt(
             - keywords: {current_match.keywords}
             """
         ).strip()
+    rewrite_preferences = rewrite_preferences or DraftRewritePreferences()
     rewrite_preferences_block = build_draft_rewrite_preferences(rewrite_preferences)
+    rewrite_constraints_block = build_draft_rewrite_constraints(rewrite_preferences)
 
     return _build_base_generation_prompt(
         identity=identity,
@@ -1083,20 +1097,40 @@ def build_draft_prompt(
 
         {rewrite_preferences_block}
 
+        {rewrite_constraints_block}
+
         任务要求：
         1. 必须以提供的套磁信模板为基础润色，不要从零重写。
         2. 只允许改动：称呼、匹配理由、个性化一段、结尾、主题。
-        3. 不得改写整体结构、段落顺序和主要话术风格。
+        3. 遵循上面的模板结构要求，不要突破模板骨架和原始沟通目的。
         4. 只生成邮件草稿，不要输出 match_score 等匹配字段。
         5. 用中文生成专业、克制、具体的套磁邮件。
         6. rich_body 必须是可渲染为邮件正文的受控富文本 JSON。
         7. suggested_material_ids 只能返回可选材料里存在的 id。
         8. 必须围绕导师研究方向进行个性化改写，研究方向来自“导师信息 - 研究方向”。
-        9. 只做轻微修改，尽量保留可表达的富文本标记，例如加粗、斜体、链接和列表。
+        9. 按上面的改写幅度要求控制改动大小，同时尽量保留可表达的富文本标记，例如加粗、斜体、链接和列表。
         10. 如果模板包含表格，保留表格中的信息顺序和语义，但不要输出 schema 不支持的表格节点。
         """,
         current_match=current_match,
     )
+
+
+def build_draft_rewrite_constraints(preferences: DraftRewritePreferences) -> str:
+    intensity = DRAFT_REWRITE_INTENSITY_REQUIREMENT_TEXT.get(
+        preferences.draft_rewrite_intensity,
+        DRAFT_REWRITE_INTENSITY_REQUIREMENT_TEXT["moderate"],
+    )
+    preservation = DRAFT_TEMPLATE_STRUCTURE_REQUIREMENT_TEXT.get(
+        preferences.draft_template_preservation,
+        DRAFT_TEMPLATE_STRUCTURE_REQUIREMENT_TEXT["structure_first"],
+    )
+    return dedent(
+        f"""
+        改写执行边界：
+        - 改写幅度要求：{intensity}
+        - 模板结构要求：{preservation}
+        """
+    ).strip()
 
 
 def build_draft_rewrite_preferences(preferences: DraftRewritePreferences | None) -> str:
@@ -1135,7 +1169,7 @@ def build_draft_rewrite_preferences(preferences: DraftRewritePreferences | None)
         - 具体性：{specificity}
         - 模板保留度：{preservation}
 
-        这些偏好只影响表达方式，不得覆盖系统要求、JSON 输出结构、富文本 schema、模板保留硬约束和导师研究方向个性化要求。
+        这些偏好只影响表达方式，不得覆盖系统要求、JSON 输出结构、富文本 schema、模板保留边界和导师研究方向个性化要求。
         """
     ).strip()
 
