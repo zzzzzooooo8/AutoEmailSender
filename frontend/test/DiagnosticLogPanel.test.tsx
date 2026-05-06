@@ -203,6 +203,18 @@ describe("DiagnosticLogPanel", () => {
     expect(crawlJobSelect).toHaveClass("min-w-0");
   });
 
+  it("诊断过滤下拉菜单向上浮起展开，避免被折叠卡片裁剪", async () => {
+    render(<DiagnosticLogPanel />);
+    await expandPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: "Category" }));
+
+    const categoryMenu = screen.getByRole("listbox");
+    expect(categoryMenu).toHaveClass("fixed");
+    expect(categoryMenu).not.toHaveClass("relative");
+    expect(categoryMenu).not.toHaveClass("absolute");
+  });
+
   it("展开和收起诊断内容时使用过渡容器", async () => {
     render(<DiagnosticLogPanel />);
     await expandPanel();

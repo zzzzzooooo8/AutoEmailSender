@@ -2,14 +2,17 @@ import {
   Children,
   isValidElement,
   type ChangeEvent,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import clsx from "clsx";
 import { Check, ChevronDown } from "lucide-react";
 
@@ -19,6 +22,7 @@ type NativeSelectFieldProps = {
   wrapperClassName?: string;
   shellClassName?: string;
   selectClassName?: string;
+  menuPlacement?: "popover" | "inline" | "floating-up";
   children: ReactNode;
   id?: string;
   disabled?: boolean;
@@ -79,6 +83,7 @@ export const NativeSelectField = ({
   wrapperClassName,
   shellClassName,
   selectClassName,
+  menuPlacement = "popover",
   children,
   id,
   disabled,
@@ -89,8 +94,10 @@ export const NativeSelectField = ({
   ariaLabel,
 }: NativeSelectFieldProps) => {
   const [open, setOpen] = useState(false);
+  const [floatingMenuStyle, setFloatingMenuStyle] = useState<CSSProperties>();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const menuId = useId();
   const options = useMemo(() => parseOptions(children), [children]);
   const currentValue = String(
@@ -106,7 +113,11 @@ export const NativeSelectField = ({
     }
 
     const handlePointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (
+        !rootRef.current?.contains(target) &&
+        !menuRef.current?.contains(target)
+      ) {
         setOpen(false);
       }
     };
@@ -125,6 +136,46 @@ export const NativeSelectField = ({
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open || menuPlacement !== "floating-up") {
+      return;
+    }
+
+    const updateFloatingMenuStyle = () => {
+      const triggerRect = triggerRef.current?.getBoundingClientRect();
+      if (!triggerRect) {
+        return;
+      }
+
+      const viewportPadding = 12;
+      const gap = 8;
+      const availableAbove = Math.max(
+        120,
+        triggerRect.top - viewportPadding - gap,
+      );
+      const menuWidth = Math.max(triggerRect.width, 176);
+      const left = Math.min(
+        Math.max(viewportPadding, triggerRect.left),
+        Math.max(viewportPadding, window.innerWidth - menuWidth - viewportPadding),
+      );
+
+      setFloatingMenuStyle({
+        left,
+        bottom: Math.max(viewportPadding, window.innerHeight - triggerRect.top + gap),
+        width: menuWidth,
+        maxHeight: Math.min(240, availableAbove),
+      });
+    };
+
+    updateFloatingMenuStyle();
+    window.addEventListener("resize", updateFloatingMenuStyle);
+    window.addEventListener("scroll", updateFloatingMenuStyle, true);
+    return () => {
+      window.removeEventListener("resize", updateFloatingMenuStyle);
+      window.removeEventListener("scroll", updateFloatingMenuStyle, true);
+    };
+  }, [menuPlacement, open]);
 
   const emitChange = (nextValue: string) => {
     if (!onChange) {
@@ -149,12 +200,65 @@ export const NativeSelectField = ({
     }
   };
 
+  const menu = open ? (
+    <div
+      id={menuId}
+      ref={menuRef}
+      role="listbox"
+      style={menuPlacement === "floating-up" ? floatingMenuStyle : undefined}
+      className={clsx(
+        "z-50 overflow-hidden rounded-2xl border border-stone-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.99),rgba(250,250,249,0.97))] p-1 shadow-[0_22px_40px_-26px_rgba(41,37,36,0.34)] backdrop-blur-xl",
+        menuPlacement === "inline"
+          ? "relative mt-2 w-full"
+          : menuPlacement === "floating-up"
+            ? "fixed"
+            : "absolute left-0 top-[calc(100%+0.45rem)] w-full",
+      )}
+    >
+      <div
+        className={clsx(
+          (shouldScroll || menuPlacement === "floating-up") &&
+            "max-h-60 overflow-y-auto pr-0.5",
+        )}
+      >
+        {options.map((option) => {
+          const selected = option.value === currentValue;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              role="option"
+              aria-selected={selected}
+              disabled={option.disabled}
+              onClick={() => {
+                emitChange(option.value);
+                setOpen(false);
+                triggerRef.current?.blur();
+              }}
+              className={clsx(
+                "flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-[13px] leading-5 transition",
+                option.disabled
+                  ? "cursor-not-allowed text-stone-300"
+                  : selected
+                    ? "bg-primary text-white shadow-sm shadow-primary/25"
+                    : "text-stone-700 hover:bg-stone-100/90 hover:text-stone-900",
+              )}
+            >
+              <span className="truncate">{option.label}</span>
+              {selected ? <Check className="h-4 w-4 shrink-0" /> : null}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  ) : null;
+
   return (
     <label className={clsx("block", wrapperClassName)}>
       {label ? (
         <div className="mb-2 text-sm font-medium text-stone-800">{label}</div>
       ) : null}
-      <div ref={rootRef} className="relative">
+      <div ref={rootRef} className="relative min-w-0">
         {name ? <input type="hidden" name={name} value={currentValue} /> : null}
         <button
           id={id}
@@ -189,44 +293,9 @@ export const NativeSelectField = ({
           />
         </button>
 
-        {open ? (
-          <div
-            id={menuId}
-            role="listbox"
-            className="absolute left-0 top-[calc(100%+0.45rem)] z-50 w-full overflow-hidden rounded-2xl border border-stone-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.99),rgba(250,250,249,0.97))] p-1 shadow-[0_22px_40px_-26px_rgba(41,37,36,0.34)] backdrop-blur-xl"
-          >
-            <div className={clsx(shouldScroll && "max-h-60 overflow-y-auto pr-0.5")}>
-              {options.map((option) => {
-                const selected = option.value === currentValue;
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    role="option"
-                    aria-selected={selected}
-                    disabled={option.disabled}
-                    onClick={() => {
-                      emitChange(option.value);
-                      setOpen(false);
-                      triggerRef.current?.blur();
-                    }}
-                    className={clsx(
-                      "flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-[13px] leading-5 transition",
-                      option.disabled
-                        ? "cursor-not-allowed text-stone-300"
-                        : selected
-                          ? "bg-primary text-white shadow-sm shadow-primary/25"
-                          : "text-stone-700 hover:bg-stone-100/90 hover:text-stone-900",
-                    )}
-                  >
-                    <span className="truncate">{option.label}</span>
-                    {selected ? <Check className="h-4 w-4 shrink-0" /> : null}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
+        {menuPlacement === "floating-up" && menu
+          ? createPortal(menu, document.body)
+          : menu}
       </div>
     </label>
   );

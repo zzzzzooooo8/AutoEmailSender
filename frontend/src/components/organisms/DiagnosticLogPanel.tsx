@@ -317,7 +317,7 @@ export const DiagnosticLogPanel = () => {
           onTransitionEnd={handleContentTransitionEnd}
           className="collapsible-card-content"
         >
-          <div className="min-h-0 px-6 pb-6">
+          <div className="collapsible-card-body min-h-0 px-6">
             <div className="mt-5 grid gap-3 sm:grid-cols-3">
               <SummaryMetric
                 label="本地事件"
@@ -336,6 +336,7 @@ export const DiagnosticLogPanel = () => {
                 ariaLabel="智能抓取任务"
                 wrapperClassName="min-w-0 max-w-full flex-1 basis-72"
                 shellClassName="h-10 min-w-0"
+                menuPlacement="floating-up"
                 value={selectedCrawlJobId}
                 onChange={(event) => setSelectedCrawlJobId(event.target.value)}
               >
@@ -362,6 +363,7 @@ export const DiagnosticLogPanel = () => {
                 ariaLabel="Level"
                 wrapperClassName="min-w-0 max-w-48 flex-1 basis-36"
                 shellClassName="h-10 min-w-0"
+                menuPlacement="floating-up"
                 value={level}
                 onChange={(event) => setLevel(event.target.value)}
               >
@@ -377,6 +379,7 @@ export const DiagnosticLogPanel = () => {
                 ariaLabel="Category"
                 wrapperClassName="min-w-0 max-w-56 flex-1 basis-44"
                 shellClassName="h-10 min-w-0"
+                menuPlacement="floating-up"
                 value={category}
                 onChange={(event) => setCategory(event.target.value)}
               >
