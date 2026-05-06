@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from html import escape
+from html import unescape
 import hashlib
 import ipaddress
 import platform
@@ -26,7 +27,11 @@ from app.services.professor_field_normalization import (
     normalize_recent_papers,
     normalize_research_direction,
 )
-from app.services.professor_management import normalize_professor_title
+from app.services.professor_management import (
+    is_valid_professor_email,
+    normalize_professor_email,
+    normalize_professor_title,
+)
 
 
 MAX_TEXT_CHARS = 12000
@@ -614,6 +619,7 @@ def build_candidate_enrichment_prompt(
 - 只输出一个 JSON 对象，不要输出 Markdown、解释或前后缀文本
 - recent_papers 必须是 JSON 数组，例如 ["Paper A", "Paper B"]；不要输出拼接字符串
 - 不要改写已有基础字段
+- 邮箱如出现反爬混淆的连续多个点，例如 name@school...cn，应还原为合法域名 name@school.cn
 - 字段值尽量保持页面原文：页面是中文就保留中文，页面是英文就保留英文；不要翻译、音译或拼音化已有内容
 - 没有证据就保持为空
 
@@ -657,6 +663,7 @@ def build_profile_candidate_prompt(
 - recent_papers 必须是 JSON 数组，例如 ["Paper A", "Paper B"]；不要输出拼接字符串
 - evidence 保持简短，只保留必要摘要，避免大段摘录页面原文
 - 字段值尽量保持页面原文：页面是中文就保留中文，页面是英文就保留英文；不要翻译、音译或拼音化姓名、院校、院系、研究方向等字段值
+- 邮箱如出现反爬混淆的连续多个点，例如 name@school...cn，应还原为合法域名 name@school.cn
 - name 必须来自页面证据；无法确认姓名时返回空字符串
 - university 默认使用：{university}
 - school 默认使用：{school}
@@ -698,14 +705,37 @@ _DOT_REPLACEMENTS = (
     r"\[\s*dot\s*\]",
     r"\s+dot\s+",
 )
+_EMAIL_FULLWIDTH_TRANSLATION = str.maketrans(
+    {
+        "＠": "@",
+        "．": ".",
+        "。": ".",
+        "﹒": ".",
+        "｡": ".",
+        "（": "(",
+        "）": ")",
+        "［": "[",
+        "］": "]",
+        "【": "[",
+        "】": "]",
+        "｛": "{",
+        "｝": "}",
+    }
+)
+_EMAIL_INVISIBLE_PATTERN = re.compile(r"[\u200b\u200c\u200d\ufeff]")
+_EMAIL_CHINESE_EMAIL_SYMBOL_PATTERN = re.compile(r"邮箱符号")
+_EMAIL_CHINESE_DOT_PATTERN = re.compile(r"(?<=[A-Za-z0-9])\s*点\s*(?=[A-Za-z0-9])")
 
 
 def normalize_obfuscated_email_tokens(text: str) -> str:
-    normalized = text
+    normalized = unescape(text).translate(_EMAIL_FULLWIDTH_TRANSLATION)
+    normalized = _EMAIL_INVISIBLE_PATTERN.sub("", normalized)
+    normalized = _EMAIL_CHINESE_EMAIL_SYMBOL_PATTERN.sub("@", normalized)
     for token in _AT_REPLACEMENTS:
         normalized = re.sub(token, "@", normalized, flags=re.IGNORECASE)
     for token in _DOT_REPLACEMENTS:
         normalized = re.sub(token, ".", normalized, flags=re.IGNORECASE)
+    normalized = _EMAIL_CHINESE_DOT_PATTERN.sub(".", normalized)
     normalized = re.sub(r"\s*@\s*", "@", normalized)
     normalized = re.sub(r"\s*\.\s*", ".", normalized)
     return normalized
@@ -713,13 +743,22 @@ def normalize_obfuscated_email_tokens(text: str) -> str:
 
 def extract_first_email_from_text(text: str) -> str | None:
     direct = _EMAIL_PATTERN.findall(text)
-    if direct:
-        return direct[0]
+    direct_email = _first_normalized_valid_email(direct)
+    if direct_email:
+        return direct_email
 
     normalized = normalize_obfuscated_email_tokens(text)
     normalized = re.sub(r"\s+", "", normalized)
     normalized_emails = _EMAIL_PATTERN.findall(normalized)
-    return normalized_emails[0] if normalized_emails else None
+    return _first_normalized_valid_email(normalized_emails)
+
+
+def _first_normalized_valid_email(candidates: Sequence[str]) -> str | None:
+    for candidate in candidates:
+        normalized = normalize_professor_email(candidate)
+        if normalized and is_valid_professor_email(normalized):
+            return normalized
+    return None
 
 
 def _first_valid_email(value: str | None) -> str | None:

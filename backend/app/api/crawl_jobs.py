@@ -45,7 +45,7 @@ from app.services.crawl_job_runs import (
     mark_crawl_job_run_running,
 )
 from app.services.operation_logs import record_operation_log
-from app.services.professor_management import is_valid_professor_email
+from app.services.professor_management import is_valid_professor_email, normalize_professor_email
 from app.services.crawl_job_runtime import enrich_selected_crawl_candidates
 from app.core.database import get_session_factory
 
@@ -251,7 +251,7 @@ async def approve_crawl_candidates(
     now = datetime.now(UTC)
 
     for candidate in candidates:
-        email = candidate.email.strip().lower() if candidate.email else None
+        email = normalize_professor_email(candidate.email)
         if email is None or not is_valid_professor_email(email):
             skipped_count += 1
             continue

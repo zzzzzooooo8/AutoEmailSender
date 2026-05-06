@@ -318,6 +318,18 @@ class CrawlerToolTests(unittest.TestCase):
 
         self.assertEqual(payload["email"], "zhang@example.edu")
 
+    def test_normalize_candidate_payload_repairs_obfuscated_domain_dots(self) -> None:
+        payload = normalize_candidate_payload(
+            ProfessorCandidatePayload(
+                name="陈老师",
+                email="wjchen@sei.ecnu...cn",
+            ),
+            university="示例大学",
+            school="计算机学院",
+        )
+
+        self.assertEqual(payload["email"], "wjchen@sei.ecnu.cn")
+
     def test_professor_candidate_payload_accepts_chinese_aliases(self) -> None:
         candidate = ProfessorCandidatePayload.model_validate(
             {
@@ -413,6 +425,7 @@ class CrawlerToolTests(unittest.TestCase):
         self.assertIn("必须使用英文键", prompt)
         self.assertIn("字段值尽量保持页面原文", prompt)
         self.assertIn("不要翻译、音译或拼音化", prompt)
+        self.assertIn("连续多个点", prompt)
         self.assertIn("recent_papers 必须是 JSON 数组", prompt)
 
     def test_candidate_enrichment_payload_defaults(self) -> None:
@@ -429,12 +442,31 @@ class CrawlerToolTests(unittest.TestCase):
             ),
             "name@example.edu, another@school.cn, third@example.edu.cn",
         )
+        self.assertEqual(
+            normalize_obfuscated_email_tokens(
+                "name（AT）example（DOT）edu, another 邮箱符号 school 点 cn, third＠example．edu"
+            ),
+            "name@example.edu, another@school.cn, third@example.edu",
+        )
 
     def test_extract_first_email_from_text(self) -> None:
         extracted = extract_first_email_from_text(
             "联系人：zhang(AT)example(DOT)edu，lisi AT bupt DOT edu DOT cn，请联系"
         )
         self.assertEqual(extracted, "zhang@example.edu")
+
+    def test_extract_first_email_from_text_handles_simple_obfuscations(self) -> None:
+        cases = {
+            "联系人：wjchen&#64;sei.ecnu.edu.cn": "wjchen@sei.ecnu.edu.cn",
+            "联系人：wjchen＠sei．ecnu．edu．cn": "wjchen@sei.ecnu.edu.cn",
+            "联系人：wjchen\u200b@sei.ecnu.edu.cn": "wjchen@sei.ecnu.edu.cn",
+            "联系人：wjchen @ sei . ecnu . edu . cn": "wjchen@sei.ecnu.edu.cn",
+            "联系人：wjchen 邮箱符号 sei 点 ecnu 点 edu 点 cn": "wjchen@sei.ecnu.edu.cn",
+        }
+
+        for value, expected in cases.items():
+            with self.subTest(value=value):
+                self.assertEqual(extract_first_email_from_text(value), expected)
 
     def test_extract_candidate_profile_enrichment_from_text(self) -> None:
         updates = extract_candidate_profile_enrichment(

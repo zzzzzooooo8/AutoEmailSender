@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+from html import unescape
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -58,7 +59,30 @@ PROFESSOR_TEMPLATE_EXAMPLE_ROW = [
 ]
 
 SUPPORTED_IMPORT_EXTENSIONS = {".csv", ".xlsx"}
-EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+EMAIL_LOCAL_PATTERN = re.compile(r"^[A-Za-z0-9._%+-]+$")
+EMAIL_DOMAIN_LABEL_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
+EMAIL_FULLWIDTH_TRANSLATION = str.maketrans(
+    {
+        "＠": "@",
+        "．": ".",
+        "。": ".",
+        "﹒": ".",
+        "｡": ".",
+        "（": "(",
+        "）": ")",
+        "［": "[",
+        "］": "]",
+        "【": "[",
+        "】": "]",
+        "｛": "{",
+        "｝": "}",
+    }
+)
+EMAIL_INVISIBLE_PATTERN = re.compile(r"[\u200b\u200c\u200d\ufeff]")
+EMAIL_CHINESE_EMAIL_SYMBOL_PATTERN = re.compile(r"邮箱符号")
+EMAIL_AT_PATTERN = re.compile(r"[\(\[\s]*at[\)\]\s]*", re.IGNORECASE)
+EMAIL_DOT_PATTERN = re.compile(r"[\(\[\s]*dot[\)\]\s]*", re.IGNORECASE)
+EMAIL_CHINESE_DOT_PATTERN = re.compile(r"(?<=[A-Za-z0-9])\s*点\s*(?=[A-Za-z0-9])")
 TITLE_SPLIT_PATTERN = re.compile(r"[、，,/／|｜；;\s]+")
 ALLOWED_TITLES = (
     "教授",
@@ -79,8 +103,54 @@ class ParsedProfessorImport:
     failed_count: int
 
 
+def normalize_professor_email(email: str | None) -> str | None:
+    if email is None:
+        return None
+
+    cleaned = _normalize_email_text(str(email))
+    if not cleaned:
+        return None
+    if cleaned.count("@") != 1:
+        return cleaned
+
+    local_part, domain = cleaned.split("@", 1)
+    normalized_domain = re.sub(r"\.{2,}", ".", domain)
+    normalized_domain = normalized_domain.strip(".")
+    return f"{local_part}@{normalized_domain}" if normalized_domain else cleaned
+
+
 def is_valid_professor_email(email: str) -> bool:
-    return bool(EMAIL_PATTERN.match(email.strip()))
+    cleaned = email.strip()
+    if cleaned.count("@") != 1:
+        return False
+
+    local_part, domain = cleaned.split("@", 1)
+    if not local_part or not domain:
+        return False
+    if not EMAIL_LOCAL_PATTERN.fullmatch(local_part):
+        return False
+
+    labels = domain.split(".")
+    if len(labels) < 2:
+        return False
+    if not all(EMAIL_DOMAIN_LABEL_PATTERN.fullmatch(label) for label in labels):
+        return False
+    return labels[-1].isalpha() and len(labels[-1]) >= 2
+
+
+def _normalize_email_text(value: str) -> str:
+    normalized = unescape(value).strip().lower()
+    normalized = normalized.translate(EMAIL_FULLWIDTH_TRANSLATION)
+    normalized = EMAIL_INVISIBLE_PATTERN.sub("", normalized)
+    normalized = EMAIL_CHINESE_EMAIL_SYMBOL_PATTERN.sub("@", normalized)
+    normalized = EMAIL_AT_PATTERN.sub("@", normalized)
+    normalized = EMAIL_DOT_PATTERN.sub(".", normalized)
+    normalized = EMAIL_CHINESE_DOT_PATTERN.sub(".", normalized)
+    normalized = re.sub(r"\s*@\s*", "@", normalized)
+    normalized = re.sub(r"\s*\.\s*", ".", normalized)
+    normalized = re.sub(r"\s+", "", normalized)
+    return normalized
+
 
 
 def normalize_professor_title(title: str | None) -> str | None:
@@ -110,7 +180,7 @@ def normalize_professor_title(title: str | None) -> str | None:
 def normalize_professor_payload(payload: ProfessorUpsertPayload) -> dict[str, Any]:
     return {
         "name": payload.name.strip(),
-        "email": payload.email.strip().lower(),
+        "email": normalize_professor_email(payload.email) or "",
         "title": normalize_professor_title(payload.title),
         "university": payload.university,
         "school": payload.school,
@@ -272,7 +342,7 @@ def _normalize_import_row(row: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
     name = raw_values["name"]
-    email = (raw_values["email"] or "").lower()
+    email = normalize_professor_email(raw_values["email"]) or ""
     if not name or not email or not is_valid_professor_email(email):
         return None
 

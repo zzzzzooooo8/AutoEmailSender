@@ -11,6 +11,7 @@ from app.services.professor_management import (
     PROFESSOR_TEMPLATE_COLUMNS,
     build_professor_template,
     is_valid_professor_email,
+    normalize_professor_email,
     normalize_professor_payload,
     parse_professor_import_file,
 )
@@ -38,6 +39,25 @@ class ProfessorManagementServiceTests(unittest.TestCase):
         for value in invalid_values:
             with self.subTest(value=value):
                 self.assertFalse(is_valid_professor_email(value))
+
+    def test_normalize_professor_email_collapses_obfuscated_domain_dots(self) -> None:
+        self.assertEqual(normalize_professor_email("wjchen@sei.ecnu...cn"), "wjchen@sei.ecnu.cn")
+        self.assertEqual(normalize_professor_email(" WJCHEN@SEI.ECNU...CN "), "wjchen@sei.ecnu.cn")
+
+    def test_normalize_professor_email_handles_simple_obfuscation_characters(self) -> None:
+        cases = {
+            "wjchen&#64;sei.ecnu.edu.cn": "wjchen@sei.ecnu.edu.cn",
+            "wjchen＠sei．ecnu．edu．cn": "wjchen@sei.ecnu.edu.cn",
+            "wjchen\u200b@sei.ecnu.edu.cn": "wjchen@sei.ecnu.edu.cn",
+            "wjchen @ sei . ecnu . edu . cn": "wjchen@sei.ecnu.edu.cn",
+        }
+
+        for value, expected in cases.items():
+            with self.subTest(value=value):
+                self.assertEqual(normalize_professor_email(value), expected)
+
+    def test_email_validation_rejects_un_normalized_empty_domain_labels(self) -> None:
+        self.assertFalse(is_valid_professor_email("wjchen@sei.ecnu...cn"))
 
     def test_normalize_professor_payload_trims_name_and_lowercases_email(self) -> None:
         payload = ProfessorUpsertPayload(
