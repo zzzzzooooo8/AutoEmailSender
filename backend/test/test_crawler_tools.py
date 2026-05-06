@@ -496,6 +496,123 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second, snapshot)
         self.assertEqual(crawl_http.await_count, 1)
 
+    async def test_crawl_page_with_crawl4ai_skips_previously_denied_url(self) -> None:
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://cs.example.edu/faculty/index.htm",
+            university="测试大学",
+            school="计算机学院",
+            session_factory=_FakeSessionFactory(),  # type: ignore[arg-type]
+        )
+        ctx.mark_denied_url("https://cs.example.edu/news/a.htm", "无关新闻页")
+
+        with patch("app.services.crawler_tools.crawl_page_with_http") as mocked_http, patch(
+            "app.services.crawler_tools.browser_investigate"
+        ) as mocked_browser:
+            snapshot = await crawl_page_with_crawl4ai(ctx, "https://cs.example.edu/news/a.htm")
+
+        mocked_http.assert_not_called()
+        mocked_browser.assert_not_called()
+        self.assertEqual(snapshot.status, "failed")
+        self.assertEqual(snapshot.links, [])
+        self.assertIn("已在本轮抓取中判定为无关页面", snapshot.error_message or "")
+
+    async def test_crawl_page_with_crawl4ai_denies_irrelevant_succeeded_page_after_fetch(self) -> None:
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://cs.example.edu/faculty/index.htm",
+            university="测试大学",
+            school="计算机学院",
+            session_factory=_FakeSessionFactory(),  # type: ignore[arg-type]
+        )
+        http_snapshot = PageSnapshot(
+            url="https://cs.example.edu/news/a.htm",
+            title="学院新闻",
+            text="学院召开本科招生宣传会议，欢迎考生报考。",
+            html="<html><body><a href='/news/b.htm'>下一篇</a></body></html>",
+            links=["https://cs.example.edu/news/b.htm"],
+            fetch_method="http",
+            status="succeeded",
+        )
+
+        with patch(
+            "app.services.crawler_tools.crawl_page_with_http",
+            return_value=http_snapshot,
+        ):
+            snapshot = await crawl_page_with_crawl4ai(ctx, "https://cs.example.edu/news/a.htm")
+
+        self.assertEqual(snapshot.status, "failed")
+        self.assertEqual(snapshot.links, [])
+        self.assertTrue(ctx.is_denied_url("https://cs.example.edu/news/a.htm"))
+        self.assertIn("不是导师列表页或导师详情页", snapshot.error_message or "")
+
+    async def test_crawl_page_with_crawl4ai_keeps_faculty_directory_and_profile_pages_allowed(self) -> None:
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://cs.example.edu/faculty/index.htm",
+            university="测试大学",
+            school="计算机学院",
+            session_factory=_FakeSessionFactory(),  # type: ignore[arg-type]
+        )
+        directory_snapshot = PageSnapshot(
+            url="https://cs.example.edu/faculty/index.htm",
+            title="教师名录",
+            text="教师名录 教授 张三 李四 副教授 王五",
+            html="<html><body><a href='/faculty/zhang.htm'>张三</a></body></html>",
+            links=["https://cs.example.edu/faculty/zhang.htm"],
+            fetch_method="http",
+            status="succeeded",
+        )
+        profile_snapshot = PageSnapshot(
+            url="https://cs.example.edu/faculty/zhang.htm",
+            title="张三 教授",
+            text="张三 教授 邮箱 zhang@example.edu 研究方向 人工智能",
+            html="<html><body>张三 教授 邮箱 zhang@example.edu</body></html>",
+            links=[],
+            fetch_method="http",
+            status="succeeded",
+        )
+
+        with patch(
+            "app.services.crawler_tools.crawl_page_with_http",
+            side_effect=[directory_snapshot, profile_snapshot],
+        ):
+            directory = await crawl_page_with_crawl4ai(ctx, "https://cs.example.edu/faculty/index.htm")
+            profile = await crawl_page_with_crawl4ai(ctx, "https://cs.example.edu/faculty/zhang.htm")
+
+        self.assertEqual(directory.status, "succeeded")
+        self.assertEqual(profile.status, "succeeded")
+        self.assertFalse(ctx.is_denied_url("https://cs.example.edu/faculty/index.htm"))
+        self.assertFalse(ctx.is_denied_url("https://cs.example.edu/faculty/zhang.htm"))
+
+    async def test_irrelevant_redirect_marks_requested_and_final_url_denied(self) -> None:
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://cs.example.edu/faculty/index.htm",
+            university="测试大学",
+            school="计算机学院",
+            session_factory=_FakeSessionFactory(),  # type: ignore[arg-type]
+        )
+        redirected_snapshot = PageSnapshot(
+            url="https://cs.example.edu/news/a.htm",
+            title="学院新闻",
+            text="学院新闻 本科招生 宣传会议",
+            html="<html><body>学院新闻</body></html>",
+            links=[],
+            fetch_method="http",
+            status="succeeded",
+        )
+
+        with patch(
+            "app.services.crawler_tools.crawl_page_with_http",
+            return_value=redirected_snapshot,
+        ):
+            snapshot = await crawl_page_with_crawl4ai(ctx, "https://cs.example.edu/go-news")
+
+        self.assertEqual(snapshot.status, "failed")
+        self.assertTrue(ctx.is_denied_url("https://cs.example.edu/go-news"))
+        self.assertTrue(ctx.is_denied_url("https://cs.example.edu/news/a.htm"))
+
     async def test_crawl_page_with_crawl4ai_retries_browser_for_template_placeholders(self) -> None:
         ctx = CrawlToolContext(
             job_id=1,
