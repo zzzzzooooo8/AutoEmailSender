@@ -1468,14 +1468,16 @@ export const ProfessorsPage = () => {
             </div>
             <ul className="mt-5 space-y-2 text-sm leading-6 text-stone-600">
               <li>模板内已包含字段说明和示例行，下载后可直接照着填写。</li>
+              <li>更推荐自己写爬虫脚本先获取导师信息，再批量导入。</li>
               <li>说明行和示例行可以保留，导入时会自动忽略。</li>
+              <li>导入时如果邮箱相同，会覆盖整条导师信息。</li>
               <li>
                 <span className="font-mono text-xs">research_direction</span>{" "}
                 多个方向用中文分号；分隔。
               </li>
               <li>
                 <span className="font-mono text-xs">recent_papers</span>{" "}
-                多篇论文用 | 分隔；同邮箱会覆盖更新；最多保留前 8 篇。
+                多篇论文用 | 分隔，最多保留前 8 篇。
               </li>
             </ul>
           </div>

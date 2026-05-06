@@ -156,7 +156,7 @@ const PROFILE_SETUP_STAGES = [
     id: "model",
     label: "3. 模型配置",
     title: "模型配置",
-    description: "配置可用模型并测试连接。",
+    description: "以 DeepSeek 为示例配置可用模型并测试连接。",
   },
   {
     id: "test",
@@ -2722,7 +2722,7 @@ export const ProfilePage = () => {
           <ProfileSetupSection
             sectionId="model"
             title="模型配置"
-            description="配置可用模型并测试连接。"
+            description="以 DeepSeek 为示例配置可用模型并测试连接。"
             open={openSetupSections.model}
             renderContent={renderedSetupSections.model}
             onToggle={() => toggleSetupSection("model")}
@@ -2778,7 +2778,7 @@ export const ProfilePage = () => {
               </div>
               <div className="mt-3 flex flex-wrap gap-2 text-xs text-stone-500">
                 <span className="rounded-full border border-stone-200 bg-white px-3 py-1">
-                  OpenAI 兼容
+                  DeepSeek 示例
                 </span>
                 <span className="rounded-full border border-stone-200 bg-white px-3 py-1">
                   Temperature {DEFAULT_LLM_TEMPERATURE}
@@ -2802,7 +2802,7 @@ export const ProfilePage = () => {
                     }))
                   }
                   className={inputClassName}
-                  placeholder="示例：主力 GPT-5.4"
+                  placeholder="示例：DeepSeek V4 Flash"
                 />
               </label>
               <label className="block md:col-span-2">
@@ -2816,7 +2816,7 @@ export const ProfilePage = () => {
                     }))
                   }
                   className={inputClassName}
-                  placeholder="示例：https://api.openai.com/v1"
+                  placeholder="示例：https://api.deepseek.com"
                 />
               </label>
               <label className="block">
@@ -2845,7 +2845,7 @@ export const ProfilePage = () => {
                     }))
                   }
                   className={inputClassName}
-                  placeholder="示例：gpt-5.4-mini"
+                  placeholder="示例：deepseek-v4-flash"
                 />
               </label>
             </div>
