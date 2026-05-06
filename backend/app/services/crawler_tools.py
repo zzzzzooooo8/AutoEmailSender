@@ -55,6 +55,47 @@ UNSAFE_CRAWL_URL_MESSAGE = "URL 不允许指向本机、内网或不可解析地
 MULTI_LABEL_PUBLIC_SUFFIXES = ("ac.cn", "com.cn", "edu.cn", "gov.cn", "net.cn", "org.cn")
 SIM_JXUFE_STAFF_HOST = "sim.jxufe.edu.cn"
 SIM_JXUFE_STAFF_DETAIL_FRAGMENT_PATTERN = re.compile(r"^/?staff/detail/(?P<staff_id>\d+)/?$")
+_FACULTY_LIST_PAGE_MARKERS = (
+    "教师名录",
+    "师资队伍",
+    "师资概况",
+    "teacher directory",
+    "faculty",
+)
+_FACULTY_PROFILE_PAGE_MARKERS = (
+    "个人主页",
+    "导师主页",
+    "教师主页",
+    "professor",
+    "profile",
+    "research direction",
+    "研究方向",
+    "邮箱",
+    "职称",
+)
+_IRRELEVANT_PAGE_MARKERS = (
+    "新闻",
+    "通知公告",
+    "招生",
+    "校友",
+    "党建",
+    "搜索",
+    "新闻动态",
+    "学院新闻",
+    "新闻网",
+)
+_BLOCKED_PAGE_MARKERS = (
+    "登录",
+    "统一身份认证",
+    "统一认证",
+    "cas",
+    "download",
+    "附件下载",
+    "文件下载",
+    "maintenance",
+    "error",
+    "blocked",
+)
 SAVE_SAME_BATCH_FAILURE_LIMIT = 2
 SAVE_TOTAL_FAILURE_LIMIT = 4
 SAME_BATCH_SAVE_FAILURE_REASON = (
@@ -64,6 +105,7 @@ TOTAL_SAVE_FAILURE_REASON = (
     "候选保存失败累计达到 4 次，已停止以避免继续消耗 token"
 )
 CrawlPageIntent = Literal["generic", "directory", "profile"]
+CrawlPageKind = Literal["list", "profile", "irrelevant", "blocked", "unknown"]
 _DEFAULT_BROWSER_WAIT_FOR = object()
 
 
@@ -245,6 +287,7 @@ class CrawlToolContext:
     school: str
     session_factory: async_sessionmaker[AsyncSession]
     http_blocked_hosts: set[str] = field(default_factory=set)
+    denied_urls: dict[str, str] = field(default_factory=dict)
     save_failure_budget: SaveFailureBudgetState = field(default_factory=SaveFailureBudgetState)
     page_snapshot_cache: dict[str, PageSnapshot] = field(default_factory=dict)
 
@@ -256,6 +299,17 @@ class CrawlToolContext:
     def is_http_blocked(self, url: str) -> bool:
         host = (urlparse(url).hostname or "").lower()
         return bool(host and host in self.http_blocked_hosts)
+
+    def mark_denied_url(self, url: str, reason: str) -> None:
+        normalized = _normalize_page_cache_url(url)
+        if normalized:
+            self.denied_urls[normalized] = reason
+
+    def is_denied_url(self, url: str) -> bool:
+        return _normalize_page_cache_url(url) in self.denied_urls
+
+    def denied_url_reason(self, url: str) -> str | None:
+        return self.denied_urls.get(_normalize_page_cache_url(url))
 
     def get_cached_page_snapshot(self, url: str) -> PageSnapshot | None:
         return self.page_snapshot_cache.get(_normalize_page_cache_url(url))
@@ -894,6 +948,11 @@ async def crawl_page_with_crawl4ai(
     intent: CrawlPageIntent = "generic",
 ) -> PageSnapshot:
     absolute_url = urljoin(ctx.start_url, url)
+    denied_snapshot = _denied_url_snapshot(ctx, absolute_url, "http")
+    if denied_snapshot is not None:
+        await record_page_snapshot(ctx, denied_snapshot)
+        return denied_snapshot
+
     cached = ctx.get_cached_page_snapshot(absolute_url)
     if cached is not None:
         return cached
@@ -909,14 +968,98 @@ async def crawl_page_with_crawl4ai(
     if _should_use_crawl4ai_fallback(http_snapshot):
         if _is_http_blocked_snapshot(http_snapshot):
             ctx.mark_http_blocked(http_snapshot.url or absolute_url)
-        return await browser_investigate(
+        browser_snapshot = await browser_investigate(
             ctx,
             url,
             goal="",
             intent=intent,
         )
-    ctx.remember_page_snapshot(http_snapshot)
-    return http_snapshot
+        return _apply_runtime_url_denylist_after_fetch(
+            ctx,
+            requested_url=absolute_url,
+            snapshot=browser_snapshot,
+        )
+    processed_snapshot = _apply_runtime_url_denylist_after_fetch(
+        ctx,
+        requested_url=absolute_url,
+        snapshot=http_snapshot,
+    )
+    if processed_snapshot.status == "succeeded":
+        ctx.remember_page_snapshot(processed_snapshot)
+    return processed_snapshot
+
+
+def _denied_url_snapshot(
+    ctx: CrawlToolContext,
+    url: str,
+    fetch_method: str,
+) -> PageSnapshot | None:
+    reason = ctx.denied_url_reason(url)
+    if reason is None:
+        return None
+    snapshot = _failed_snapshot(
+        url=url,
+        fetch_method=fetch_method,
+        error_message=f"该 URL 已在本轮抓取中判定为无关页面，已跳过：{reason}",
+    )
+    snapshot.links = []
+    return snapshot
+
+
+def _apply_runtime_url_denylist_after_fetch(
+    ctx: CrawlToolContext,
+    *,
+    requested_url: str,
+    snapshot: PageSnapshot,
+) -> PageSnapshot:
+    page_kind = _classify_crawl_page_snapshot(snapshot)
+    if page_kind in {"list", "profile", "unknown"}:
+        return snapshot
+
+    reason = (
+        "页面不是导师列表页或导师详情页"
+        if page_kind == "irrelevant"
+        else "页面为登录、认证、下载或确定性不可用页面"
+    )
+    ctx.mark_denied_url(requested_url, reason)
+    if snapshot.url:
+        ctx.mark_denied_url(snapshot.url, reason)
+    return snapshot.model_copy(
+        update={
+            "status": "failed",
+            "links": [],
+            "error_message": f"{reason}，已加入本轮排除列表",
+        }
+    )
+
+
+def _classify_crawl_page_snapshot(snapshot: PageSnapshot) -> CrawlPageKind:
+    text = "\n".join(
+        part
+        for part in (snapshot.title or "", snapshot.url or "", snapshot.text or "")
+        if part
+    )
+    normalized = text.lower()
+
+    if snapshot.status == "failed":
+        message = (snapshot.error_message or "").lower()
+        if any(marker in normalized or marker in message for marker in _BLOCKED_PAGE_MARKERS):
+            return "blocked"
+        return "unknown"
+
+    if any(marker in normalized for marker in _BLOCKED_PAGE_MARKERS):
+        return "blocked"
+    if any(marker in normalized for marker in _FACULTY_LIST_PAGE_MARKERS):
+        return "list"
+    if _EMAIL_PATTERN.search(text) and any(
+        marker in normalized for marker in _FACULTY_PROFILE_PAGE_MARKERS
+    ):
+        return "profile"
+    if any(marker in normalized for marker in _FACULTY_PROFILE_PAGE_MARKERS):
+        return "profile"
+    if any(marker in normalized for marker in _IRRELEVANT_PAGE_MARKERS):
+        return "irrelevant"
+    return "irrelevant"
 
 
 async def _crawl_known_profile_api(
@@ -1014,6 +1157,11 @@ async def browser_investigate(
     intent: CrawlPageIntent = "generic",
 ) -> PageSnapshot:
     absolute_url = urljoin(ctx.start_url, url)
+    denied_snapshot = _denied_url_snapshot(ctx, absolute_url, "browser")
+    if denied_snapshot is not None:
+        await record_page_snapshot(ctx, denied_snapshot)
+        return denied_snapshot
+
     cached = ctx.get_cached_page_snapshot(absolute_url)
     if cached is not None:
         return cached
@@ -1037,9 +1185,15 @@ async def browser_investigate(
         return snapshot
 
     snapshot = await _crawl_page_with_crawl4ai_browser(ctx, absolute_url, goal, intent)
-    await record_page_snapshot(ctx, snapshot)
-    ctx.remember_page_snapshot(snapshot)
-    return snapshot
+    processed_snapshot = _apply_runtime_url_denylist_after_fetch(
+        ctx,
+        requested_url=absolute_url,
+        snapshot=snapshot,
+    )
+    await record_page_snapshot(ctx, processed_snapshot)
+    if processed_snapshot.status == "succeeded":
+        ctx.remember_page_snapshot(processed_snapshot)
+    return processed_snapshot
 
 
 def _should_use_crawl4ai_fallback(snapshot: PageSnapshot) -> bool:
