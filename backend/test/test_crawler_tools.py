@@ -50,6 +50,25 @@ class CrawlerToolTests(unittest.TestCase):
             session_factory=_FakeSessionFactory(),  # type: ignore[arg-type]
         )
 
+    def test_crawl_tool_context_tracks_denied_urls_by_normalized_exact_url(self) -> None:
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://cs.example.edu/faculty/index.htm",
+            university="测试大学",
+            school="计算机学院",
+            session_factory=_FakeSessionFactory(),  # type: ignore[arg-type]
+        )
+
+        ctx.mark_denied_url("https://cs.example.edu/news/a.htm#section", "无关新闻页")
+
+        self.assertTrue(ctx.is_denied_url("https://cs.example.edu/news/a.htm"))
+        self.assertEqual(
+            ctx.denied_url_reason("https://cs.example.edu/news/a.htm#other"),
+            "无关新闻页",
+        )
+        self.assertFalse(ctx.is_denied_url("https://cs.example.edu/news/b.htm"))
+        self.assertFalse(ctx.is_denied_url("https://cs.example.edu/news/"))
+
     def test_save_candidate_batch_fingerprint_ignores_order_and_non_identity_fields(self) -> None:
         first = save_candidate_batch_fingerprint(
             [

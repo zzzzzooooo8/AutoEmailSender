@@ -240,6 +240,7 @@ class CrawlToolContext:
     school: str
     session_factory: async_sessionmaker[AsyncSession]
     http_blocked_hosts: set[str] = field(default_factory=set)
+    denied_urls: dict[str, str] = field(default_factory=dict)
     save_failure_budget: SaveFailureBudgetState = field(default_factory=SaveFailureBudgetState)
     page_snapshot_cache: dict[str, PageSnapshot] = field(default_factory=dict)
 
@@ -251,6 +252,17 @@ class CrawlToolContext:
     def is_http_blocked(self, url: str) -> bool:
         host = (urlparse(url).hostname or "").lower()
         return bool(host and host in self.http_blocked_hosts)
+
+    def mark_denied_url(self, url: str, reason: str) -> None:
+        normalized = _normalize_page_cache_url(url)
+        if normalized:
+            self.denied_urls[normalized] = reason
+
+    def is_denied_url(self, url: str) -> bool:
+        return _normalize_page_cache_url(url) in self.denied_urls
+
+    def denied_url_reason(self, url: str) -> str | None:
+        return self.denied_urls.get(_normalize_page_cache_url(url))
 
     def get_cached_page_snapshot(self, url: str) -> PageSnapshot | None:
         return self.page_snapshot_cache.get(_normalize_page_cache_url(url))
