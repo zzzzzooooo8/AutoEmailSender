@@ -1118,6 +1118,11 @@ async def browser_investigate(
     intent: CrawlPageIntent = "generic",
 ) -> PageSnapshot:
     absolute_url = urljoin(ctx.start_url, url)
+    denied_snapshot = _denied_url_snapshot(ctx, absolute_url, "browser")
+    if denied_snapshot is not None:
+        await record_page_snapshot(ctx, denied_snapshot)
+        return denied_snapshot
+
     cached = ctx.get_cached_page_snapshot(absolute_url)
     if cached is not None:
         return cached
@@ -1141,9 +1146,15 @@ async def browser_investigate(
         return snapshot
 
     snapshot = await _crawl_page_with_crawl4ai_browser(ctx, absolute_url, goal, intent)
-    await record_page_snapshot(ctx, snapshot)
-    ctx.remember_page_snapshot(snapshot)
-    return snapshot
+    processed_snapshot = _apply_runtime_url_denylist_after_fetch(
+        ctx,
+        requested_url=absolute_url,
+        snapshot=snapshot,
+    )
+    await record_page_snapshot(ctx, processed_snapshot)
+    if processed_snapshot.status == "succeeded":
+        ctx.remember_page_snapshot(processed_snapshot)
+    return processed_snapshot
 
 
 def _should_use_crawl4ai_fallback(snapshot: PageSnapshot) -> bool:

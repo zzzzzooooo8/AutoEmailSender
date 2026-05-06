@@ -1775,6 +1775,61 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(snapshot, browser_snapshot)
         self.assertEqual(browser_path.call_count, 1)
 
+    async def test_browser_investigate_skips_previously_denied_url(self) -> None:
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://cs.example.edu/faculty/index.htm",
+            university="测试大学",
+            school="计算机学院",
+            session_factory=_FakeSessionFactory(),  # type: ignore[arg-type]
+        )
+        ctx.mark_denied_url("https://cs.example.edu/news/a.htm", "无关新闻页")
+
+        with patch("app.services.crawler_tools._crawl_page_with_crawl4ai_browser") as mocked_browser:
+            snapshot = await crawler_tools.browser_investigate(
+                ctx,
+                "https://cs.example.edu/news/a.htm",
+                "查找导师邮箱",
+            )
+
+        mocked_browser.assert_not_called()
+        self.assertEqual(snapshot.status, "failed")
+        self.assertEqual(snapshot.links, [])
+        self.assertIn("已在本轮抓取中判定为无关页面", snapshot.error_message or "")
+
+    async def test_browser_investigate_denies_irrelevant_succeeded_page_after_fetch(self) -> None:
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://cs.example.edu/faculty/index.htm",
+            university="测试大学",
+            school="计算机学院",
+            session_factory=_FakeSessionFactory(),  # type: ignore[arg-type]
+        )
+        browser_snapshot = PageSnapshot(
+            url="https://cs.example.edu/news/a.htm",
+            title="通知公告",
+            text="关于本科招生宣传会议的通知",
+            html="<html><body><a href='/news/b.htm'>下一篇</a></body></html>",
+            links=["https://cs.example.edu/news/b.htm"],
+            fetch_method="browser",
+            status="succeeded",
+        )
+
+        with patch(
+            "app.services.crawler_tools._crawl_page_with_crawl4ai_browser",
+            return_value=browser_snapshot,
+        ):
+            snapshot = await crawler_tools.browser_investigate(
+                ctx,
+                "https://cs.example.edu/news/a.htm",
+                "查找导师邮箱",
+            )
+
+        self.assertEqual(snapshot.status, "failed")
+        self.assertEqual(snapshot.links, [])
+        self.assertTrue(ctx.is_denied_url("https://cs.example.edu/news/a.htm"))
+        self.assertIn("不是导师列表页或导师详情页", snapshot.error_message or "")
+
     async def test_crawl4ai_browser_fetch_disables_chromium_https_upgrades(self) -> None:
         crawler_kwargs: list[dict[str, object]] = []
 
