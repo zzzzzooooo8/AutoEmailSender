@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.workspace_support import build_workspace_thread
 from app.core.database import get_async_session, get_session_factory
 from app.schemas.email_task import (
+    DraftPreviewRead,
     EmailTaskApprovalRequest,
     EmailTaskOutreachConfigRequest,
     EmailTaskPrimaryMaterialRequest,
@@ -22,6 +23,7 @@ from app.services.task_runtime import (
     continue_task_manually,
     MatchAnalysisAlreadyRunningError,
     regenerate_task_draft,
+    preview_task_draft,
     start_follow_up_task,
     update_task_outreach_config,
     update_task_primary_material,
@@ -82,6 +84,34 @@ async def generate_draft(
     return await _run_workspace_action(
         session,
         lambda: regenerate_task_draft(get_session_factory(), task_id),
+    )
+
+
+@router.post("/{task_id}/draft-preview", response_model=DraftPreviewRead)
+async def draft_preview(
+    task_id: int,
+) -> DraftPreviewRead:
+    try:
+        generation = await preview_task_draft(get_session_factory(), task_id)
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 404 if "不存在" in detail else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+
+    return DraftPreviewRead(
+        subject=generation.result.subject,
+        body_text=generation.result.body_text,
+        body_html=generation.result.body_html,
+        rich_body=generation.result.rich_body,
+        suggested_material_ids=generation.result.suggested_material_ids,
+        usage=TokenUsageRead(
+            prompt_tokens=generation.usage.prompt_tokens if generation.usage else None,
+            completion_tokens=generation.usage.completion_tokens if generation.usage else None,
+            total_tokens=generation.usage.total_tokens if generation.usage else None,
+            cached_tokens=generation.usage.cached_tokens if generation.usage else None,
+        )
+        if generation.usage is not None
+        else None,
     )
 
 
