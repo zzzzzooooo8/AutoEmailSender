@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   getTemplatePlaceholder,
@@ -37,5 +39,19 @@ describe("templatePlaceholders", () => {
       '<p><span data-template-placeholder="name">导师姓名</span>老师您好，我是<span data-template-placeholder="sender_email">发件邮箱</span></p>',
     );
     expect(serializeTemplatePlaceholderHtml(prepared)).toBe("<p>{{name}}老师您好，我是{{sender_email}}</p>");
+  });
+
+  it("keeps placeholder chips inheriting font weight so surrounding bold text still shows", () => {
+    const css = readFileSync(join(process.cwd(), "src/index.css"), "utf8");
+    const chipRule = css.match(/\.email-placeholder-chip\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+
+    expect(chipRule).toContain("color: inherit;");
+    expect(chipRule).toContain("font-size: inherit;");
+    expect(chipRule).toContain("font-weight: inherit;");
+    expect(chipRule).toContain("line-height: inherit;");
+    expect(chipRule).not.toContain("color: rgb(153 27 27);");
+    expect(chipRule).not.toContain("font-size: 0.8125rem;");
+    expect(chipRule).not.toContain("font-weight: 600;");
+    expect(chipRule).not.toContain("line-height: 1.45;");
   });
 });

@@ -337,11 +337,11 @@ select.form-input,
   border: 1px solid rgb(254 202 202);
   border-radius: 999px;
   background: rgb(254 242 242);
-  color: rgb(153 27 27);
+  color: inherit;
   padding: 0 0.5rem;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  line-height: 1.45;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
   vertical-align: baseline;
 }
 
