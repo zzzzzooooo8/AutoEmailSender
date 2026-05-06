@@ -7,6 +7,7 @@ export interface RuntimeSettingsDTO {
   crawler_worker_count: number;
   crawler_profile_enrichment_concurrency: number;
   crawler_host_concurrency: number;
+  draft_max_tokens: number;
   updated_at: string;
 }
 

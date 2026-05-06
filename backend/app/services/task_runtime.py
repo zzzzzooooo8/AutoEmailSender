@@ -42,6 +42,7 @@ from app.services.outreach_templates import (
     resolve_outreach_template_config,
 )
 from app.services.rich_text import normalize_email_html, text_to_email_html
+from app.services.runtime_settings import get_runtime_settings
 
 
 TASK_RELATION_OPTIONS = (
@@ -320,6 +321,7 @@ async def generate_task_draft(
                     raise ValueError(detail)
 
                 current_match = _build_match_result_from_task(task)
+                runtime_settings = await get_runtime_settings(session)
                 generation = await llm_runtime.generate_draft_content(
                     identity=task.identity,
                     primary_material=task.primary_material,
@@ -329,6 +331,7 @@ async def generate_task_draft(
                     custom_subject=template_subject,
                     custom_body=template_body,
                     current_match=current_match,
+                    max_tokens=runtime_settings.draft_max_tokens,
                 )
                 subject = generation.result.subject
                 body_text = generation.result.body_text

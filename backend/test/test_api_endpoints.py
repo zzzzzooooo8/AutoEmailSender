@@ -3674,6 +3674,7 @@ class ApiEndpointTests(unittest.TestCase):
         async def _fake_generate_draft_content(**kwargs):
             self.assertEqual(kwargs["custom_subject"], batch_subject)
             self.assertEqual(kwargs["custom_body"], batch_body_text)
+            self.assertEqual(kwargs["max_tokens"], 3600)
             return self._build_draft_generation_result(
                 subject=f"润色后: {kwargs['custom_subject']}",
                 body_text=f"润色后正文: {kwargs['custom_body']}",

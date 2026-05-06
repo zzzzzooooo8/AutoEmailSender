@@ -124,7 +124,7 @@ type TestComposeSetupStatus = "unchecked" | "loading" | "completed" | "pending";
 
 const DEFAULT_LLM_PROVIDER = "openai";
 const DEFAULT_LLM_TEMPERATURE = 0.2;
-const DEFAULT_LLM_MAX_TOKENS = 1800;
+const DEFAULT_LLM_MAX_TOKENS = 3600;
 const PRIMARY_MATERIAL_EXTENSIONS = [".pdf", ".doc", ".docx", ".txt", ".md"];
 const TEMPLATE_FILE_ACCEPT = ".docx,.html,.htm,.txt,.md";
 const TEMPLATE_PLACEHOLDERS = [
@@ -2784,7 +2784,7 @@ export const ProfilePage = () => {
                   Temperature {DEFAULT_LLM_TEMPERATURE}
                 </span>
                 <span className="rounded-full border border-stone-200 bg-white px-3 py-1">
-                  Max Tokens {DEFAULT_LLM_MAX_TOKENS}
+                  草稿 Token 默认 {DEFAULT_LLM_MAX_TOKENS}
                 </span>
               </div>
             </div>

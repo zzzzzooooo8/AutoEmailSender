@@ -12,6 +12,7 @@ class RuntimeSettingsRead(BaseModel):
     crawler_worker_count: int
     crawler_profile_enrichment_concurrency: int
     crawler_host_concurrency: int
+    draft_max_tokens: int
     updated_at: datetime
 
 
@@ -22,3 +23,4 @@ class RuntimeSettingsUpdate(BaseModel):
     crawler_worker_count: int = Field(ge=1, le=8)
     crawler_profile_enrichment_concurrency: int = Field(ge=1, le=20)
     crawler_host_concurrency: int = Field(ge=1, le=8)
+    draft_max_tokens: int = Field(ge=256, le=32000)

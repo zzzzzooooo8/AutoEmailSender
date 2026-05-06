@@ -51,6 +51,7 @@ class RuntimeSettingsApiTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["match_analysis_job_item_concurrency"], 3)
         self.assertEqual(payload["crawler_host_concurrency"], 1)
+        self.assertEqual(payload["draft_max_tokens"], 3600)
 
     def test_patch_runtime_settings_updates_values_and_records_log(self) -> None:
         response = self.client.patch(
@@ -62,11 +63,13 @@ class RuntimeSettingsApiTests(unittest.TestCase):
                 "crawler_worker_count": 3,
                 "crawler_profile_enrichment_concurrency": 4,
                 "crawler_host_concurrency": 2,
+                "draft_max_tokens": 4800,
             },
         )
 
         self.assertEqual(response.status_code, 200, msg=response.text)
         self.assertEqual(response.json()["match_analysis_job_item_concurrency"], 4)
+        self.assertEqual(response.json()["draft_max_tokens"], 4800)
         logs = self.client.get(
             "/api/diagnostics/operation-logs",
             params={"event_name": "runtime_settings.updated"},
@@ -84,6 +87,23 @@ class RuntimeSettingsApiTests(unittest.TestCase):
                 "crawler_worker_count": 3,
                 "crawler_profile_enrichment_concurrency": 4,
                 "crawler_host_concurrency": 2,
+                "draft_max_tokens": 4800,
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_patch_runtime_settings_rejects_draft_max_tokens_out_of_range(self) -> None:
+        response = self.client.patch(
+            "/api/runtime-settings",
+            json={
+                "match_analysis_job_worker_count": 1,
+                "match_analysis_job_item_concurrency": 4,
+                "match_analysis_job_interval_seconds": 5,
+                "crawler_worker_count": 3,
+                "crawler_profile_enrichment_concurrency": 4,
+                "crawler_host_concurrency": 2,
+                "draft_max_tokens": 0,
             },
         )
 

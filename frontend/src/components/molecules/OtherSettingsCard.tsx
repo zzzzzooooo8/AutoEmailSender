@@ -21,6 +21,13 @@ const fields: Array<{
   restartRequired?: boolean;
 }> = [
   {
+    key: "draft_max_tokens",
+    label: "AI 草稿输出 token 上限",
+    hint: "LLM 生成邮件草稿时传给模型的 max tokens，全局生效。",
+    min: 256,
+    max: 32000,
+  },
+  {
     key: "match_analysis_job_item_concurrency",
     label: "批量匹配分析并发数",
     hint: "单个批量匹配任务内同时分析的导师数量，保存后下一轮后端任务生效。",
@@ -106,7 +113,8 @@ export function OtherSettingsCard() {
   const summary = useMemo(() => {
     const matchConcurrency = form.match_analysis_job_item_concurrency || "3";
     const crawlConcurrency = form.crawler_profile_enrichment_concurrency || "3";
-    return `匹配 ${matchConcurrency} / 抓取 ${crawlConcurrency}`;
+    const draftMaxTokens = form.draft_max_tokens || "3600";
+    return `草稿 ${draftMaxTokens} / 匹配 ${matchConcurrency} / 抓取 ${crawlConcurrency}`;
   }, [form]);
 
   const toggleOpen = () => {
@@ -168,7 +176,7 @@ export function OtherSettingsCard() {
             </span>
           </div>
           <p className="mt-2 text-sm leading-6 text-stone-600">
-            调整批量匹配和智能抓取的并发限制。
+            调整 AI 草稿 token 上限、批量匹配和智能抓取的并发限制。
           </p>
         </div>
         <ChevronDown

@@ -26,7 +26,7 @@ from app.services.rich_text import (
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_LLM_TEMPERATURE = 0.2
-DEFAULT_LLM_MAX_TOKENS = 1800
+DEFAULT_LLM_MAX_TOKENS = 3600
 SYSTEM_MATCH_AND_DRAFT_PROMPT = dedent(
     """
     你是研究生套磁助理。你必须只输出 JSON，不要输出任何解释、Markdown 代码块或多余文字。
@@ -393,6 +393,7 @@ async def generate_match_and_draft(
     available_materials: list[IdentityMaterial],
     custom_subject: str | None = None,
     custom_body: str | None = None,
+    max_tokens: int | None = None,
 ) -> GeneratedMatchAndDraft:
     prompt = build_match_and_draft_prompt(
         identity=identity,
@@ -415,7 +416,7 @@ async def generate_match_and_draft(
             },
         ],
         "temperature": llm_profile.temperature if llm_profile.temperature is not None else DEFAULT_LLM_TEMPERATURE,
-        "max_tokens": llm_profile.max_tokens or DEFAULT_LLM_MAX_TOKENS,
+        "max_tokens": max_tokens or DEFAULT_LLM_MAX_TOKENS,
     }
     completion = await request_chat_completion(llm_profile, payload)
 
@@ -492,6 +493,7 @@ async def generate_draft_content(
     custom_subject: str | None = None,
     custom_body: str | None = None,
     current_match: MatchEvaluationResult | None = None,
+    max_tokens: int | None = None,
 ) -> GeneratedDraftContent:
     prompt = build_draft_prompt(
         identity=identity,
@@ -517,7 +519,7 @@ async def generate_draft_content(
                 },
             ],
             "temperature": llm_profile.temperature if llm_profile.temperature is not None else DEFAULT_LLM_TEMPERATURE,
-            "max_tokens": llm_profile.max_tokens or DEFAULT_LLM_MAX_TOKENS,
+            "max_tokens": max_tokens or DEFAULT_LLM_MAX_TOKENS,
         },
     )
     result = parse_structured_result(completion.content, DraftGenerationResult)
@@ -883,6 +885,7 @@ def estimate_match_and_draft_tokens(
     available_materials: list[IdentityMaterial],
     custom_subject: str | None = None,
     custom_body: str | None = None,
+    max_tokens: int | None = None,
 ) -> DraftTokenEstimate:
     prompt = build_match_and_draft_prompt(
         identity=identity,
@@ -893,7 +896,7 @@ def estimate_match_and_draft_tokens(
         custom_body=custom_body,
     )
     estimated_prompt_tokens = estimate_text_tokens(f"{SYSTEM_MATCH_AND_DRAFT_PROMPT}\n{prompt}")
-    estimated_completion_tokens_upper_bound = llm_profile.max_tokens or DEFAULT_LLM_MAX_TOKENS
+    estimated_completion_tokens_upper_bound = max_tokens or DEFAULT_LLM_MAX_TOKENS
     return DraftTokenEstimate(
         estimated_prompt_tokens=estimated_prompt_tokens,
         estimated_completion_tokens_upper_bound=estimated_completion_tokens_upper_bound,

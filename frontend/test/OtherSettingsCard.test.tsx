@@ -11,6 +11,7 @@ vi.mock("@/lib/api/runtimeSettings", () => ({
     crawler_worker_count: 2,
     crawler_profile_enrichment_concurrency: 3,
     crawler_host_concurrency: 1,
+    draft_max_tokens: 3600,
     updated_at: "2026-05-04T00:00:00Z",
   })),
   updateRuntimeSettings: vi.fn(async (payload) => ({
@@ -27,9 +28,13 @@ describe("OtherSettingsCard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /其他设置/ }));
     expect(await screen.findByLabelText("批量匹配分析并发数")).toHaveValue(3);
+    expect(screen.getByLabelText("AI 草稿输出 token 上限")).toHaveValue(3600);
 
     fireEvent.change(screen.getByLabelText("批量匹配分析并发数"), {
       target: { value: "4" },
+    });
+    fireEvent.change(screen.getByLabelText("AI 草稿输出 token 上限"), {
+      target: { value: "4800" },
     });
     fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
 
@@ -37,6 +42,7 @@ describe("OtherSettingsCard", () => {
       expect(api.updateRuntimeSettings).toHaveBeenCalledWith(
         expect.objectContaining({
           match_analysis_job_item_concurrency: 4,
+          draft_max_tokens: 4800,
         }),
       );
     });

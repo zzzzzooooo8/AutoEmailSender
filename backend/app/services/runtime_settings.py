@@ -18,6 +18,7 @@ def serialize_runtime_settings(settings: AppSetting) -> RuntimeSettingsRead:
         crawler_worker_count=settings.crawler_worker_count,
         crawler_profile_enrichment_concurrency=settings.crawler_profile_enrichment_concurrency,
         crawler_host_concurrency=settings.crawler_host_concurrency,
+        draft_max_tokens=settings.draft_max_tokens,
         updated_at=settings.updated_at,
     )
 
@@ -42,7 +43,7 @@ async def update_runtime_settings(
         session,
         category="backend",
         event_name="runtime_settings.updated",
-        message="运行时并发设置已更新",
+        message="运行时设置已更新",
         entity_type="runtime_settings",
         entity_id="1",
         metadata={

@@ -8,6 +8,7 @@ from app.services.llm_runtime import (
     build_match_prompt_parts,
     build_draft_prompt,
     fetch_llm_profile_models,
+    generate_draft_content,
     generate_match_evaluation,
     LLMRuntimeError,
     parse_completion_usage,
@@ -203,6 +204,87 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.usage.cached_tokens, 64)
         self.assertEqual(len(result.prompt_hash), 64)
         self.assertEqual(len(result.stable_prefix_hash), 64)
+
+    async def test_generate_draft_content_uses_global_max_tokens_argument(self) -> None:
+        from app.models import IdentityMaterial, IdentityProfile, Professor
+
+        identity = IdentityProfile(
+            id=3,
+            name="张三",
+            email_address="sender@example.com",
+            smtp_host="smtp.example.com",
+            smtp_port=465,
+            smtp_username="sender@example.com",
+            smtp_password="secret",
+            default_language="zh-CN",
+            outreach_generation_mode="llm",
+        )
+        primary_material = IdentityMaterial(
+            id=7,
+            identity_id=3,
+            display_name="简历",
+            file_path="data/materials/resume.txt",
+            original_filename="resume.txt",
+            material_type="resume",
+            extracted_text="我做过信息抽取与智能体相关研究。",
+        )
+        profile = LLMProfile(
+            id=5,
+            name="openai",
+            provider="openai",
+            api_base_url=None,
+            api_key="test-key",
+            model_name="gpt-test",
+            temperature=0.8,
+            max_tokens=1200,
+        )
+        professor = Professor(
+            name="李老师",
+            email="prof@example.edu",
+            title="Professor",
+            university="Example University",
+            school="Computer Science",
+            research_direction="Information Extraction",
+            recent_papers=["Paper A"],
+        )
+        calls: list[tuple[str, dict[str, object] | None]] = []
+        responses = [
+            _FakeResponse(
+                status_code=200,
+                payload={
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    '{"subject":"申请交流","rich_body":{"type":"doc","blocks":['
+                                    '{"type":"paragraph","children":[{"type":"text","text":"李老师您好"}]}'
+                                    ']},"suggested_material_ids":[7]}'
+                                ),
+                            },
+                        },
+                    ],
+                },
+            ),
+        ]
+
+        with patch(
+            "app.services.llm_runtime.httpx.AsyncClient",
+            side_effect=lambda *args, **kwargs: _FakeAsyncClient(responses, calls),
+        ):
+            result = await generate_draft_content(
+                identity=identity,
+                primary_material=primary_material,
+                llm_profile=profile,
+                professor=professor,
+                available_materials=[primary_material],
+                custom_subject="模板主题",
+                custom_body="模板正文",
+                max_tokens=4800,
+            )
+
+        payload = calls[0][1]
+        self.assertEqual(payload["max_tokens"], 4800)
+        self.assertEqual(result.result.suggested_material_ids, [7])
 
     def test_match_only_prompt_includes_explicit_score_rubric(self) -> None:
         from app.services.llm_runtime import SYSTEM_MATCH_ONLY_PROMPT

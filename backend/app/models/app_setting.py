@@ -59,3 +59,8 @@ class AppSetting(Base):
         nullable=False,
         server_default=text("1"),
     )
+    draft_max_tokens: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("3600"),
+    )
