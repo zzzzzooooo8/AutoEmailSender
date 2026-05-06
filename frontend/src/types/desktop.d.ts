@@ -35,6 +35,11 @@ declare global {
       backendBaseUrl?: string;
       getBackendBaseUrl?: () => string | undefined;
       getVersion: () => Promise<string>;
+      selectProfessorImportFile?: () => Promise<{
+        name: string;
+        type: string;
+        data: ArrayBuffer;
+      } | null>;
       checkForUpdate: () => Promise<DesktopUpdateStatus>;
       downloadUpdate: (options?: { mode?: DesktopUpdateDownloadMode }) => Promise<DesktopUpdateStatus>;
       switchToFullDownload: () => Promise<DesktopUpdateStatus>;

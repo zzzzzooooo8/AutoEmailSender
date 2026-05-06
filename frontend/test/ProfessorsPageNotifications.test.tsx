@@ -33,8 +33,16 @@ const renderPage = () =>
 const getWorkbenchRegion = () =>
   screen.getByRole("region", { name: "导师档案管理" });
 
+const openImportModal = () => {
+  const button =
+    within(getWorkbenchRegion()).queryByRole("button", { name: "模板导入" }) ??
+    screen.getByRole("button", { name: "模板导入" });
+  fireEvent.click(button);
+};
+
 describe("ProfessorsPage notifications", () => {
   beforeEach(() => {
+    Reflect.deleteProperty(window, "autoEmailSender");
     mockedUseSelectionContext.mockReset();
     mockedUseSelectionContext.mockReturnValue({
       identities: [],
@@ -60,11 +68,7 @@ describe("ProfessorsPage notifications", () => {
       expect(listProfessorsForManagement).toHaveBeenCalled();
     });
 
-    fireEvent.click(
-      within(getWorkbenchRegion()).getByRole("button", {
-        name: "模板导入",
-      }),
-    );
+    openImportModal();
     fireEvent.click(screen.getByRole("button", { name: "开始导入" }));
 
     const notificationCard = await screen.findByTestId("notification-card");
@@ -78,11 +82,7 @@ describe("ProfessorsPage notifications", () => {
       expect(listProfessorsForManagement).toHaveBeenCalled();
     });
 
-    fireEvent.click(
-      within(getWorkbenchRegion()).getByRole("button", {
-        name: "模板导入",
-      }),
-    );
+    openImportModal();
 
     expect(screen.getByRole("button", { name: "开始导入" })).toBeInTheDocument();
     expect(document.querySelector('input[type="file"][accept=".csv,.xlsx"]')).not.toBeNull();
@@ -103,11 +103,7 @@ describe("ProfessorsPage notifications", () => {
       expect(listProfessorsForManagement).toHaveBeenCalledTimes(1);
     });
 
-    fireEvent.click(
-      within(getWorkbenchRegion()).getByRole("button", {
-        name: "模板导入",
-      }),
-    );
+    openImportModal();
 
     const fileInput = document.querySelector(
       'input[type="file"][accept=".csv,.xlsx"]',
@@ -134,5 +130,37 @@ describe("ProfessorsPage notifications", () => {
     const notificationCard = await screen.findByTestId("notification-card");
     expect(notificationCard).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "开始导入" })).toBeEnabled();
+  });
+
+  it("uses the desktop open-file bridge for professor import selection", async () => {
+    const selectProfessorImportFile = vi.fn().mockResolvedValue({
+      name: "professors.csv",
+      type: "text/csv",
+      data: new Uint8Array([110, 97, 109, 101, 44, 101, 109, 97, 105, 108]).buffer,
+    });
+    window.autoEmailSender = {
+      getVersion: vi.fn(),
+      selectProfessorImportFile,
+      checkForUpdate: vi.fn(),
+      downloadUpdate: vi.fn(),
+      switchToFullDownload: vi.fn(),
+      quitAndInstall: vi.fn(),
+      onUpdateStatus: vi.fn(),
+    } as NonNullable<typeof window.autoEmailSender>;
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(listProfessorsForManagement).toHaveBeenCalled();
+    });
+
+    openImportModal();
+    fireEvent.click(screen.getByText("拖拽 csv/xlsx 到这里，或点击选择文件"));
+
+    await waitFor(() => {
+      expect(selectProfessorImportFile).toHaveBeenCalledTimes(1);
+    });
+
+    expect(screen.getByText("professors.csv")).toBeInTheDocument();
   });
 });

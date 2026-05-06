@@ -19,6 +19,12 @@ contextBridge.exposeInMainWorld("autoEmailSender", {
   backendBaseUrl,
   getBackendBaseUrl: () => backendBaseUrl,
   getVersion: () => ipcRenderer.invoke("app:get-version") as Promise<string>,
+  selectProfessorImportFile: () =>
+    ipcRenderer.invoke("professors:select-import-file") as Promise<{
+      name: string;
+      type: string;
+      data: ArrayBuffer;
+    } | null>,
   checkForUpdate: () => ipcRenderer.invoke("update:check") as Promise<UpdateStatus>,
   downloadUpdate: (options?: { mode?: "differential" | "full" }) =>
     ipcRenderer.invoke("update:download", options) as Promise<UpdateStatus>,

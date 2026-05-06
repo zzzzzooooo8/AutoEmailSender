@@ -1,6 +1,7 @@
 import {
   type ChangeEvent,
   type DragEvent as ReactDragEvent,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -640,6 +641,36 @@ export const ProfessorsPage = () => {
     const nextFile = event.target.files?.[0] ?? null;
     setImportFile(nextFile);
     setImportResult(null);
+  };
+
+  const handleChooseDesktopImportFile = async () => {
+    try {
+      const selectedFile = await window.autoEmailSender?.selectProfessorImportFile?.();
+      if (!selectedFile) {
+        return;
+      }
+
+      setImportFile(
+        new File([selectedFile.data], selectedFile.name, {
+          type: selectedFile.type,
+        }),
+      );
+      setImportResult(null);
+    } catch (selectError) {
+      notifyError(
+        "选择文件失败",
+        getActionErrorMessage(selectError, "选择导师导入文件失败"),
+      );
+    }
+  };
+
+  const handleImportDropZoneClick = (event: ReactMouseEvent<HTMLLabelElement>) => {
+    if (!window.autoEmailSender?.selectProfessorImportFile) {
+      return;
+    }
+
+    event.preventDefault();
+    void handleChooseDesktopImportFile();
   };
 
   const handleDropImportFile = (event: ReactDragEvent<HTMLLabelElement>) => {
@@ -1490,6 +1521,7 @@ export const ProfessorsPage = () => {
               必填列是 name 和 email。格式错误的行会跳过；同邮箱记录会覆盖更新。
             </p>
             <label
+              onClick={handleImportDropZoneClick}
               onDragOver={(event) => event.preventDefault()}
               onDrop={handleDropImportFile}
               className="mt-4 flex min-h-44 cursor-pointer flex-col items-center justify-center rounded-[28px] border border-dashed border-stone-300 bg-stone-50/70 px-5 text-center transition hover:border-stone-400 hover:bg-white"
