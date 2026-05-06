@@ -1,6 +1,16 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type { BackendStatus, UpdateStatus } from "./types.js";
 
+const markDesktopRuntime = (): void => {
+  document.documentElement.dataset.runtime = "desktop";
+};
+
+if (document.documentElement) {
+  markDesktopRuntime();
+} else {
+  window.addEventListener("DOMContentLoaded", markDesktopRuntime, { once: true });
+}
+
 let backendBaseUrl = process.argv
   .find((value) => value.startsWith("--backend-base-url="))
   ?.replace("--backend-base-url=", "");

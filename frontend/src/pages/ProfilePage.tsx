@@ -124,7 +124,7 @@ type TestComposeSetupStatus = "unchecked" | "loading" | "completed" | "pending";
 
 const DEFAULT_LLM_PROVIDER = "openai";
 const DEFAULT_LLM_TEMPERATURE = 0.2;
-const DEFAULT_LLM_MAX_TOKENS = 3600;
+const DEFAULT_LLM_MAX_TOKENS = 6000;
 const PRIMARY_MATERIAL_EXTENSIONS = [".pdf", ".doc", ".docx", ".txt", ".md"];
 const TEMPLATE_FILE_ACCEPT = ".docx,.html,.htm,.txt,.md";
 const TEMPLATE_PLACEHOLDERS = [
@@ -425,7 +425,9 @@ function ProfileSetupSection({
           onTransitionEnd={handleContentTransitionEnd}
           className="collapsible-card-content"
         >
-          <div className="min-h-0 px-6 pb-6">{children}</div>
+          <div className="collapsible-card-body min-h-0 px-6">
+            {children}
+          </div>
         </div>
       ) : null}
     </section>

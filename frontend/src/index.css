@@ -130,6 +130,9 @@ button.collapsible-card-toggle:not(:disabled):active {
   display: grid;
   overflow: hidden;
   border-top: 1px solid rgb(245 245 244);
+  transition:
+    grid-template-rows 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 160ms ease-in;
 }
 
 .collapsible-card-content[data-state="open"] {
@@ -141,9 +144,19 @@ button.collapsible-card-toggle:not(:disabled):active {
 .collapsible-card-content[data-state="closed"] {
   grid-template-rows: 0fr;
   opacity: 0;
-  transition:
-    grid-template-rows 190ms cubic-bezier(0.4, 0, 0.2, 1),
-    opacity 140ms ease-in;
+}
+
+.collapsible-card-body {
+  padding-bottom: 1.5rem;
+  transition: padding-bottom 190ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.collapsible-card-content[data-state="open"] > .collapsible-card-body {
+  padding-bottom: 1.5rem;
+}
+
+.collapsible-card-content[data-state="closed"] > .collapsible-card-body {
+  padding-bottom: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -151,8 +164,26 @@ button.collapsible-card-toggle:not(:disabled):active {
     animation: none;
   }
 
-  .collapsible-card-content[data-state="closed"] {
+  .collapsible-card-content {
     transition: none;
+  }
+
+  .collapsible-card-body {
+    transition: none;
+  }
+
+  html[data-runtime="desktop"] .collapsible-card-content {
+    transition:
+      grid-template-rows 220ms cubic-bezier(0.4, 0, 0.2, 1),
+      opacity 160ms ease-in;
+  }
+
+  html[data-runtime="desktop"] .collapsible-card-content[data-state="open"] {
+    animation: collapsible-card-expand 240ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  html[data-runtime="desktop"] .collapsible-card-body {
+    transition: padding-bottom 190ms cubic-bezier(0.4, 0, 0.2, 1);
   }
 }
 

@@ -268,7 +268,7 @@ export function TokenUsageCenterCard() {
           onTransitionEnd={handleContentTransitionEnd}
           className="collapsible-card-content"
         >
-          <div className="min-h-0 min-w-0 space-y-5 px-6 pb-6">
+          <div className="collapsible-card-body min-h-0 min-w-0 space-y-5 px-6">
             <TokenUsageFilters
               featureType={featureType}
               modelName={modelName}
@@ -378,7 +378,7 @@ function TokenUsageFilters({
     ? Array.from(new Set([...modelOptions, modelName])).sort()
     : modelOptions;
   return (
-    <div className="grid min-w-0 gap-3 rounded-2xl border border-stone-200 bg-stone-50/70 p-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
+    <div className="mt-5 grid min-w-0 gap-3 rounded-2xl border border-stone-200 bg-stone-50/70 p-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
       <NativeSelectField
         label="功能筛选"
         ariaLabel="功能筛选"
