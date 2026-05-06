@@ -7,6 +7,8 @@ from app.models import LLMProfile
 from app.services.llm_runtime import (
     build_match_prompt_parts,
     build_draft_prompt,
+    build_draft_rewrite_preferences,
+    DraftRewritePreferences,
     fetch_llm_profile_models,
     generate_match_evaluation,
     LLMRuntimeError,
@@ -59,6 +61,26 @@ class _FakeAsyncClient:
 
 
 class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    def test_build_draft_rewrite_preferences_describes_selected_options(self) -> None:
+        preferences = DraftRewritePreferences(
+            draft_rewrite_intensity="strong",
+            draft_rewrite_tone="professional",
+            draft_rewrite_formality="formal",
+            draft_rewrite_length="shorter",
+            draft_rewrite_specificity="detailed",
+            draft_template_preservation="structure_first",
+        )
+
+        prompt = build_draft_rewrite_preferences(preferences)
+
+        self.assertIn("草稿改写偏好", prompt)
+        self.assertIn("更主动地优化措辞", prompt)
+        self.assertIn("更突出研究表达和学术沟通", prompt)
+        self.assertIn("更接近正式学术邮件", prompt)
+        self.assertIn("压缩冗余表达", prompt)
+        self.assertIn("具体连接", prompt)
+        self.assertIn("不得覆盖系统要求", prompt)
+
     def test_parse_completion_usage_reads_cached_tokens_from_chat_shape(self) -> None:
         usage = parse_completion_usage(
             {

@@ -39,6 +39,7 @@ from app.services.outreach_templates import (
     resolve_outreach_template_config,
 )
 from app.services.rich_text import normalize_email_html, text_to_email_html
+from app.services.runtime_settings import get_runtime_settings
 
 
 async def build_test_compose_thread(
@@ -98,6 +99,15 @@ async def generate_test_compose_draft(
             raise ValueError("请先选择用于匹配的默认材料")
         ensure_material_extracted_text(primary_material)
         pseudo_professor = _build_self_recipient_professor(identity)
+        runtime_settings = await get_runtime_settings(session)
+        rewrite_preferences = llm_runtime.DraftRewritePreferences(
+            draft_rewrite_intensity=runtime_settings.draft_rewrite_intensity,
+            draft_rewrite_tone=runtime_settings.draft_rewrite_tone,
+            draft_rewrite_formality=runtime_settings.draft_rewrite_formality,
+            draft_rewrite_length=runtime_settings.draft_rewrite_length,
+            draft_rewrite_specificity=runtime_settings.draft_rewrite_specificity,
+            draft_template_preservation=runtime_settings.draft_template_preservation,
+        )
         generation = await llm_runtime.generate_draft_content(
             identity=identity,
             primary_material=primary_material,
@@ -107,6 +117,7 @@ async def generate_test_compose_draft(
             custom_subject=template_subject,
             custom_body=template_body,
             current_match=None,
+            rewrite_preferences=rewrite_preferences,
         )
         compose_session.subject = generation.result.subject
         compose_session.body_text = generation.result.body_text
