@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.database import get_async_session
+from app.core.database import get_async_session, get_session_factory
 from app.models import (
     BatchTask,
     BatchTaskStatus,
@@ -36,6 +36,7 @@ from app.services.outreach_templates import (
     render_outreach_template,
     resolve_outreach_template_config,
 )
+from app.services.task_runtime import dispatch_email_task
 
 
 router = APIRouter(prefix="/api/batch-tasks", tags=["batch-tasks"])
@@ -171,6 +172,7 @@ async def create_batch_task(
     session.add(batch_task)
     await session.flush()
 
+    created_email_tasks: list[EmailTask] = []
     for professor in professors:
         generated_subject = None
         generated_body_text = None
@@ -194,30 +196,32 @@ async def create_batch_task(
             task_status = EmailTaskStatus.APPROVED.value
             approved_at = datetime.now(UTC)
 
-        session.add(
-            EmailTask(
-                source=EmailTaskSource.BATCH.value,
-                batch_task_id=batch_task.id,
-                identity_id=payload.identity_id,
-                llm_profile_id=payload.llm_profile_id,
-                professor_id=professor.id,
-                primary_material_id=primary_material_id,
-                outreach_generation_mode=outreach_config.generation_mode,
-                outreach_template_subject=_normalize_nullable_text(outreach_config.subject_template),
-                outreach_template_body_text=_normalize_nullable_text(outreach_config.body_text_template),
-                outreach_template_body_html=_normalize_nullable_text(outreach_config.body_html_template),
-                status=task_status,
-                generated_subject=generated_subject,
-                generated_content_text=generated_body_text,
-                generated_content_html=generated_body_html,
-                approved_subject=generated_subject,
-                approved_body_text=generated_body_text,
-                approved_body_html=generated_body_html,
-                approved_at=approved_at,
-                selected_material_ids=selected_material_ids,
-            ),
+        email_task = EmailTask(
+            source=EmailTaskSource.BATCH.value,
+            batch_task_id=batch_task.id,
+            identity_id=payload.identity_id,
+            llm_profile_id=payload.llm_profile_id,
+            professor_id=professor.id,
+            primary_material_id=primary_material_id,
+            outreach_generation_mode=outreach_config.generation_mode,
+            outreach_template_subject=_normalize_nullable_text(outreach_config.subject_template),
+            outreach_template_body_text=_normalize_nullable_text(outreach_config.body_text_template),
+            outreach_template_body_html=_normalize_nullable_text(outreach_config.body_html_template),
+            status=task_status,
+            generated_subject=generated_subject,
+            generated_content_text=generated_body_text,
+            generated_content_html=generated_body_html,
+            approved_subject=generated_subject,
+            approved_body_text=generated_body_text,
+            approved_body_html=generated_body_html,
+            approved_at=approved_at,
+            selected_material_ids=selected_material_ids,
         )
+        session.add(email_task)
+        created_email_tasks.append(email_task)
 
+    await session.flush()
+    created_email_task_ids = [email_task.id for email_task in created_email_tasks]
     await record_operation_log(
         session,
         category="email",
@@ -232,8 +236,15 @@ async def create_batch_task(
         },
     )
     await session.commit()
-    await session.refresh(batch_task, attribute_names=["email_tasks"])
-    return _serialize_batch_task(batch_task)
+    if (
+        outreach_config.generation_mode == OUTREACH_GENERATION_MODE_TEMPLATE
+        and payload.schedule_type == "immediate"
+    ):
+        session_factory = get_session_factory()
+        for email_task_id in created_email_task_ids:
+            await dispatch_email_task(session_factory, email_task_id)
+    refreshed_batch_task = await _load_batch_task_for_serialization(session, batch_task.id)
+    return _serialize_batch_task(refreshed_batch_task)
 
 
 @router.get("/{task_id}/items", response_model=list[BatchTaskItemRead])
@@ -373,14 +384,19 @@ async def restore_batch_task(
 
 
 async def _get_batch_task(session: AsyncSession, task_id: int) -> BatchTask:
-    task = await session.scalar(
-        select(BatchTask)
-        .options(selectinload(BatchTask.email_tasks))
-        .where(BatchTask.id == task_id),
-    )
+    task = await _load_batch_task_for_serialization(session, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="未找到批量任务")
     return task
+
+
+async def _load_batch_task_for_serialization(session: AsyncSession, task_id: int) -> BatchTask | None:
+    return await session.scalar(
+        select(BatchTask)
+        .options(selectinload(BatchTask.email_tasks))
+        .where(BatchTask.id == task_id)
+        .execution_options(populate_existing=True),
+    )
 
 
 async def _record_batch_task_action(

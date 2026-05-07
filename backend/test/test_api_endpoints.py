@@ -3513,7 +3513,7 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(task_payload["draft_failed_count"], 1)
         self.assertEqual(task_payload["pending_generation_count"], 1)
 
-    def test_template_batch_task_creates_approved_items_without_review(self) -> None:
+    def test_template_scheduled_batch_task_creates_approved_items_without_review(self) -> None:
         identity_id = self._create_identity(with_imap=False)
         llm_id = self._create_llm()
         professor_response = self.client.post(
@@ -3541,10 +3541,11 @@ class ApiEndpointTests(unittest.TestCase):
                 "llm_profile_id": llm_id,
                 "name": "模板批量任务",
                 "professor_ids": [professor_id],
-                "schedule_type": "immediate",
-                "window_start_time": None,
-                "window_end_time": None,
-                "emails_per_window": None,
+                "schedule_type": "scheduled",
+                "scheduled_dates": ["2026-05-08"],
+                "window_start_time": "09:00",
+                "window_end_time": "18:00",
+                "emails_per_window": 10,
                 "primary_material_id": None,
                 "email_subject": None,
                 "email_body": None,
@@ -3561,6 +3562,67 @@ class ApiEndpointTests(unittest.TestCase):
         items = self.client.get(f"/api/batch-tasks/{task_id}/items")
         self.assertEqual(items.status_code, 200, msg=items.text)
         self.assertEqual(items.json()[0]["status"], "approved")
+
+    def test_template_immediate_batch_task_sends_items_on_create(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "立即发送导师",
+                "email": "template-immediate@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Agents",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        with patch(
+            "app.services.task_runtime.mail_runtime.send_email",
+            AsyncMock(
+                return_value=self._build_send_result(
+                    message_id="<template-immediate@example.com>",
+                    provider_payload={},
+                ),
+            ),
+        ) as mocked_send:
+            response = self.client.post(
+                "/api/batch-tasks",
+                json={
+                    "identity_id": identity_id,
+                    "llm_profile_id": llm_id,
+                    "name": "模板立即发送批量任务",
+                    "professor_ids": [professor_id],
+                    "schedule_type": "immediate",
+                    "window_start_time": None,
+                    "window_end_time": None,
+                    "emails_per_window": None,
+                    "primary_material_id": None,
+                    "email_subject": None,
+                    "email_body": None,
+                    "selected_material_ids": None,
+                    "outreach_generation_mode": "template",
+                    "outreach_template_subject": "发送给{{name}}",
+                    "outreach_template_body_text": "{{name}}老师您好，我是{{sender_name}}。",
+                    "outreach_template_body_html": "<p>{{name}}老师您好，我是{{sender_name}}。</p>",
+                },
+            )
+
+        self.assertEqual(response.status_code, 201, msg=response.text)
+        task_id = response.json()["id"]
+        self.assertEqual(response.json()["sent_count"], 1)
+        mocked_send.assert_awaited_once()
+
+        items = self.client.get(f"/api/batch-tasks/{task_id}/items")
+        self.assertEqual(items.status_code, 200, msg=items.text)
+        self.assertEqual(items.json()[0]["status"], "sent")
 
     def test_batch_task_items_show_professor_delivery_progress(self) -> None:
         identity_id = self._create_identity(with_imap=False)
