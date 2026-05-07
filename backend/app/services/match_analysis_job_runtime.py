@@ -165,6 +165,7 @@ def serialize_match_analysis_job(job: MatchAnalysisJob) -> MatchAnalysisJobRead:
         finished_at=job.finished_at,
         created_at=job.created_at,
         updated_at=job.updated_at,
+        deleted_at=job.deleted_at,
         last_error=job.last_error,
     )
 
@@ -346,7 +347,10 @@ async def _claim_next_match_analysis_job(
     async with session_factory() as session:
         job_id = await session.scalar(
             select(MatchAnalysisJob.id)
-            .where(MatchAnalysisJob.status == MatchAnalysisJobStatus.QUEUED.value)
+            .where(
+                MatchAnalysisJob.status == MatchAnalysisJobStatus.QUEUED.value,
+                MatchAnalysisJob.deleted_at.is_(None),
+            )
             .order_by(MatchAnalysisJob.created_at.asc(), MatchAnalysisJob.id.asc())
             .limit(1),
         )
@@ -359,6 +363,7 @@ async def _claim_next_match_analysis_job(
             .where(
                 MatchAnalysisJob.id == job_id,
                 MatchAnalysisJob.status == MatchAnalysisJobStatus.QUEUED.value,
+                MatchAnalysisJob.deleted_at.is_(None),
             )
             .values(
                 status=MatchAnalysisJobStatus.RUNNING.value,
@@ -379,13 +384,16 @@ async def _recover_interrupted_match_analysis_jobs(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     async with session_factory() as session:
-        running_job_ids = list(
-            await session.scalars(
-                select(MatchAnalysisJob.id)
-                .where(MatchAnalysisJob.status == MatchAnalysisJobStatus.RUNNING.value)
-                .order_by(MatchAnalysisJob.created_at.asc(), MatchAnalysisJob.id.asc()),
+            running_job_ids = list(
+                await session.scalars(
+                    select(MatchAnalysisJob.id)
+                    .where(
+                        MatchAnalysisJob.status == MatchAnalysisJobStatus.RUNNING.value,
+                        MatchAnalysisJob.deleted_at.is_(None),
+                    )
+                    .order_by(MatchAnalysisJob.created_at.asc(), MatchAnalysisJob.id.asc()),
+                )
             )
-        )
 
     for job_id in running_job_ids:
         if job_id in _ACTIVE_MATCH_ANALYSIS_JOB_IDS:

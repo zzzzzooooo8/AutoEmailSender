@@ -3,11 +3,13 @@ import type {
   CreateMatchAnalysisJobRequestDTO,
   MatchAnalysisJobDTO,
   MatchAnalysisJobItemDTO,
+  TaskListView,
 } from '@/types';
 
 export const listMatchAnalysisJobs = (params?: {
   identityId?: number | null;
   llmProfileId?: number | null;
+  view?: TaskListView;
 }) =>
   apiFetch<MatchAnalysisJobDTO[]>(
     '/api/match-analysis-jobs',
@@ -15,6 +17,7 @@ export const listMatchAnalysisJobs = (params?: {
     {
       identity_id: params?.identityId ?? undefined,
       llm_profile_id: params?.llmProfileId ?? undefined,
+      view: params?.view ?? undefined,
     },
   );
 
@@ -42,6 +45,22 @@ export const cancelMatchAnalysisJob = (jobId: number) =>
 export const retryFailedMatchAnalysisJob = (jobId: number) =>
   apiFetch<MatchAnalysisJobDTO>(
     `/api/match-analysis-jobs/${jobId}/retry-failed`,
+    {
+      method: 'POST',
+    },
+  );
+
+export const deleteMatchAnalysisJob = (jobId: number) =>
+  apiFetch<{ ok: boolean; job: MatchAnalysisJobDTO }>(
+    `/api/match-analysis-jobs/${jobId}/delete`,
+    {
+      method: 'POST',
+    },
+  );
+
+export const restoreMatchAnalysisJob = (jobId: number) =>
+  apiFetch<{ ok: boolean; job: MatchAnalysisJobDTO }>(
+    `/api/match-analysis-jobs/${jobId}/restore`,
     {
       method: 'POST',
     },

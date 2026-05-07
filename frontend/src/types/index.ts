@@ -333,6 +333,7 @@ export interface CrawlJobDTO {
   error_message: string | null;
   created_at: string;
   updated_at: string;
+  deleted_at: string | null;
 }
 
 export interface CrawlJobSummaryDTO extends CrawlJobDTO {
@@ -484,6 +485,7 @@ export interface MatchAnalysisJobDTO {
   finished_at: string | null;
   created_at: string;
   updated_at: string;
+  deleted_at: string | null;
   last_error: string | null;
 }
 
@@ -522,6 +524,7 @@ export const MATCH_ANALYSIS_JOB_STATUS_LABELS: Record<
 };
 
 export type BatchTaskRuntimeStatus = 'running' | 'paused' | 'stopped' | 'completed';
+export type TaskListView = 'current' | 'trash';
 
 export type WorkspaceTaskStatus =
   | 'discovered'
@@ -558,6 +561,7 @@ export interface BatchTaskCardDTO {
   replied_count: number;
   created_at: string;
   updated_at: string;
+  deleted_at: string | null;
 }
 
 export interface BatchTaskItemDTO {

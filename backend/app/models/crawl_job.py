@@ -83,6 +83,11 @@ class CrawlJob(Base):
         server_default=text("CURRENT_TIMESTAMP"),
         onupdate=lambda: datetime.now(UTC),
     )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        index=True,
+        nullable=True,
+    )
 
     llm_profile: Mapped["LLMProfile | None"] = relationship()
     current_run: Mapped["CrawlJobRun | None"] = relationship(

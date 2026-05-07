@@ -47,6 +47,7 @@ class BatchTaskCardRead(BaseModel):
     replied_count: int
     created_at: datetime
     updated_at: datetime
+    deleted_at: datetime | None
 
 
 class BatchTaskItemRead(BaseModel):

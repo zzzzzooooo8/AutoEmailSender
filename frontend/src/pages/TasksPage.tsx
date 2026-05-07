@@ -12,8 +12,10 @@ import {
   Mail,
   Pause,
   Play,
+  RotateCcw,
   Sparkles,
   Square,
+  Trash2,
   X,
 } from "lucide-react";
 import { useNotification } from "@/context/NotificationContext";
@@ -21,21 +23,26 @@ import { useSelectionContext } from "@/context/SelectionContext";
 import { useConfirmDialog } from "@/lib/useConfirmDialog";
 import { safeRecordUserAction } from "@/lib/diagnosticUserActions";
 import {
+  deleteBatchTask,
   listBatchTasks,
   listBatchTaskItems,
   pauseBatchTask,
+  restoreBatchTask,
   resumeBatchTask,
   stopBatchTask,
 } from "@/lib/api/batchTasksApi";
 import {
   cancelMatchAnalysisJob,
+  deleteMatchAnalysisJob,
   listMatchAnalysisJobItems,
   listMatchAnalysisJobs,
+  restoreMatchAnalysisJob,
   retryFailedMatchAnalysisJob,
 } from "@/lib/api/matchAnalysisJobsApi";
 import {
   cancelCrawlJob,
   approveCrawlCandidates,
+  deleteCrawlJob,
   enrichCrawlCandidates,
   getCrawlJob,
   getCrawlJobEvents,
@@ -44,6 +51,7 @@ import {
   listCrawlPages,
   pauseCrawlJob,
   retryCrawlJob,
+  restoreCrawlJob,
   resumeCrawlJobReview,
   resumeCrawlJob,
 } from "@/lib/api/crawlJobsApi";
@@ -69,10 +77,12 @@ import {
   type MatchAnalysisJobDTO,
   type MatchAnalysisJobItemDTO,
   type MatchAnalysisJobStatus,
+  type TaskListView,
   type WorkspaceTaskStatus,
 } from "@/types";
 
 type TasksTab = "batch" | "crawl" | "match";
+type TaskListViews = Record<TasksTab, TaskListView>;
 
 const CRAWL_JOB_STATUS_LABELS: Record<CrawlJobStatusDTO, string> = {
   queued: "排队中",
@@ -215,6 +225,7 @@ type TaskListPaginationProps = {
 
 type CrawlJobCardProps = {
   job: CrawlJobSummaryDTO;
+  listView: TaskListView;
   pausingCrawlJobId: number | null;
   resumingCrawlJobId: number | null;
   retryingCrawlJobId: number | null;
@@ -225,11 +236,28 @@ type CrawlJobCardProps = {
   onCancel: (jobId: number) => void;
   onRetry: (jobId: number) => void;
   onResumeReview: (jobId: number) => void;
+  onDelete: (job: CrawlJobSummaryDTO) => void;
+  onRestore: (jobId: number) => void;
   formatUpdatedAt: (value: string) => string;
 };
 
+const canDeleteCrawlJob = (job: CrawlJobSummaryDTO) =>
+  job.status === "completed" ||
+  job.status === "failed" ||
+  job.status === "canceled";
+
+const canDeleteBatchTask = (task: BatchTaskCardDTO) =>
+  task.status === "stopped" || task.status === "completed";
+
+const canDeleteMatchJob = (job: MatchAnalysisJobDTO) =>
+  job.status === "completed" ||
+  job.status === "partial_failed" ||
+  job.status === "failed" ||
+  job.status === "canceled";
+
 export const CrawlJobCard = ({
   job,
+  listView,
   pausingCrawlJobId,
   resumingCrawlJobId,
   retryingCrawlJobId,
@@ -240,6 +268,8 @@ export const CrawlJobCard = ({
   onCancel,
   onRetry,
   onResumeReview,
+  onDelete,
+  onRestore,
   formatUpdatedAt,
 }: CrawlJobCardProps) => (
   <article className="rounded-2xl border border-stone-200 bg-white px-5 py-5 shadow-sm">
@@ -325,7 +355,28 @@ export const CrawlJobCard = ({
         >
           <FileSearch className="h-4 w-4" />
         </button>
-        {job.status === "queued" || job.status === "running" ? (
+        {listView === "trash" ? (
+          <button
+            type="button"
+            onClick={() => onRestore(job.id)}
+            className="ui-btn-primary"
+          >
+            <RotateCcw className="h-4 w-4" />
+            恢复
+          </button>
+        ) : null}
+        {listView === "current" && canDeleteCrawlJob(job) ? (
+          <button
+            type="button"
+            onClick={() => onDelete(job)}
+            className="ui-btn-danger"
+          >
+            <Trash2 className="h-4 w-4" />
+            删除
+          </button>
+        ) : null}
+        {listView === "current" &&
+        (job.status === "queued" || job.status === "running") ? (
           <>
             <button
               type="button"
@@ -346,7 +397,7 @@ export const CrawlJobCard = ({
             </button>
           </>
         ) : null}
-        {job.status === "paused" ? (
+        {listView === "current" && job.status === "paused" ? (
           <>
             <button
               type="button"
@@ -367,7 +418,8 @@ export const CrawlJobCard = ({
             </button>
           </>
         ) : null}
-        {job.status === "failed" || job.status === "canceled" ? (
+        {listView === "current" &&
+        (job.status === "failed" || job.status === "canceled") ? (
           <>
             <button
               type="button"
@@ -518,7 +570,13 @@ export const TasksPage = () => {
   const [activeTab, setActiveTab] = useState<TasksTab>(() =>
     hasTaskSelection ? "batch" : "crawl",
   );
+  const [taskListViews, setTaskListViews] = useState<TaskListViews>({
+    batch: "current",
+    crawl: "current",
+    match: "current",
+  });
   const [tasks, setTasks] = useState<BatchTaskCardDTO[]>([]);
+  const [currentBatchTasks, setCurrentBatchTasks] = useState<BatchTaskCardDTO[]>([]);
   const [selectedBatchTask, setSelectedBatchTask] =
     useState<BatchTaskCardDTO | null>(null);
   const [selectedBatchTaskItems, setSelectedBatchTaskItems] = useState<
@@ -529,6 +587,9 @@ export const TasksPage = () => {
   const [matchAnalysisJobs, setMatchAnalysisJobs] = useState<
     MatchAnalysisJobDTO[]
   >([]);
+  const [currentMatchAnalysisJobs, setCurrentMatchAnalysisJobs] = useState<
+    MatchAnalysisJobDTO[]
+  >([]);
   const [matchJobsLoading, setMatchJobsLoading] = useState(false);
   const [selectedMatchJob, setSelectedMatchJob] =
     useState<MatchAnalysisJobDTO | null>(null);
@@ -537,6 +598,7 @@ export const TasksPage = () => {
   >([]);
   const [matchJobDetailsLoading, setMatchJobDetailsLoading] = useState(false);
   const [crawlJobs, setCrawlJobs] = useState<CrawlJobSummaryDTO[]>([]);
+  const [currentCrawlJobs, setCurrentCrawlJobs] = useState<CrawlJobSummaryDTO[]>([]);
   const [crawlJobsLoading, setCrawlJobsLoading] = useState(false);
   const [batchPage, setBatchPage] = useState(1);
   const [matchPage, setMatchPage] = useState(1);
@@ -593,46 +655,47 @@ export const TasksPage = () => {
   const latestMatchJobDetailsRequestIdRef = useRef(0);
   const latestCrawlJobsRequestIdRef = useRef(0);
   const latestCrawlJobDetailsRequestIdRef = useRef(0);
+  const activeTaskListView = taskListViews[activeTab];
   const tasksRequestKey =
     selectedIdentityId && selectedLlmProfileId
-      ? `${selectedIdentityId}:${selectedLlmProfileId}`
+      ? `${selectedIdentityId}:${selectedLlmProfileId}:${taskListViews.batch}`
       : null;
   const batchRunningCount = useMemo(
-    () => tasks.filter((task) => task.status === "running").length,
-    [tasks],
+    () => currentBatchTasks.filter((task) => task.status === "running").length,
+    [currentBatchTasks],
   );
   const batchAttentionCount = useMemo(
     () =>
-      tasks.reduce(
+      currentBatchTasks.reduce(
         (total, task) => total + task.review_required_count + task.failed_count,
         0,
       ),
-    [tasks],
+    [currentBatchTasks],
   );
   const crawlRunningCount = useMemo(
     () =>
-      crawlJobs.filter(
+      currentCrawlJobs.filter(
         (job) => job.status === "queued" || job.status === "running",
       ).length,
-    [crawlJobs],
+    [currentCrawlJobs],
   );
   const crawlReviewCount = useMemo(
-    () => crawlJobs.filter((job) => job.status === "needs_review").length,
-    [crawlJobs],
+    () => currentCrawlJobs.filter((job) => job.status === "needs_review").length,
+    [currentCrawlJobs],
   );
   const matchRunningCount = useMemo(
     () =>
-      matchAnalysisJobs.filter(
+      currentMatchAnalysisJobs.filter(
         (job) => job.status === "queued" || job.status === "running",
       ).length,
-    [matchAnalysisJobs],
+    [currentMatchAnalysisJobs],
   );
   const matchAttentionCount = useMemo(
     () =>
-      matchAnalysisJobs.filter(
+      currentMatchAnalysisJobs.filter(
         (job) => job.status === "partial_failed" || job.status === "failed",
       ).length,
-    [matchAnalysisJobs],
+    [currentMatchAnalysisJobs],
   );
   const totalRunningCount =
     batchRunningCount + crawlRunningCount + matchRunningCount;
@@ -741,12 +804,25 @@ export const TasksPage = () => {
     setActiveTab("crawl");
   }, [activeTab, hasTaskSelection]);
 
+  useEffect(() => {
+    setBatchPage(1);
+  }, [taskListViews.batch]);
+
+  useEffect(() => {
+    setCrawlPage(1);
+  }, [taskListViews.crawl]);
+
+  useEffect(() => {
+    setMatchPage(1);
+  }, [taskListViews.match]);
+
   const loadTasks = useCallback(async () => {
     if (!tasksRequestKey || !selectedIdentityId || !selectedLlmProfileId) {
       latestTasksRequestIdRef.current += 1;
       activeTasksRequestKeyRef.current = null;
       loadedTasksKeyRef.current = null;
       setTasks([]);
+      setCurrentBatchTasks([]);
       lastLoadErrorRef.current = null;
       setLoading(false);
       return;
@@ -759,7 +835,16 @@ export const TasksPage = () => {
       const data = await listBatchTasks({
         identityId: selectedIdentityId,
         llmProfileId: selectedLlmProfileId,
+        view: taskListViews.batch,
       });
+      const currentData =
+        taskListViews.batch === "current"
+          ? data
+          : await listBatchTasks({
+              identityId: selectedIdentityId,
+              llmProfileId: selectedLlmProfileId,
+              view: "current",
+            });
       if (
         latestTasksRequestIdRef.current !== requestId ||
         activeTasksRequestKeyRef.current !== tasksRequestKey
@@ -767,6 +852,7 @@ export const TasksPage = () => {
         return;
       }
       setTasks(data);
+      setCurrentBatchTasks(currentData);
       loadedTasksKeyRef.current = tasksRequestKey;
       lastLoadErrorRef.current = null;
     } catch (loadError) {
@@ -793,7 +879,13 @@ export const TasksPage = () => {
         setLoading(false);
       }
     }
-  }, [notifyError, selectedIdentityId, selectedLlmProfileId, tasksRequestKey]);
+  }, [
+    notifyError,
+    selectedIdentityId,
+    selectedLlmProfileId,
+    taskListViews.batch,
+    tasksRequestKey,
+  ]);
 
   const loadCrawlJobs = useCallback(
     async (options?: { showLoading?: boolean }) => {
@@ -803,11 +895,16 @@ export const TasksPage = () => {
         setCrawlJobsLoading(true);
       }
       try {
-        const data = await listCrawlJobs();
+        const data = await listCrawlJobs({ view: taskListViews.crawl });
+        const currentData =
+          taskListViews.crawl === "current"
+            ? data
+            : await listCrawlJobs({ view: "current" });
         if (latestCrawlJobsRequestIdRef.current !== requestId) {
           return;
         }
         setCrawlJobs(data);
+        setCurrentCrawlJobs(currentData);
         setSelectedCrawlJob((currentJob) => {
           if (!currentJob) {
             return currentJob;
@@ -834,12 +931,13 @@ export const TasksPage = () => {
         }
       }
     },
-    [notifyError],
+    [notifyError, taskListViews.crawl],
   );
 
   const loadMatchAnalysisJobs = useCallback(async (options?: { showLoading?: boolean }) => {
     if (!selectedIdentityId || !selectedLlmProfileId) {
       setMatchAnalysisJobs([]);
+      setCurrentMatchAnalysisJobs([]);
       lastMatchJobsLoadErrorRef.current = null;
       setMatchJobsLoading(false);
       return;
@@ -853,11 +951,21 @@ export const TasksPage = () => {
       const data = await listMatchAnalysisJobs({
         identityId: selectedIdentityId,
         llmProfileId: selectedLlmProfileId,
+        view: taskListViews.match,
       });
+      const currentData =
+        taskListViews.match === "current"
+          ? data
+          : await listMatchAnalysisJobs({
+              identityId: selectedIdentityId,
+              llmProfileId: selectedLlmProfileId,
+              view: "current",
+            });
       if (latestMatchJobsRequestIdRef.current !== requestId) {
         return;
       }
       setMatchAnalysisJobs(data);
+      setCurrentMatchAnalysisJobs(currentData);
       setSelectedMatchJob((currentJob) => {
         if (!currentJob) {
           return currentJob;
@@ -883,7 +991,7 @@ export const TasksPage = () => {
         setMatchJobsLoading(false);
       }
     }
-  }, [notifyError, selectedIdentityId, selectedLlmProfileId]);
+  }, [notifyError, selectedIdentityId, selectedLlmProfileId, taskListViews.match]);
 
   const loadMatchJobDetails = useCallback(
     async (jobId: number) => {
@@ -1570,6 +1678,117 @@ export const TasksPage = () => {
     lastMatchJobDetailsLoadErrorRef.current = null;
   };
 
+  const handleDeleteBatchTask = async (task: BatchTaskCardDTO) => {
+    const confirmed = await confirm({
+      title: "删除任务",
+      description: "删除后会移入回收站，不会清除任务记录，可在回收站恢复。",
+      confirmLabel: "删除",
+      cancelLabel: "先保留",
+      tone: "danger",
+    });
+    if (!confirmed) {
+      return;
+    }
+    try {
+      await deleteBatchTask(task.id);
+      notifySuccess("已移入回收站");
+      if (selectedBatchTask?.id === task.id) {
+        closeBatchTaskDetails();
+      }
+      await loadTasks();
+    } catch (actionError) {
+      const message =
+        actionError instanceof Error ? actionError.message : "删除任务失败";
+      notifyError("删除任务失败", message);
+    }
+  };
+
+  const handleRestoreBatchTask = async (taskId: number) => {
+    try {
+      await restoreBatchTask(taskId);
+      notifySuccess("已恢复任务");
+      await loadTasks();
+    } catch (actionError) {
+      const message =
+        actionError instanceof Error ? actionError.message : "恢复任务失败";
+      notifyError("恢复任务失败", message);
+    }
+  };
+
+  const handleDeleteCrawlJob = async (job: CrawlJobSummaryDTO) => {
+    const confirmed = await confirm({
+      title: "删除任务",
+      description: "删除后会移入回收站，不会清除任务记录，可在回收站恢复。",
+      confirmLabel: "删除",
+      cancelLabel: "先保留",
+      tone: "danger",
+    });
+    if (!confirmed) {
+      return;
+    }
+    try {
+      await deleteCrawlJob(job.id);
+      notifySuccess("已移入回收站");
+      if (selectedCrawlJobId === job.id) {
+        closeCrawlJobDetails();
+      }
+      await loadCrawlJobs();
+    } catch (actionError) {
+      const message =
+        actionError instanceof Error ? actionError.message : "删除任务失败";
+      notifyError("删除任务失败", message);
+    }
+  };
+
+  const handleRestoreCrawlJob = async (jobId: number) => {
+    try {
+      await restoreCrawlJob(jobId);
+      notifySuccess("已恢复任务");
+      await loadCrawlJobs();
+    } catch (actionError) {
+      const message =
+        actionError instanceof Error ? actionError.message : "恢复任务失败";
+      notifyError("恢复任务失败", message);
+    }
+  };
+
+  const handleDeleteMatchJob = async (job: MatchAnalysisJobDTO) => {
+    const confirmed = await confirm({
+      title: "删除任务",
+      description: "删除后会移入回收站，不会清除任务记录，可在回收站恢复。",
+      confirmLabel: "删除",
+      cancelLabel: "先保留",
+      tone: "danger",
+    });
+    if (!confirmed) {
+      return;
+    }
+    try {
+      await deleteMatchAnalysisJob(job.id);
+      notifySuccess("已移入回收站");
+      if (selectedMatchJob?.id === job.id) {
+        closeMatchJobDetails();
+      }
+      await loadMatchAnalysisJobs();
+    } catch (actionError) {
+      const message =
+        actionError instanceof Error ? actionError.message : "删除任务失败";
+      notifyError("删除任务失败", message);
+    }
+  };
+
+  const handleRestoreMatchJob = async (jobId: number) => {
+    try {
+      await restoreMatchAnalysisJob(jobId);
+      notifySuccess("已恢复任务");
+      await loadMatchAnalysisJobs();
+    } catch (actionError) {
+      const message =
+        actionError instanceof Error ? actionError.message : "恢复任务失败";
+      notifyError("恢复任务失败", message);
+    }
+  };
+
   return (
     <main className="mx-auto max-w-7xl px-6 py-8">
       <div className="rounded-3xl border border-stone-200 bg-[#fcfbf8] p-6 shadow-sm">
@@ -1592,7 +1811,7 @@ export const TasksPage = () => {
               批量邮件
             </div>
             <div className="mt-2 text-2xl font-semibold text-stone-900">
-              {tasks.length}
+              {currentBatchTasks.length}
             </div>
           </div>
           <div className="rounded-2xl border border-stone-200 bg-white px-4 py-3">
@@ -1601,7 +1820,7 @@ export const TasksPage = () => {
               教师抓取
             </div>
             <div className="mt-2 text-2xl font-semibold text-stone-900">
-              {crawlJobs.length}
+              {currentCrawlJobs.length}
             </div>
           </div>
           <div className="rounded-2xl border border-stone-200 bg-white px-4 py-3">
@@ -1644,7 +1863,7 @@ export const TasksPage = () => {
               activeTab === "batch" ? "text-white/80" : "text-stone-400"
             }
           >
-            {tasks.length}
+            {currentBatchTasks.length}
           </span>
         </button>
         <button
@@ -1664,7 +1883,7 @@ export const TasksPage = () => {
               activeTab === "crawl" ? "text-white/80" : "text-stone-400"
             }
           >
-            {crawlJobs.length}
+            {currentCrawlJobs.length}
           </span>
         </button>
         <button
@@ -1685,9 +1904,28 @@ export const TasksPage = () => {
               activeTab === "match" ? "text-white/80" : "text-stone-400"
             }
           >
-            {matchAnalysisJobs.length}
+            {currentMatchAnalysisJobs.length}
           </span>
         </button>
+      </div>
+
+      <div className="mt-4 inline-flex gap-1 rounded-2xl border border-stone-200 bg-white p-1 shadow-sm">
+        {(["current", "trash"] as TaskListView[]).map((view) => (
+          <button
+            key={view}
+            type="button"
+            onClick={() =>
+              setTaskListViews((current) => ({ ...current, [activeTab]: view }))
+            }
+            className={
+              activeTaskListView === view
+                ? "inline-flex min-h-9 items-center rounded-xl bg-stone-900 px-4 text-sm font-medium text-white"
+                : "inline-flex min-h-9 items-center rounded-xl px-4 text-sm font-medium text-stone-600 hover:bg-stone-50"
+            }
+          >
+            {view === "current" ? "当前任务" : "回收站"}
+          </button>
+        ))}
       </div>
 
       {activeTab === "batch" && loading ? (
@@ -1697,7 +1935,7 @@ export const TasksPage = () => {
         </div>
       ) : activeTab === "batch" && tasks.length === 0 ? (
         <div className="mt-6 rounded-3xl border border-dashed border-stone-300 bg-white px-6 py-14 text-center text-sm text-stone-500 shadow-sm">
-          暂无任务。可从首页创建。
+          {activeTaskListView === "trash" ? "回收站暂无任务。" : "暂无任务。可从首页创建。"}
         </div>
       ) : activeTab === "batch" ? (
         <>
@@ -1767,7 +2005,29 @@ export const TasksPage = () => {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-                      {task.status === "running" ? (
+                      {activeTaskListView === "trash" ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleRestoreBatchTask(task.id)}
+                          className="ui-btn-primary"
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                          恢复
+                        </button>
+                      ) : null}
+                      {activeTaskListView === "current" &&
+                      canDeleteBatchTask(task) ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteBatchTask(task)}
+                          className="ui-btn-danger"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          删除
+                        </button>
+                      ) : null}
+                      {activeTaskListView === "current" &&
+                      task.status === "running" ? (
                         <button
                           type="button"
                           onClick={() => void handleAction(task.id, "pause")}
@@ -1777,7 +2037,8 @@ export const TasksPage = () => {
                           暂停
                         </button>
                       ) : null}
-                      {task.status === "paused" ? (
+                      {activeTaskListView === "current" &&
+                      task.status === "paused" ? (
                         <button
                           type="button"
                           onClick={() => void handleAction(task.id, "resume")}
@@ -1787,7 +2048,8 @@ export const TasksPage = () => {
                           继续
                         </button>
                       ) : null}
-                      {task.status !== "stopped" &&
+                      {activeTaskListView === "current" &&
+                      task.status !== "stopped" &&
                       task.status !== "completed" ? (
                         <button
                           type="button"
@@ -1826,7 +2088,9 @@ export const TasksPage = () => {
         </div>
       ) : activeTab === "match" && matchAnalysisJobs.length === 0 ? (
         <div className="mt-6 rounded-3xl border border-dashed border-stone-300 bg-white px-6 py-14 text-center text-sm text-stone-500 shadow-sm">
-          暂无匹配分析任务。可从首页创建。
+          {activeTaskListView === "trash"
+            ? "回收站暂无任务。"
+            : "暂无匹配分析任务。可从首页创建。"}
         </div>
       ) : activeTab === "match" ? (
         <>
@@ -1865,7 +2129,29 @@ export const TasksPage = () => {
                     </span>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-                    {(job.status === "queued" || job.status === "running") ? (
+                    {activeTaskListView === "trash" ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleRestoreMatchJob(job.id)}
+                        className="ui-btn-primary"
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                        恢复
+                      </button>
+                    ) : null}
+                    {activeTaskListView === "current" &&
+                    canDeleteMatchJob(job) ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteMatchJob(job)}
+                        className="ui-btn-danger"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        删除
+                      </button>
+                    ) : null}
+                    {activeTaskListView === "current" &&
+                    (job.status === "queued" || job.status === "running") ? (
                       <button
                         type="button"
                         onClick={() => void handleCancelMatchJob(job.id)}
@@ -1876,7 +2162,7 @@ export const TasksPage = () => {
                         取消
                       </button>
                     ) : null}
-                    {(
+                    {activeTaskListView === "current" && (
                       job.status === "partial_failed" ||
                       job.status === "failed" ||
                       job.status === "canceled"
@@ -1918,7 +2204,9 @@ export const TasksPage = () => {
         </div>
       ) : crawlJobs.length === 0 ? (
         <div className="mt-6 rounded-3xl border border-dashed border-stone-300 bg-white px-6 py-14 text-center text-sm text-stone-500 shadow-sm">
-          暂无抓取任务。可从导师管理页创建。
+          {activeTaskListView === "trash"
+            ? "回收站暂无任务。"
+            : "暂无抓取任务。可从导师管理页创建。"}
         </div>
       ) : (
         <>
@@ -1927,6 +2215,7 @@ export const TasksPage = () => {
               <CrawlJobCard
                 key={job.id}
                 job={job}
+                listView={taskListViews.crawl}
                 pausingCrawlJobId={pausingCrawlJobId}
                 resumingCrawlJobId={resumingCrawlJobId}
                 retryingCrawlJobId={retryingCrawlJobId}
@@ -1943,6 +2232,8 @@ export const TasksPage = () => {
                 onCancel={(jobId) => void handleCancelCrawlJob(jobId)}
                 onRetry={(jobId) => void handleRetryCrawlJob(jobId)}
                 onResumeReview={(jobId) => void handleResumeCrawlJobReview(jobId)}
+                onDelete={(currentJob) => void handleDeleteCrawlJob(currentJob)}
+                onRestore={(jobId) => void handleRestoreCrawlJob(jobId)}
                 formatUpdatedAt={(value) =>
                   formatDisplayTime(value, { withSeconds: true })
                 }

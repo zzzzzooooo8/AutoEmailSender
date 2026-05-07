@@ -96,15 +96,20 @@ async def create_crawl_job(
 @router.get("", response_model=list[CrawlJobSummaryRead])
 async def list_crawl_jobs(
     limit: CrawlJobListLimit = 50,
+    view: str = "current",
     session: AsyncSession = Depends(get_async_session),
 ) -> list[CrawlJobSummaryRead]:
+    statement = select(CrawlJob).options(selectinload(CrawlJob.current_run))
+    if view == "trash":
+        statement = statement.where(CrawlJob.deleted_at.is_not(None))
+    elif view == "current":
+        statement = statement.where(CrawlJob.deleted_at.is_(None))
+    else:
+        raise HTTPException(status_code=400, detail="未知任务视图")
     jobs = list(
         (
             await session.execute(
-                select(CrawlJob)
-                .options(selectinload(CrawlJob.current_run))
-                .order_by(CrawlJob.created_at.desc(), CrawlJob.id.desc())
-                .limit(limit),
+                statement.order_by(CrawlJob.created_at.desc(), CrawlJob.id.desc()).limit(limit),
             )
         ).scalars(),
     )
@@ -568,6 +573,70 @@ async def retry_crawl_job(
         metadata={
             "status": job.status,
             "clear_existing_data": payload.clear_existing_data,
+        },
+    )
+    await session.commit()
+    await session.refresh(job)
+    return job
+
+
+CRAWL_JOB_DELETABLE_STATUSES = {
+    CrawlJobStatus.COMPLETED.value,
+    CrawlJobStatus.FAILED.value,
+    CrawlJobStatus.CANCELED.value,
+}
+
+
+@router.post("/{job_id}/delete", response_model=CrawlJobRead)
+async def delete_crawl_job(
+    job_id: int,
+    session: AsyncSession = Depends(get_async_session),
+) -> CrawlJob:
+    job = await _get_crawl_job_or_404(session, job_id)
+    if job.status not in CRAWL_JOB_DELETABLE_STATUSES:
+        raise HTTPException(status_code=400, detail="请先中止/取消任务后再删除")
+    previous_deleted_at = job.deleted_at
+    if job.deleted_at is None:
+        now = datetime.now(UTC)
+        job.deleted_at = now
+        job.updated_at = now
+    await record_operation_log(
+        session,
+        category="crawler",
+        event_name="crawl_job.deleted",
+        entity_type="crawl_job",
+        entity_id=str(job.id),
+        metadata={
+            "status": job.status,
+            "llm_profile_id": job.llm_profile_id,
+            "previous_deleted_at": previous_deleted_at.isoformat() if previous_deleted_at else None,
+        },
+    )
+    await session.commit()
+    await session.refresh(job)
+    return job
+
+
+@router.post("/{job_id}/restore", response_model=CrawlJobRead)
+async def restore_crawl_job(
+    job_id: int,
+    session: AsyncSession = Depends(get_async_session),
+) -> CrawlJob:
+    job = await _get_crawl_job_or_404(session, job_id)
+    previous_deleted_at = job.deleted_at
+    if job.deleted_at is not None:
+        job.deleted_at = None
+        job.updated_at = datetime.now(UTC)
+    await record_operation_log(
+        session,
+        category="crawler",
+        event_name="crawl_job.restored",
+        entity_type="crawl_job",
+        entity_id=str(job.id),
+        metadata={
+            "status": job.status,
+            "llm_profile_id": job.llm_profile_id,
+            "previous_deleted_at": previous_deleted_at.isoformat() if previous_deleted_at else None,
         },
     )
     await session.commit()

@@ -3,11 +3,13 @@ import type {
   BatchTaskCardDTO,
   BatchTaskItemDTO,
   CreateBatchTaskRequestDTO,
+  TaskListView,
 } from '@/types';
 
 export const listBatchTasks = (params?: {
   identityId?: number | null;
   llmProfileId?: number | null;
+  view?: TaskListView;
 }) =>
   apiFetch<BatchTaskCardDTO[]>(
     '/api/batch-tasks',
@@ -15,6 +17,7 @@ export const listBatchTasks = (params?: {
     {
       identity_id: params?.identityId ?? undefined,
       llm_profile_id: params?.llmProfileId ?? undefined,
+      view: params?.view ?? undefined,
     },
   );
 
@@ -39,5 +42,15 @@ export const resumeBatchTask = (taskId: number) =>
 
 export const stopBatchTask = (taskId: number) =>
   apiFetch<{ ok: boolean; task: BatchTaskCardDTO }>(`/api/batch-tasks/${taskId}/stop`, {
+    method: 'POST',
+  });
+
+export const deleteBatchTask = (taskId: number) =>
+  apiFetch<{ ok: boolean; task: BatchTaskCardDTO }>(`/api/batch-tasks/${taskId}/delete`, {
+    method: 'POST',
+  });
+
+export const restoreBatchTask = (taskId: number) =>
+  apiFetch<{ ok: boolean; task: BatchTaskCardDTO }>(`/api/batch-tasks/${taskId}/restore`, {
     method: 'POST',
   });

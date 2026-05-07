@@ -43,6 +43,7 @@ router = APIRouter(prefix="/api/batch-tasks", tags=["batch-tasks"])
 async def list_batch_tasks(
     identity_id: int | None = None,
     llm_profile_id: int | None = None,
+    view: str = "current",
     session: AsyncSession = Depends(get_async_session),
 ) -> list[BatchTaskCardRead]:
     statement = (
@@ -54,6 +55,12 @@ async def list_batch_tasks(
         statement = statement.where(BatchTask.identity_id == identity_id)
     if llm_profile_id is not None:
         statement = statement.where(BatchTask.llm_profile_id == llm_profile_id)
+    if view == "trash":
+        statement = statement.where(BatchTask.deleted_at.is_not(None))
+    elif view == "current":
+        statement = statement.where(BatchTask.deleted_at.is_(None))
+    else:
+        raise HTTPException(status_code=400, detail="未知任务视图")
 
     tasks = list((await session.execute(statement)).scalars().unique())
     return [_serialize_batch_task(task) for task in tasks]
@@ -268,6 +275,62 @@ async def stop_batch_task(
     return BatchTaskActionResponse(ok=True, task=_serialize_batch_task(task))
 
 
+BATCH_TASK_DELETABLE_STATUSES = {
+    BatchTaskStatus.STOPPED.value,
+    BatchTaskStatus.COMPLETED.value,
+}
+
+
+@router.post("/{task_id}/delete", response_model=BatchTaskActionResponse)
+async def delete_batch_task(
+    task_id: int,
+    session: AsyncSession = Depends(get_async_session),
+) -> BatchTaskActionResponse:
+    task = await _get_batch_task(session, task_id)
+    serialized = _serialize_batch_task(task)
+    if serialized.status not in BATCH_TASK_DELETABLE_STATUSES:
+        raise HTTPException(status_code=400, detail="请先中止/取消任务后再删除")
+    previous_deleted_at = task.deleted_at
+    if task.deleted_at is None:
+        now = datetime.now(UTC)
+        task.deleted_at = now
+        task.updated_at = now
+    await _record_batch_task_action(
+        session,
+        task,
+        "batch_task.deleted",
+        extra_metadata={
+            "previous_deleted_at": previous_deleted_at.isoformat() if previous_deleted_at else None,
+        },
+    )
+    await session.commit()
+    await session.refresh(task, attribute_names=["email_tasks"])
+    return BatchTaskActionResponse(ok=True, task=_serialize_batch_task(task))
+
+
+@router.post("/{task_id}/restore", response_model=BatchTaskActionResponse)
+async def restore_batch_task(
+    task_id: int,
+    session: AsyncSession = Depends(get_async_session),
+) -> BatchTaskActionResponse:
+    task = await _get_batch_task(session, task_id)
+    previous_deleted_at = task.deleted_at
+    if task.deleted_at is not None:
+        task.deleted_at = None
+        task.updated_at = datetime.now(UTC)
+    await _record_batch_task_action(
+        session,
+        task,
+        "batch_task.restored",
+        extra_metadata={
+            "previous_deleted_at": previous_deleted_at.isoformat() if previous_deleted_at else None,
+        },
+    )
+    await session.commit()
+    await session.refresh(task, attribute_names=["email_tasks"])
+    return BatchTaskActionResponse(ok=True, task=_serialize_batch_task(task))
+
+
 async def _get_batch_task(session: AsyncSession, task_id: int) -> BatchTask:
     task = await session.scalar(
         select(BatchTask)
@@ -283,19 +346,23 @@ async def _record_batch_task_action(
     session: AsyncSession,
     task: BatchTask,
     event_name: str,
+    extra_metadata: dict[str, object] | None = None,
 ) -> None:
+    metadata = {
+        "status": task.status,
+        "target_count": task.target_count,
+        "identity_id": task.identity_id,
+        "llm_profile_id": task.llm_profile_id,
+    }
+    if extra_metadata:
+        metadata.update(extra_metadata)
     await record_operation_log(
         session,
         category="email",
         event_name=event_name,
         entity_type="batch_task",
         entity_id=str(task.id),
-        metadata={
-            "status": task.status,
-            "target_count": task.target_count,
-            "identity_id": task.identity_id,
-            "llm_profile_id": task.llm_profile_id,
-        },
+        metadata=metadata,
     )
 
 
@@ -368,6 +435,7 @@ def _serialize_batch_task(task: BatchTask) -> BatchTaskCardRead:
         replied_count=status_counter.get(EmailTaskStatus.REPLY_DETECTED.value, 0),
         created_at=task.created_at,
         updated_at=task.updated_at,
+        deleted_at=task.deleted_at,
     )
 
 
