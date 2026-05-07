@@ -140,7 +140,7 @@
 
 - 每轮读取候选任务 id，并先把本轮要执行的任务原子领取为 `generating_draft`。
 - 使用 `asyncio.Semaphore(max(concurrency, 1))` 限制并发。
-- 每个任务调用 `generate_task_draft(..., force=False)`。
+- 每个任务调用自动批量草稿生成入口。该入口复用 `generate_task_draft()` 的主体逻辑，但必须启用“自动批量模式”：缺默认材料、缺研究方向、模板不完整等前置失败进入 `draft_failed`，不能静默返回待生成状态。
 - 返回本轮实际处理的任务数量，用于运行时循环日志和测试断言。
 
 领取要求：
