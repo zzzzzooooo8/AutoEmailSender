@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.models import Base, CrawlCandidate, CrawlJob, CrawlJobRun, CrawlJobStatus, CrawlPage, LLMProfile
+from app.services import crawl_job_runtime
 from app.services.crawl_job_runtime import (
     _enrich_saved_candidates,
     enrich_selected_crawl_candidates,
@@ -1637,6 +1638,82 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.enriched_count, 0)
         self.assertEqual(result.unchanged_count, 1)
         self.assertEqual(result.failed_count, 0)
+
+    async def test_enrichment_worker_pause_exception_does_not_hang(self) -> None:
+        job_id = await self._create_default_profile_and_job()
+        await self._seed_candidates(job_id, count=1, host="example.edu")
+        llm_profile = await self._get_default_llm_profile()
+
+        async with self.session_factory() as session:
+            candidate = await session.scalar(
+                select(CrawlCandidate).where(CrawlCandidate.job_id == job_id)
+            )
+            assert candidate is not None
+            candidate_id = candidate.id
+
+        async def fake_enrich_candidate_work_item(
+            *args: object,
+            **kwargs: object,
+        ) -> None:
+            _ = args, kwargs
+            raise crawl_job_runtime.CrawlJobPaused()
+
+        with patch(
+            "app.services.crawl_job_runtime._enrich_candidate_work_item",
+            new=fake_enrich_candidate_work_item,
+        ):
+            result = await asyncio.wait_for(
+                enrich_selected_crawl_candidates(
+                    self.session_factory,
+                    job_id=job_id,
+                    candidate_ids=[candidate_id],
+                    llm_profile=llm_profile,
+                ),
+                timeout=1.0,
+            )
+
+        self.assertEqual(result.selected_count, 1)
+        self.assertEqual(result.enriched_count, 0)
+        self.assertEqual(result.unchanged_count, 0)
+        self.assertEqual(result.failed_count, 0)
+
+    async def test_enrichment_worker_unexpected_exception_is_counted_as_failure(self) -> None:
+        job_id = await self._create_default_profile_and_job()
+        await self._seed_candidates(job_id, count=1, host="example.edu")
+        llm_profile = await self._get_default_llm_profile()
+
+        async with self.session_factory() as session:
+            candidate = await session.scalar(
+                select(CrawlCandidate).where(CrawlCandidate.job_id == job_id)
+            )
+            assert candidate is not None
+            candidate_id = candidate.id
+
+        async def fake_enrich_candidate_work_item(
+            *args: object,
+            **kwargs: object,
+        ) -> None:
+            _ = args, kwargs
+            raise RuntimeError("boom")
+
+        with patch(
+            "app.services.crawl_job_runtime._enrich_candidate_work_item",
+            new=fake_enrich_candidate_work_item,
+        ):
+            result = await asyncio.wait_for(
+                enrich_selected_crawl_candidates(
+                    self.session_factory,
+                    job_id=job_id,
+                    candidate_ids=[candidate_id],
+                    llm_profile=llm_profile,
+                ),
+                timeout=1.0,
+            )
+
+        self.assertEqual(result.selected_count, 1)
+        self.assertEqual(result.enriched_count, 0)
+        self.assertEqual(result.unchanged_count, 0)
+        self.assertEqual(result.failed_count, 1)
 
     async def _create_default_profile_and_job(
         self,

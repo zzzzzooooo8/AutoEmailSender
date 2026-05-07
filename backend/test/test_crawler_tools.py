@@ -110,6 +110,46 @@ class CrawlerToolTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(len(first), 12)
 
+    def test_page_snapshot_cache_evicts_lru_entries(self) -> None:
+        ctx = self._budget_test_ctx()
+        first = PageSnapshot(
+            url="https://example.edu/a",
+            title="A",
+            text="alpha",
+            html="<html>a</html>",
+            links=[],
+            fetch_method="http",
+            status="succeeded",
+        )
+        second = PageSnapshot(
+            url="https://example.edu/b",
+            title="B",
+            text="beta",
+            html="<html>b</html>",
+            links=[],
+            fetch_method="http",
+            status="succeeded",
+        )
+        third = PageSnapshot(
+            url="https://example.edu/c",
+            title="C",
+            text="gamma",
+            html="<html>c</html>",
+            links=[],
+            fetch_method="http",
+            status="succeeded",
+        )
+
+        with patch("app.services.crawler_tools.MAX_PAGE_SNAPSHOT_CACHE_ENTRIES", 2, create=True):
+            ctx.remember_page_snapshot(first)
+            ctx.remember_page_snapshot(second)
+            self.assertIs(ctx.get_cached_page_snapshot(first.url), first)
+            ctx.remember_page_snapshot(third)
+
+        self.assertIs(ctx.get_cached_page_snapshot(first.url), first)
+        self.assertIsNone(ctx.get_cached_page_snapshot(second.url))
+        self.assertIs(ctx.get_cached_page_snapshot(third.url), third)
+
     def test_record_save_batch_failure_trips_same_batch_limit_on_second_failure(self) -> None:
         ctx = self._budget_test_ctx()
         candidates = [{"name": "张三", "email": "zhang@example.edu"}]
