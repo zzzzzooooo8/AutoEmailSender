@@ -62,17 +62,73 @@ echo fake uv %*
 exit /b 0
 "@
 
+  $releaseRepo = Join-Path $tempRoot "release-repo"
+  New-Item -ItemType Directory -Path (Join-Path $releaseRepo "docs\releases") -Force | Out-Null
+  New-Item -ItemType Directory -Path (Join-Path $releaseRepo "desktop") -Force | Out-Null
+  New-Item -ItemType Directory -Path (Join-Path $releaseRepo "frontend") -Force | Out-Null
+  Set-Content -Encoding UTF8 -Path (Join-Path $releaseRepo "docs\releases\v9.9.9.md") -Value @"
+# v9.9.9
+
+## 更新内容
+
+- 测试公告。
+"@
+
+  New-CmdShim -Directory $tempBin -Name "git" -Content @"
+@echo off
+if "%3"=="branch" echo master & exit /b 0
+if "%3"=="status" (
+  echo %* | findstr /C:"--untracked-files=all" >nul || exit /b 2
+  echo ?? docs/releases/v9.9.9.md
+  exit /b 0
+)
+if "%3"=="add" exit /b 0
+if "%3"=="commit" exit /b 0
+if "%3"=="tag" exit /b 0
+if "%3"=="push" exit /b 0
+exit /b 0
+"@
+
   $oldPath = $env:PATH
   $env:PATH = "$tempBin;$oldPath"
   try {
     $pwshPath = (Get-Command pwsh).Source
+    $failureProcess = Start-Process -FilePath $pwshPath -ArgumentList @(
+      "-NoLogo",
+      "-NoProfile",
+      "-File",
+      $releaseScript,
+      "9.9.9",
+      "-DryRun",
+      "-RepoRoot",
+      $releaseRepo
+    ) -WorkingDirectory $repoRoot -PassThru -Wait -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+
+    $failureOutput = "$(Get-Content -Raw -Encoding UTF8 $stdoutPath)`n$(Get-Content -Raw -Encoding UTF8 $stderrPath)"
+    if ($failureProcess.ExitCode -eq 0) {
+      throw "release.ps1 应该在 frontend 的 npm test 失败时返回非零退出码。"
+    }
+
+    Assert-Contains -Text $failureOutput -Needle "[fail] frontend: npm test" -Message "输出里没有看到 frontend: npm test 的失败信息。`n$failureOutput"
+    if ($failureOutput -match "验证 backend" -or $failureOutput -match "fake npm run lint" -or $failureOutput -match "fake npm run build") {
+      throw "release.ps1 没有在第一个失败处停下。`n$failureOutput"
+    }
+
+    New-CmdShim -Directory $tempBin -Name "npm" -Content @"
+@echo off
+echo fake npm %*
+exit /b 0
+"@
+
     $process = Start-Process -FilePath $pwshPath -ArgumentList @(
       "-NoLogo",
       "-NoProfile",
       "-File",
       $releaseScript,
       "9.9.9",
-      "-DryRun"
+      "-SkipVerify",
+      "-RepoRoot",
+      $releaseRepo
     ) -WorkingDirectory $repoRoot -PassThru -Wait -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
 
     $stdout = Get-Content -Raw -Encoding UTF8 $stdoutPath
@@ -80,12 +136,14 @@ exit /b 0
     $output = "$stdout`n$stderr"
 
     if ($process.ExitCode -eq 0) {
-      throw "release.ps1 应该在 frontend 的 npm test 失败时返回非零退出码。"
-    }
-
-    Assert-Contains -Text $output -Needle "[fail] frontend: npm test" -Message "输出里没有看到 frontend: npm test 的失败信息。`n$output"
-    if ($output -match "验证 backend" -or $output -match "fake npm run lint" -or $output -match "fake npm run build") {
-      throw "release.ps1 没有在第一个失败处停下。`n$output"
+      if (-not (Test-Path (Join-Path $releaseRepo "desktop\release-notes.md"))) {
+        throw "release.ps1 应该把公告复制到 desktop\\release-notes.md。`n$output"
+      }
+      if ($output -notmatch "已发布 v9.9.9") {
+        throw "release.ps1 成功时没有输出发布完成信息。`n$output"
+      }
+    } else {
+      throw "release.ps1 在允许的未跟踪公告文件存在时应该成功。`n$output"
     }
 
     $missingNotesProcess = Start-Process -FilePath $pwshPath -ArgumentList @(
@@ -94,7 +152,9 @@ exit /b 0
       "-File",
       $releaseScript,
       "8.8.8",
-      "-DryRun"
+      "-DryRun",
+      "-RepoRoot",
+      $releaseRepo
     ) -WorkingDirectory $repoRoot -PassThru -Wait -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
 
     $missingOutput = "$(Get-Content -Raw -Encoding UTF8 $stdoutPath)`n$(Get-Content -Raw -Encoding UTF8 $stderrPath)"

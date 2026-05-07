@@ -4,14 +4,15 @@ param(
   [string]$Version,
 
   [switch]$DryRun,
-  [switch]$SkipVerify
+  [switch]$SkipVerify,
+  [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 )
 
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $true
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 $OutputEncoding = [System.Text.UTF8Encoding]::new()
-$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$RepoRoot = (Resolve-Path $RepoRoot).Path
 $ReleaseTag = "v$Version"
 $CuratedReleaseNotesPath = Join-Path $RepoRoot "docs\releases\$ReleaseTag.md"
 $DesktopReleaseNotesPath = Join-Path $RepoRoot "desktop\release-notes.md"
@@ -39,7 +40,7 @@ function Invoke-CheckedCommand {
 }
 
 function Assert-CleanRepository {
-  $branch = git -C $RepoRoot branch --show-current
+  $branch = (git -C $RepoRoot branch --show-current).Trim()
   if ($DryRun) {
     Write-Host "[dry-run] current branch is $branch; real release requires master"
     return
@@ -49,7 +50,7 @@ function Assert-CleanRepository {
     throw "发布必须在 master 分支执行，当前分支是 $branch。"
   }
 
-  $status = git -C $RepoRoot status --porcelain
+  $status = git -C $RepoRoot status --porcelain --untracked-files=all
   $allowedReleaseNotesPath = "docs/releases/$ReleaseTag.md"
   $unexpectedStatus = @(
     $status | Where-Object {
