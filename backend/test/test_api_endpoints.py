@@ -1166,6 +1166,70 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("发送日期", response.json()["detail"])
 
+    def test_batch_task_delete_restore_and_trash_view(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_profile_id = self._create_llm()
+        self.client.post("/api/professors/import-sample")
+        professor_id = self.client.get("/api/professors").json()[0]["id"]
+        created = self.client.post(
+            "/api/batch-tasks",
+            json={
+                "identity_id": identity_id,
+                "llm_profile_id": llm_profile_id,
+                "name": "可删除批量任务",
+                "professor_ids": [professor_id],
+                "schedule_type": "immediate",
+                "primary_material_id": None,
+                "email_subject": "Hello {{导师姓名}}",
+                "email_body": "Body",
+                "selected_material_ids": None,
+                "outreach_generation_mode": "template",
+                "outreach_template_subject": "Hello {{导师姓名}}",
+                "outreach_template_body_text": "Body",
+                "outreach_template_body_html": None,
+            },
+        )
+        self.assertEqual(created.status_code, 201, msg=created.text)
+        task_id = created.json()["id"]
+
+        blocked = self.client.post(f"/api/batch-tasks/{task_id}/delete")
+        self.assertEqual(blocked.status_code, 400)
+        self.assertIn("请先中止/取消任务后再删除", blocked.json()["detail"])
+
+        stopped = self.client.post(f"/api/batch-tasks/{task_id}/stop")
+        self.assertEqual(stopped.status_code, 200, msg=stopped.text)
+        deleted = self.client.post(f"/api/batch-tasks/{task_id}/delete")
+        self.assertEqual(deleted.status_code, 200, msg=deleted.text)
+        self.assertIsNotNone(deleted.json()["task"]["deleted_at"])
+
+        repeated_delete = self.client.post(f"/api/batch-tasks/{task_id}/delete")
+        self.assertEqual(repeated_delete.status_code, 200, msg=repeated_delete.text)
+
+        current = self.client.get(
+            "/api/batch-tasks",
+            params={"identity_id": identity_id, "llm_profile_id": llm_profile_id},
+        )
+        self.assertEqual(current.status_code, 200)
+        self.assertEqual(current.json(), [])
+
+        trash = self.client.get(
+            "/api/batch-tasks",
+            params={
+                "identity_id": identity_id,
+                "llm_profile_id": llm_profile_id,
+                "view": "trash",
+            },
+        )
+        self.assertEqual(trash.status_code, 200)
+        self.assertEqual([item["id"] for item in trash.json()], [task_id])
+
+        restored = self.client.post(f"/api/batch-tasks/{task_id}/restore")
+        self.assertEqual(restored.status_code, 200, msg=restored.text)
+        self.assertIsNone(restored.json()["task"]["deleted_at"])
+
+        repeated_restore = self.client.post(f"/api/batch-tasks/{task_id}/restore")
+        self.assertEqual(repeated_restore.status_code, 200, msg=repeated_restore.text)
+
     def test_create_and_list_match_analysis_jobs(self) -> None:
         identity_id = self._create_identity(with_imap=False)
         llm_id = self._create_llm()
