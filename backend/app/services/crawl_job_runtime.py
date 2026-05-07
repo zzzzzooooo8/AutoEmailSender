@@ -654,6 +654,8 @@ async def _enrich_candidate_collection_concurrent(
             trace_callback=trace_callback,
         )
     finally:
+        for worker in workers:
+            worker.cancel()
         await asyncio.gather(*workers, return_exceptions=True)
 
     await _emit_trace_event(
@@ -689,16 +691,34 @@ async def _run_candidate_enrichment_worker(
         item = await work_queue.get()
         if item is None:
             return
-        result = await _enrich_candidate_work_item(
-            session_factory,
-            ctx,
-            llm_profile,
-            item,
-            host_limiters,
-            trace_callback=trace_callback,
-            host_concurrency=host_concurrency,
-            max_retries=max_retries,
-        )
+        try:
+            result = await _enrich_candidate_work_item(
+                session_factory,
+                ctx,
+                llm_profile,
+                item,
+                host_limiters,
+                trace_callback=trace_callback,
+                host_concurrency=host_concurrency,
+                max_retries=max_retries,
+            )
+        except asyncio.CancelledError:
+            raise
+        except (CrawlJobPaused, CrawlJobCanceled):
+            result = CandidateEnrichmentResult(
+                candidate_id=item.candidate_id,
+                candidate_name=item.candidate_name,
+                profile_url=item.profile_url,
+                status="stopped",
+            )
+        except Exception as exc:
+            result = CandidateEnrichmentResult(
+                candidate_id=item.candidate_id,
+                candidate_name=item.candidate_name,
+                profile_url=item.profile_url,
+                status="failed",
+                error_message=str(exc),
+            )
         await result_queue.put(result)
 
 
