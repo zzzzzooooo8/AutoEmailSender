@@ -149,17 +149,23 @@ def _render_block(value: Any) -> tuple[str, str]:
 
     if node_type in {"bullet_list", "numbered_list"}:
         items = value.get("items")
-        if not isinstance(items, list) or not items:
+        if not isinstance(items, list):
             raise ValueError("列表不能为空")
+        if not items:
+            return "", ""
 
         tag = "ul" if node_type == "bullet_list" else "ol"
         html_items: list[str] = []
         text_items: list[str] = []
         for index, item in enumerate(items, start=1):
             item_html, item_text = _render_inline_children(item)
+            if not item_text.strip():
+                continue
             html_items.append(f"<li>{item_html}</li>")
             prefix = "-" if node_type == "bullet_list" else f"{index}."
             text_items.append(f"{prefix} {item_text}")
+        if not text_items:
+            return "", ""
         return f"<{tag}>{''.join(html_items)}</{tag}>", "\n".join(text_items)
 
     raise ValueError(f"不支持的富文本块类型: {node_type}")

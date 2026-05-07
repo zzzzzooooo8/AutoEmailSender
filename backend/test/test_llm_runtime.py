@@ -612,6 +612,17 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
             calls[1][0],
             "https://ark.cn-beijing.volces.com/api/v3/responses",
         )
+        responses_payload = calls[1][1]
+        self.assertEqual(
+            responses_payload["input"],
+            [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "ping"}],
+                },
+            ],
+        )
         self.assertEqual(result.endpoint_kind, "responses")
         self.assertEqual(result.request_url, "https://ark.cn-beijing.volces.com/api/v3/responses")
         self.assertEqual(

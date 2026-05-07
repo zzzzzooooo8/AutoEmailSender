@@ -71,6 +71,30 @@ class RichTextRenderingTest(unittest.TestCase):
                 }
             )
 
+    def test_ignores_empty_list_blocks_when_visible_text_exists(self) -> None:
+        result = render_rich_text_document(
+            {
+                "type": "doc",
+                "blocks": [
+                    {
+                        "type": "paragraph",
+                        "children": [{"type": "text", "text": "李老师您好："}],
+                    },
+                    {
+                        "type": "bullet_list",
+                        "items": [],
+                    },
+                    {
+                        "type": "paragraph",
+                        "children": [{"type": "text", "text": "期待与您交流。"}],
+                    },
+                ],
+            }
+        )
+
+        self.assertNotIn("<ul>", result.html)
+        self.assertEqual(result.text, "李老师您好：\n期待与您交流。")
+
     def test_preserves_table_and_font_styles_in_email_html(self) -> None:
         result = normalize_email_html(
             '<table style="font-family:SimSun;border-collapse:collapse"><tbody><tr><td style="font-family:SimSun">老师您好</td></tr></tbody></table>'

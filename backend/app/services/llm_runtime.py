@@ -1393,7 +1393,7 @@ def compute_duration_ms(start: float) -> int:
 def build_responses_payload(payload: dict[str, object]) -> dict[str, object]:
     request_payload: dict[str, object] = {
         "model": payload["model"],
-        "input": payload.get("messages", []),
+        "input": _build_responses_input(payload.get("messages", [])),
     }
     if payload.get("temperature") is not None:
         request_payload["temperature"] = payload["temperature"]
@@ -1404,6 +1404,47 @@ def build_responses_payload(payload: dict[str, object]) -> dict[str, object]:
     if payload.get("prompt_cache_retention") is not None:
         request_payload["prompt_cache_retention"] = payload["prompt_cache_retention"]
     return request_payload
+
+
+def _build_responses_input(messages: object) -> list[dict[str, object]]:
+    if not isinstance(messages, list):
+        return []
+
+    input_items: list[dict[str, object]] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = message.get("role")
+        content = message.get("content")
+        if not isinstance(role, str):
+            continue
+        input_items.append(
+            {
+                "type": "message",
+                "role": role,
+                "content": _build_responses_content_items(content),
+            },
+        )
+    return input_items
+
+
+def _build_responses_content_items(content: object) -> list[dict[str, str]]:
+    if isinstance(content, str):
+        return [{"type": "input_text", "text": content}]
+    if not isinstance(content, list):
+        return []
+
+    content_items: list[dict[str, str]] = []
+    for item in content:
+        if isinstance(item, str):
+            content_items.append({"type": "input_text", "text": item})
+            continue
+        if not isinstance(item, dict):
+            continue
+        text = item.get("text")
+        if isinstance(text, str):
+            content_items.append({"type": "input_text", "text": text})
+    return content_items
 
 
 def extract_chat_completion_content(data: dict[str, object]) -> str:
