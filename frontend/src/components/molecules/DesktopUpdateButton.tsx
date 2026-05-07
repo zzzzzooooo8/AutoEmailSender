@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { useNotification } from "@/context/NotificationContext";
 import {
@@ -44,6 +44,10 @@ function formatUpdateCheckErrorMessage(message: string): string {
   return `${message}。请检查系统代理是否已开启，或确认当前网络可以访问 GitHub。`;
 }
 
+function getUpdateStatusKey(status: DesktopUpdateStatus): string {
+  return JSON.stringify(status);
+}
+
 export function DesktopUpdateButton() {
   if (!isDesktopApp()) {
     return null;
@@ -60,6 +64,7 @@ function DesktopUpdateButtonInner() {
   );
   const [checking, setChecking] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const emittedStatusDuringCheckRef = useRef<string | null>(null);
   const { notifyError, notifySuccess } = useNotification();
 
   const handleStatus = useCallback(
@@ -143,7 +148,10 @@ function DesktopUpdateButtonInner() {
         }
       });
 
-    const unsubscribe = onDesktopUpdateStatus(handleStatus);
+    const unsubscribe = onDesktopUpdateStatus((nextStatus) => {
+      emittedStatusDuringCheckRef.current = getUpdateStatusKey(nextStatus);
+      handleStatus(nextStatus);
+    });
 
     return () => {
       cancelled = true;
@@ -204,10 +212,13 @@ function DesktopUpdateButtonInner() {
     }
 
     setChecking(true);
+    emittedStatusDuringCheckRef.current = null;
 
     try {
       const status = await checkForDesktopUpdate();
-      handleStatus(status);
+      if (emittedStatusDuringCheckRef.current !== getUpdateStatusKey(status)) {
+        handleStatus(status);
+      }
       if (status.state === "downloaded_pending_install") {
         await installUpdate();
       }

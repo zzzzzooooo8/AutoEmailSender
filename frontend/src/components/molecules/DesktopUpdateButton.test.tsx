@@ -50,6 +50,32 @@ describe("DesktopUpdateButton", () => {
     expect(confirm).not.toHaveBeenCalled();
   });
 
+  it("shows one notification when desktop update check emits and returns not available", async () => {
+    const listeners: Array<(status: DesktopUpdateStatus) => void> = [];
+    const status: DesktopUpdateStatus = { state: "not_available", version: "0.1.0" };
+    const checkForUpdate = vi.fn(async () => {
+      listeners[0]?.(status);
+      return status;
+    });
+    window.autoEmailSender = buildDesktopApi({
+      checkForUpdate,
+      onUpdateStatus: (callback) => {
+        listeners.push(callback);
+        return () => undefined;
+      },
+    });
+
+    render(<DesktopUpdateButton />);
+    fireEvent.click(await screen.findByRole("button", { name: /检查更新/ }));
+
+    await waitFor(() => expect(checkForUpdate).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole("button", { name: /检查更新/ })).not.toBeDisabled());
+
+    expect(notifySuccess).toHaveBeenCalledTimes(1);
+    expect(notifySuccess).toHaveBeenCalledWith("检查更新", "当前已是最新版本。");
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
   it("shows download choices and keeps NEW when update is available", async () => {
     window.autoEmailSender = buildDesktopApi({
       checkForUpdate: async () => ({
