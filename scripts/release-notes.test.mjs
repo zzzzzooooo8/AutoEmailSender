@@ -5,17 +5,19 @@ import { describe, expect, it } from "vitest";
 import { buildReleaseNotes, generateReleaseNotes } from "./release-notes.mjs";
 
 describe("release notes generator", () => {
-  it("combines template text with recent commit subjects", () => {
+  it("combines the release announcement template with recent commit subjects", () => {
     const notes = buildReleaseNotes("v2.0.2", [
       "fix(后端): 修复桌面路径断言兼容性",
       "test(前端): 修复时间断言时区依赖",
     ]);
 
     expect(notes).toContain("# v2.0.2");
-    expect(notes).toContain("普通用户只需下载 `AutoEmailSender-Setup-2.0.2.exe`");
+    expect(notes).toContain("## 更新内容");
     expect(notes).toContain("- fix(后端): 修复桌面路径断言兼容性");
     expect(notes).toContain("- test(前端): 修复时间断言时区依赖");
-    expect(notes).toContain("latest.yml");
+    expect(notes).toContain("普通用户只需下载 `AutoEmailSender Setup 2.0.2.exe`");
+    expect(notes).toContain("发现新版本后，可以选择增量下载或全量下载。");
+    expect(notes).not.toContain("AutoEmailSender-Setup-2.0.2.exe");
   });
 
   it("writes notes to disk when asked", () => {

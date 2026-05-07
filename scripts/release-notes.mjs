@@ -7,7 +7,7 @@ const RELEASE_COMMIT_PREFIX = "chore(release):";
 
 export function buildReleaseNotes(version, commits) {
   const normalizedVersion = normalizeVersion(version);
-  const installerName = `AutoEmailSender-Setup-${normalizedVersion}.exe`;
+  const installerName = `AutoEmailSender Setup ${normalizedVersion}.exe`;
   const recentUpdates = commits.length
     ? commits.map((commit) => `- ${commit}`).join("\n")
     : "- 本次发布未包含额外的功能提交。";
@@ -15,18 +15,18 @@ export function buildReleaseNotes(version, commits) {
   return [
     `# ${version}`,
     "",
-    "## 最近更新",
+    "## 更新内容",
+    "",
     recentUpdates,
     "",
     "## 安装说明",
-    `- 普通用户只需下载 \`${installerName}\``,
+    "",
+    `- 普通用户只需下载 \`${installerName}\`。`,
     "",
     "## 自动更新",
-    "- 应用内会自动检查更新。",
-    "- 有新版本时，会提示你确认下载并安装。",
     "",
-    "## 文件说明",
-    "- `latest.yml` 和 `.blockmap` 是自动更新所需文件，不需要手动下载。",
+    "- 应用内会自动检查更新。",
+    "- 发现新版本后，可以选择增量下载或全量下载。",
     "",
   ].join("\n");
 }
