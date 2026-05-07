@@ -22,6 +22,7 @@ class RuntimeSettingsRead(BaseModel):
     crawler_profile_enrichment_concurrency: int
     crawler_host_concurrency: int
     draft_max_tokens: int
+    batch_draft_generation_concurrency: int
     draft_rewrite_intensity: DraftRewriteIntensity
     draft_rewrite_tone: DraftRewriteTone
     draft_rewrite_formality: DraftRewriteFormality
@@ -39,6 +40,7 @@ class RuntimeSettingsUpdate(BaseModel):
     crawler_profile_enrichment_concurrency: int = Field(ge=1, le=20)
     crawler_host_concurrency: int = Field(ge=1, le=8)
     draft_max_tokens: int = Field(ge=256, le=32000)
+    batch_draft_generation_concurrency: int = Field(ge=1, le=20)
     draft_rewrite_intensity: DraftRewriteIntensity
     draft_rewrite_tone: DraftRewriteTone
     draft_rewrite_formality: DraftRewriteFormality

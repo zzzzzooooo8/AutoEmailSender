@@ -20,6 +20,7 @@ vi.mock("@/lib/api/runtimeSettings", () => ({
     crawler_profile_enrichment_concurrency: 3,
     crawler_host_concurrency: 1,
     draft_max_tokens: 6000,
+    batch_draft_generation_concurrency: 3,
     draft_rewrite_intensity: "moderate",
     draft_rewrite_tone: "polite",
     draft_rewrite_formality: "balanced",

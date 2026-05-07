@@ -21,6 +21,8 @@ if TYPE_CHECKING:
 class EmailTaskStatus(StrEnum):
     DISCOVERED = "discovered"
     MATCHED = "matched"
+    GENERATING_DRAFT = "generating_draft"
+    DRAFT_FAILED = "draft_failed"
     REVIEW_REQUIRED = "review_required"
     APPROVED = "approved"
     SCHEDULED = "scheduled"
@@ -86,6 +88,7 @@ class EmailTask(Base):
         server_default=text("'discovered'"),
     )
     cancellation_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    draft_generation_previous_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     match_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     match_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     generated_subject: Mapped[str | None] = mapped_column(Text, nullable=True)
