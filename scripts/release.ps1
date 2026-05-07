@@ -8,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $true
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
 function Run-Git {
@@ -17,6 +18,19 @@ function Run-Git {
     return
   }
   git -C $RepoRoot @Args
+}
+
+function Invoke-CheckedCommand {
+  param(
+    [Parameter(Mandatory = $true)][string]$Label,
+    [Parameter(Mandatory = $true)][scriptblock]$Action
+  )
+
+  try {
+    & $Action
+  } catch {
+    throw "[fail] $Label 失败：$($_.Exception.Message)"
+  }
 }
 
 function Assert-CleanRepository {
@@ -45,9 +59,9 @@ function Invoke-Verification {
   Write-Host "=== 验证 frontend ==="
   Push-Location (Join-Path $RepoRoot "frontend")
   try {
-    npm test
-    npm run lint
-    npm run build
+    Invoke-CheckedCommand "frontend: npm test" { npm test }
+    Invoke-CheckedCommand "frontend: npm run lint" { npm run lint }
+    Invoke-CheckedCommand "frontend: npm run build" { npm run build }
   } finally {
     Pop-Location
   }
@@ -55,8 +69,10 @@ function Invoke-Verification {
   Write-Host "=== 验证 backend ==="
   Push-Location (Join-Path $RepoRoot "backend")
   try {
-    uv sync --dev
-    uv run python -m unittest test.test_desktop_runtime
+    Invoke-CheckedCommand "backend: uv sync --dev" { uv sync --dev }
+    Invoke-CheckedCommand "backend: uv run python -m unittest test.test_desktop_runtime" {
+      uv run python -m unittest test.test_desktop_runtime
+    }
   } finally {
     Pop-Location
   }
@@ -64,7 +80,7 @@ function Invoke-Verification {
   Write-Host "=== 验证 desktop ==="
   Push-Location (Join-Path $RepoRoot "desktop")
   try {
-    npm test
+    Invoke-CheckedCommand "desktop: npm test" { npm test }
   } finally {
     Pop-Location
   }
