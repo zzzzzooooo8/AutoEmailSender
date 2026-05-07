@@ -24,6 +24,7 @@ const numberFields: Array<{
   hint: string;
   min: number;
   max: number;
+  defaultValue: number;
   restartRequired?: boolean;
 }> = [
   {
@@ -32,6 +33,7 @@ const numberFields: Array<{
     hint: "LLM 生成邮件草稿时传给模型的 max tokens，全局生效。",
     min: 256,
     max: 32000,
+    defaultValue: 6000,
   },
   {
     key: "match_analysis_job_item_concurrency",
@@ -39,6 +41,7 @@ const numberFields: Array<{
     hint: "单个批量匹配任务内同时分析的导师数量，保存后下一轮后端任务生效。",
     min: 1,
     max: 20,
+    defaultValue: 3,
   },
   {
     key: "batch_draft_generation_concurrency",
@@ -46,6 +49,7 @@ const numberFields: Array<{
     hint: "后台批量生成 AI 草稿时同时执行的 LLM 请求数量，保存后下一轮任务生效。",
     min: 1,
     max: 20,
+    defaultValue: 3,
   },
   {
     key: "match_analysis_job_interval_seconds",
@@ -53,6 +57,7 @@ const numberFields: Array<{
     hint: "后端检查待处理批量匹配任务的间隔秒数。",
     min: 1,
     max: 300,
+    defaultValue: 10,
     restartRequired: true,
   },
   {
@@ -61,6 +66,7 @@ const numberFields: Array<{
     hint: "同时处理的批量匹配任务数量。",
     min: 1,
     max: 8,
+    defaultValue: 1,
     restartRequired: true,
   },
   {
@@ -69,6 +75,7 @@ const numberFields: Array<{
     hint: "同时运行的抓取任务数量。",
     min: 1,
     max: 8,
+    defaultValue: 2,
     restartRequired: true,
   },
   {
@@ -77,6 +84,7 @@ const numberFields: Array<{
     hint: "单个抓取任务内同时补全的详情页数量，保存后下一轮抓取生效。",
     min: 1,
     max: 20,
+    defaultValue: 3,
   },
   {
     key: "crawler_host_concurrency",
@@ -84,6 +92,7 @@ const numberFields: Array<{
     hint: "同一域名同时抓取的详情页数量，建议保持 1。",
     min: 1,
     max: 8,
+    defaultValue: 1,
   },
 ];
 
@@ -431,12 +440,26 @@ export function OtherSettingsCard() {
 function toFormState(settings: RuntimeSettingsDTO): FormState {
   const state = { ...emptyForm };
   for (const field of numberFields) {
-    state[field.key] = String(settings[field.key]);
+    state[field.key] = String(getNumberSetting(settings, field.key, field.defaultValue));
   }
   for (const field of preferenceFields) {
-    state[field.key] = String(settings[field.key]);
+    state[field.key] = getPreferenceSetting(settings, field.key);
   }
   return state;
+}
+
+function getNumberSetting(
+  settings: RuntimeSettingsDTO,
+  key: NumberSettingsKey,
+  fallback: number,
+): number {
+  const value = settings[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function getPreferenceSetting(settings: RuntimeSettingsDTO, key: PreferenceSettingsKey): string {
+  const value = settings[key];
+  return typeof value === "string" && value ? value : defaultDraftRewritePreferences[key];
 }
 
 function toUpdatePayload(form: FormState): RuntimeSettingsUpdateDTO {

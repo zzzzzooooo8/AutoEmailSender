@@ -78,6 +78,34 @@ describe("OtherSettingsCard", () => {
     expect(screen.getByLabelText("批量邮件 LLM 草稿并发数")).toHaveValue(6);
   });
 
+  it("falls back to the default batch draft concurrency when the setting is missing", async () => {
+    const api = await import("@/lib/api/runtimeSettings");
+    vi.mocked(api.getRuntimeSettings).mockResolvedValueOnce({
+      match_analysis_job_worker_count: 1,
+      match_analysis_job_item_concurrency: 3,
+      match_analysis_job_interval_seconds: 10,
+      crawler_worker_count: 2,
+      crawler_profile_enrichment_concurrency: 3,
+      crawler_host_concurrency: 1,
+      draft_max_tokens: 6000,
+      draft_rewrite_intensity: "moderate",
+      draft_rewrite_tone: "polite",
+      draft_rewrite_formality: "balanced",
+      draft_rewrite_length: "default",
+      draft_rewrite_specificity: "balanced",
+      draft_template_preservation: "structure_first",
+      updated_at: "2026-05-04T00:00:00Z",
+    } as Awaited<ReturnType<typeof api.getRuntimeSettings>>);
+
+    render(<OtherSettingsCard />);
+
+    fireEvent.click(screen.getByRole("button", { name: /其他设置/ }));
+
+    expect(await screen.findByLabelText("批量邮件 LLM 草稿并发数")).toHaveValue(3);
+    expect(screen.getByRole("button", { name: /其他设置/ })).toHaveTextContent("草稿并发 3");
+    expect(screen.getByRole("button", { name: /其他设置/ })).not.toHaveTextContent("undefined");
+  });
+
   it("loads saves and resets draft rewrite preferences", async () => {
     const api = await import("@/lib/api/runtimeSettings");
 
