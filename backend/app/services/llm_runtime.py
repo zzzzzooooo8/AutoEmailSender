@@ -452,6 +452,7 @@ async def generate_match_and_draft(
     available_materials: list[IdentityMaterial],
     custom_subject: str | None = None,
     custom_body: str | None = None,
+    custom_body_html: str | None = None,
     max_tokens: int | None = None,
 ) -> GeneratedMatchAndDraft:
     prompt = build_match_and_draft_prompt(
@@ -461,6 +462,7 @@ async def generate_match_and_draft(
         available_materials=available_materials,
         custom_subject=custom_subject,
         custom_body=custom_body,
+        custom_body_html=custom_body_html,
     )
     payload = {
         "model": llm_profile.model_name,
@@ -551,6 +553,7 @@ async def generate_draft_content(
     available_materials: list[IdentityMaterial],
     custom_subject: str | None = None,
     custom_body: str | None = None,
+    custom_body_html: str | None = None,
     current_match: MatchEvaluationResult | None = None,
     max_tokens: int | None = None,
     rewrite_preferences: DraftRewritePreferences | None = None,
@@ -562,6 +565,7 @@ async def generate_draft_content(
         available_materials=available_materials,
         custom_subject=custom_subject,
         custom_body=custom_body,
+        custom_body_html=custom_body_html,
         current_match=current_match,
         rewrite_preferences=rewrite_preferences,
     )
@@ -946,6 +950,7 @@ def estimate_match_and_draft_tokens(
     available_materials: list[IdentityMaterial],
     custom_subject: str | None = None,
     custom_body: str | None = None,
+    custom_body_html: str | None = None,
     max_tokens: int | None = None,
 ) -> DraftTokenEstimate:
     prompt = build_match_and_draft_prompt(
@@ -955,6 +960,7 @@ def estimate_match_and_draft_tokens(
         available_materials=available_materials,
         custom_subject=custom_subject,
         custom_body=custom_body,
+        custom_body_html=custom_body_html,
     )
     estimated_prompt_tokens = estimate_text_tokens(f"{SYSTEM_MATCH_AND_DRAFT_PROMPT}\n{prompt}")
     estimated_completion_tokens_upper_bound = max_tokens or DEFAULT_LLM_MAX_TOKENS
@@ -1067,6 +1073,7 @@ def build_draft_prompt(
     custom_subject: str | None,
     custom_body: str | None,
     current_match: MatchEvaluationResult | None,
+    custom_body_html: str | None = None,
     rewrite_preferences: DraftRewritePreferences | None = None,
 ) -> str:
     match_context = ""
@@ -1092,6 +1099,7 @@ def build_draft_prompt(
         available_materials=available_materials,
         custom_subject=custom_subject,
         custom_body=custom_body,
+        custom_body_html=custom_body_html,
         extra_requirements=f"""
         {match_context or "当前还没有单独计算过匹配，请你自己综合判断邮件内容。"}
 
@@ -1110,6 +1118,7 @@ def build_draft_prompt(
         8. 必须围绕导师研究方向进行个性化改写，研究方向来自“导师信息 - 研究方向”。
         9. 按上面的改写幅度要求控制改动大小，同时尽量保留可表达的富文本标记，例如加粗、斜体、链接和列表。
         10. 如果模板包含表格，保留表格中的信息顺序和语义，但不要输出 schema 不支持的表格节点。
+        11. 如果提供了套磁信模板正文 HTML，优先参考其中的富文本标记；将 HTML 中的 strong/b 标签转换为 rich_body 的 strong 节点，em/i 转换为 emphasis，a 转换为 link，ul/ol 转换为列表节点，不要把 HTML 原样放进 text。
         """,
         current_match=current_match,
     )
@@ -1182,6 +1191,7 @@ def build_match_and_draft_prompt(
     available_materials: list[IdentityMaterial],
     custom_subject: str | None,
     custom_body: str | None,
+    custom_body_html: str | None = None,
 ) -> str:
     return _build_base_generation_prompt(
         identity=identity,
@@ -1190,6 +1200,7 @@ def build_match_and_draft_prompt(
         available_materials=available_materials,
         custom_subject=custom_subject,
         custom_body=custom_body,
+        custom_body_html=custom_body_html,
         extra_requirements="""
         任务要求：
         1. 先根据默认材料和导师方向判断匹配度。
@@ -1211,6 +1222,7 @@ def _build_base_generation_prompt(
     custom_body: str | None,
     extra_requirements: str,
     current_match: MatchEvaluationResult | None,
+    custom_body_html: str | None = None,
 ) -> str:
     material_block = "\n".join(
         f"- id={material.id}, name={material.display_name}, type={material.material_type}"
@@ -1266,6 +1278,7 @@ def _build_base_generation_prompt(
 
         套磁信模板主题：{custom_subject or "无"}
         套磁信模板正文：{custom_body or "无"}
+        套磁信模板正文 HTML（如有，用于保留加粗、斜体、链接、列表等格式）：{custom_body_html or "无"}
         {current_match_block}
 
         {dedent(extra_requirements).strip()}

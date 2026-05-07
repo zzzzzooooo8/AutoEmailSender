@@ -92,6 +92,7 @@ async def build_workspace_thread(
                 current_task_outreach.body_text_template,
                 current_task_outreach.body_html_template,
             ),
+            custom_body_html=current_task_outreach.body_html_template,
         )
 
     return WorkspaceThreadRead(

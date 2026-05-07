@@ -329,6 +329,7 @@ async def generate_task_draft(
                 template_body = _normalize_nullable_text(outreach_config.body_text_template) or (
                     _normalize_nullable_text(batch_task.email_body) if batch_task else None
                 )
+                template_body_html = _normalize_nullable_text(outreach_config.body_html_template)
                 detail = get_outreach_template_defaults_validation_error(
                     template_subject,
                     template_body,
@@ -354,6 +355,7 @@ async def generate_task_draft(
                     available_materials=list(task.identity.materials),
                     custom_subject=template_subject,
                     custom_body=template_body,
+                    custom_body_html=template_body_html,
                     current_match=current_match,
                     max_tokens=runtime_settings.draft_max_tokens,
                     rewrite_preferences=rewrite_preferences,
@@ -620,6 +622,7 @@ async def preview_task_draft(
         template_body = _normalize_nullable_text(outreach_config.body_text_template) or (
             _normalize_nullable_text(task.batch_task.email_body) if task.batch_task else None
         )
+        template_body_html = _normalize_nullable_text(outreach_config.body_html_template)
         detail = get_outreach_template_defaults_validation_error(
             template_subject,
             template_body,
@@ -645,6 +648,7 @@ async def preview_task_draft(
             available_materials=list(task.identity.materials),
             custom_subject=template_subject,
             custom_body=template_body,
+            custom_body_html=template_body_html,
             current_match=current_match,
             rewrite_preferences=rewrite_preferences,
         )

@@ -85,6 +85,7 @@ async def generate_test_compose_draft(
 
     template_subject = (outreach_config.subject_template or "").strip() or None
     template_body = (outreach_config.body_text_template or "").strip() or None
+    template_body_html = (outreach_config.body_html_template or "").strip() or None
     detail = get_outreach_template_defaults_validation_error(template_subject, template_body)
     if detail:
         raise ValueError(detail)
@@ -116,6 +117,7 @@ async def generate_test_compose_draft(
             available_materials=list(identity.materials),
             custom_subject=template_subject,
             custom_body=template_body,
+            custom_body_html=template_body_html,
             current_match=None,
             max_tokens=runtime_settings.draft_max_tokens,
             rewrite_preferences=rewrite_preferences,

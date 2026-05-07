@@ -443,6 +443,52 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("加粗", prompt)
         self.assertIn("链接", prompt)
 
+    def test_build_draft_prompt_includes_template_html_for_format_preservation(self) -> None:
+        from app.models import IdentityMaterial, IdentityProfile, Professor
+
+        identity = IdentityProfile(
+            name="张三",
+            email_address="sender@example.com",
+            smtp_host="smtp.example.com",
+            smtp_port=465,
+            smtp_username="sender@example.com",
+            smtp_password="secret",
+            default_language="zh-CN",
+            outreach_generation_mode="llm",
+        )
+        primary_material = IdentityMaterial(
+            id=12,
+            identity_id=1,
+            display_name="简历",
+            file_path="data/materials/resume.txt",
+            original_filename="resume.txt",
+            material_type="resume",
+            extracted_text="我做过信息抽取与智能体相关研究。",
+        )
+        professor = Professor(
+            name="李老师",
+            email="prof@example.edu",
+            title="Professor",
+            university="Example University",
+            school="Computer Science",
+            research_direction="Information Extraction",
+        )
+
+        prompt = build_draft_prompt(
+            identity=identity,
+            primary_material=primary_material,
+            professor=professor,
+            available_materials=[primary_material],
+            custom_subject="申请与{{name}}老师交流",
+            custom_body="老师您好，我来自 Example University。",
+            custom_body_html="<p>老师您好，我来自 <strong>Example University</strong>。</p>",
+            current_match=None,
+        )
+
+        self.assertIn("套磁信模板正文 HTML", prompt)
+        self.assertIn("<strong>Example University</strong>", prompt)
+        self.assertIn("将 HTML 中的 strong/b 标签转换为 rich_body 的 strong 节点", prompt)
+
     def test_build_draft_prompt_uses_dynamic_rewrite_constraints_for_strong_preferences(self) -> None:
         from app.models import IdentityMaterial, IdentityProfile, Professor
 
