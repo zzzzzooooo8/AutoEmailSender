@@ -596,8 +596,12 @@ async def generate_draft_content(
     max_tokens: int | None = None,
     rewrite_preferences: DraftRewritePreferences | None = None,
 ) -> GeneratedDraftContent:
-    if custom_body_html:
-        template_document = build_template_run_document(custom_body_html)
+    template_html = custom_body_html
+    if not template_html and custom_body:
+        template_html = text_to_email_html(custom_body).html
+
+    if template_html:
+        template_document = build_template_run_document(template_html)
         prompt = build_template_run_rewrite_prompt(
             identity=identity,
             primary_material=primary_material,
