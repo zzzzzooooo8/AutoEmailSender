@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, RefreshCw } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import { Loader2, RefreshCw, X } from "lucide-react";
 import { useNotification } from "@/context/NotificationContext";
 import {
   checkForDesktopUpdate,
@@ -58,6 +59,9 @@ function DesktopUpdateButtonInner() {
   const [pendingVersion, setPendingVersion] = useState<string | null>(() =>
     typeof window === "undefined" ? null : readPendingVersion(),
   );
+  const [releaseDialogStatus, setReleaseDialogStatus] = useState<
+    Extract<DesktopUpdateStatus, { state: "available" }> | null
+  >(null);
   const [checking, setChecking] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const { notifyError, notifySuccess } = useNotification();
@@ -75,12 +79,14 @@ function DesktopUpdateButtonInner() {
         setChecking(false);
         setPendingVersion(status.nextVersion);
         writePendingVersion(status.nextVersion);
+        setReleaseDialogStatus(status);
         return;
       }
 
       if (status.state === "not_available") {
         setChecking(false);
         setDownloading(false);
+        setReleaseDialogStatus(null);
         if (pendingVersion !== null && pendingVersion === version) {
           writePendingVersion(null);
           setPendingVersion(null);
@@ -258,8 +264,98 @@ function DesktopUpdateButtonInner() {
           onSwitchToFullDownload={switchToFullDownload}
           onInstall={installUpdate}
         />
+        <DesktopUpdateReleaseNotesDialog
+          status={releaseDialogStatus}
+          onClose={() => setReleaseDialogStatus(null)}
+          onStartDownload={(mode) => {
+            setReleaseDialogStatus(null);
+            void startDownload(mode);
+          }}
+        />
       </span>
     </>
+  );
+}
+
+function DesktopUpdateReleaseNotesDialog({
+  status,
+  onClose,
+  onStartDownload,
+}: {
+  status: Extract<DesktopUpdateStatus, { state: "available" }> | null;
+  onClose: () => void;
+  onStartDownload: (mode: DesktopUpdateDownloadMode) => void;
+}) {
+  if (status === null) {
+    return null;
+  }
+
+  const releaseNotes = status.releaseNotes?.trim() || "新版本已发布，更新内容暂不可用。";
+
+  return (
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-stone-950/35 p-4 backdrop-blur-md"
+      role="presentation"
+      onClick={onClose}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="desktop-update-release-title"
+        className="w-full max-w-2xl overflow-hidden rounded-[28px] border border-stone-200/80 bg-white shadow-[0_34px_90px_-32px_rgba(41,37,36,0.55)]"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-stone-100 px-6 py-5">
+          <div>
+            <h3 id="desktop-update-release-title" className="text-lg font-semibold text-stone-900">
+              发现新版本 v{status.nextVersion}
+            </h3>
+            <p className="mt-1 text-sm text-stone-500">
+              当前 v{status.version} -&gt; v{status.nextVersion}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 transition hover:border-stone-300 hover:text-stone-900"
+            aria-label="关闭更新公告"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div
+          data-testid="desktop-update-release-notes"
+          className="max-h-[50vh] overflow-y-auto px-6 py-5"
+        >
+          <article className="prose prose-sm max-w-none break-words text-stone-700 prose-headings:text-stone-900 prose-a:text-primary prose-code:text-stone-900">
+            <ReactMarkdown>{releaseNotes}</ReactMarkdown>
+          </article>
+        </div>
+        <div className="flex flex-wrap justify-end gap-3 border-t border-stone-100 px-6 py-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-2xl border border-stone-200 bg-white px-4 py-2.5 text-sm font-medium text-stone-700 transition hover:border-stone-300 hover:bg-stone-50"
+          >
+            稍后
+          </button>
+          <button
+            type="button"
+            onClick={() => onStartDownload("differential")}
+            className="rounded-2xl border border-stone-200 bg-white px-4 py-2.5 text-sm font-semibold text-stone-700 transition hover:border-primary/40 hover:text-primary"
+          >
+            增量下载
+          </button>
+          <button
+            type="button"
+            onClick={() => onStartDownload("full")}
+            className="rounded-2xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-primary/20 transition hover:bg-primary/90"
+          >
+            全量下载
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
