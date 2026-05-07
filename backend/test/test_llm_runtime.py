@@ -10,6 +10,7 @@ from app.services.llm_runtime import (
     build_draft_prompt,
     build_draft_rewrite_preferences,
     DraftRewritePreferences,
+    estimate_template_run_draft_tokens,
     fetch_llm_profile_models,
     generate_draft_content,
     generate_match_evaluation,
@@ -495,6 +496,55 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         for fragment in expected_fragments:
             with self.subTest(fragment=fragment):
                 self.assertIn(fragment, SYSTEM_MATCH_ONLY_PROMPT)
+
+    def test_estimate_template_run_draft_tokens_omits_full_html_snapshot(self) -> None:
+        from app.models import IdentityMaterial, IdentityProfile, Professor
+
+        identity = IdentityProfile(
+            id=3,
+            name="张三",
+            email_address="sender@example.com",
+            smtp_host="smtp.example.com",
+            smtp_port=465,
+            smtp_username="sender@example.com",
+            smtp_password="secret",
+            default_language="zh-CN",
+            outreach_generation_mode="llm",
+        )
+        material = IdentityMaterial(
+            id=7,
+            identity_id=3,
+            display_name="简历",
+            file_path="resume.txt",
+            original_filename="resume.txt",
+            material_type="resume",
+            extracted_text="信息抽取经历",
+        )
+        profile = LLMProfile(
+            id=5,
+            name="openai",
+            provider="openai",
+            api_base_url=None,
+            api_key="test-key",
+            model_name="gpt-test",
+        )
+        professor = Professor(name="李老师", research_direction="Information Extraction")
+
+        estimate = estimate_template_run_draft_tokens(
+            identity=identity,
+            primary_material=material,
+            llm_profile=profile,
+            professor=professor,
+            available_materials=[material],
+            custom_subject="申请交流",
+            custom_body="老师您好：",
+            custom_body_html='<p style="font-family:SimSun;font-size:12pt">老师您好：</p>',
+            max_tokens=4800,
+        )
+
+        self.assertGreater(estimate.estimated_prompt_tokens, 0)
+        self.assertEqual(estimate.estimated_completion_tokens_upper_bound, 4800)
+        self.assertLess(estimate.estimated_prompt_tokens, 1200)
 
     def test_build_match_prompt_keeps_specific_research_direction_without_recent_papers(self) -> None:
         from app.models import IdentityMaterial, IdentityProfile, Professor

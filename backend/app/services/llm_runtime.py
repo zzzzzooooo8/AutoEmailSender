@@ -1068,6 +1068,61 @@ def estimate_match_and_draft_tokens(
     )
 
 
+def estimate_template_run_draft_tokens(
+    *,
+    identity: IdentityProfile,
+    primary_material: IdentityMaterial | None,
+    llm_profile: LLMProfile,
+    professor: Professor,
+    available_materials: list[IdentityMaterial],
+    custom_subject: str | None = None,
+    custom_body: str | None = None,
+    custom_body_html: str | None = None,
+    max_tokens: int | None = None,
+) -> DraftTokenEstimate:
+    template_html = custom_body_html
+    if not template_html and custom_body:
+        template_html = text_to_email_html(custom_body).html
+
+    if template_html:
+        document = build_template_run_document(template_html)
+        prompt = build_template_run_rewrite_prompt(
+            identity=identity,
+            primary_material=primary_material,
+            professor=professor,
+            available_materials=available_materials,
+            subject_template=custom_subject,
+            template_document=document,
+            current_match=None,
+            rewrite_preferences=DraftRewritePreferences(),
+        )
+        estimated_prompt_tokens = estimate_text_tokens(
+            f"{SYSTEM_TEMPLATE_RUN_REWRITE_PROMPT}\n{prompt}",
+        )
+    else:
+        prompt = build_draft_prompt(
+            identity=identity,
+            primary_material=primary_material,
+            professor=professor,
+            available_materials=available_materials,
+            custom_subject=custom_subject,
+            custom_body=custom_body,
+            custom_body_html=custom_body_html,
+            current_match=None,
+            rewrite_preferences=DraftRewritePreferences(),
+        )
+        estimated_prompt_tokens = estimate_text_tokens(f"{SYSTEM_DRAFT_PROMPT}\n{prompt}")
+
+    estimated_completion_tokens_upper_bound = max_tokens or DEFAULT_LLM_MAX_TOKENS
+    return DraftTokenEstimate(
+        estimated_prompt_tokens=estimated_prompt_tokens,
+        estimated_completion_tokens_upper_bound=estimated_completion_tokens_upper_bound,
+        estimated_total_tokens_upper_bound=(
+            estimated_prompt_tokens + estimated_completion_tokens_upper_bound
+        ),
+    )
+
+
 def build_match_prompt(
     *,
     identity: IdentityProfile,
