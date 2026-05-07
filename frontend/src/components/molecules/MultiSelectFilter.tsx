@@ -116,7 +116,7 @@ export const MultiSelectFilter = ({
               role="listbox"
               aria-label={label}
               aria-multiselectable="true"
-              className="max-h-60 overflow-y-auto py-1"
+              className="flex max-h-60 flex-col gap-1 overflow-y-auto py-1"
             >
               {options.length === 0 ? (
                 <div className="px-3 py-2 text-sm text-stone-400">暂无选项</div>

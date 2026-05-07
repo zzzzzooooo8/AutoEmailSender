@@ -45,6 +45,24 @@ describe("MultiSelectFilter", () => {
     expect(onToggle).toHaveBeenCalledWith("Stanford");
   });
 
+  it("keeps visible spacing between dropdown options", () => {
+    render(
+      <MultiSelectFilter
+        label="学校"
+        allLabel="全部学校"
+        selectedValues={[]}
+        options={["MIT", "Stanford"]}
+        onToggle={vi.fn()}
+        onClear={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "学校：全部学校" }));
+
+    const listbox = screen.getByRole("listbox", { name: "学校" });
+    expect(listbox).toHaveClass("flex", "flex-col", "gap-1");
+  });
+
   it("summarizes multiple selected values and clears them", async () => {
     const onClear = vi.fn();
 
