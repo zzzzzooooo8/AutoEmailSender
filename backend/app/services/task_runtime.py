@@ -445,6 +445,10 @@ async def generate_task_draft(
             metadata={
                 "generation_mode": outreach_config.generation_mode,
                 "has_usage": usage is not None,
+                "prompt_tokens": usage.prompt_tokens if usage is not None else None,
+                "completion_tokens": usage.completion_tokens if usage is not None else None,
+                "cached_tokens": usage.cached_tokens if usage is not None else None,
+                "total_tokens": usage.total_tokens if usage is not None else None,
                 "selected_material_ids": task.selected_material_ids,
             },
         )

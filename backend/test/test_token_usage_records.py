@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models import (
     Base,
+    BatchTask,
+    BatchTaskStatus,
     CrawlJob,
     CrawlJobRun,
     CrawlJobStatus,
@@ -430,6 +432,72 @@ class TokenUsageRecordsServiceTests(unittest.TestCase):
 
             await session.commit()
 
+    async def _seed_batch_draft_generation_record(self) -> None:
+        now = datetime(2026, 5, 4, 10, 0, 0, tzinfo=UTC)
+        async with self.session_factory() as session:
+            identity = IdentityProfile(
+                name="博士申请邮箱",
+                profile_name="博士申请邮箱",
+                sender_name="王同学",
+                email_address="batch-draft-sender@example.com",
+                smtp_host="smtp.example.com",
+                smtp_port=465,
+                smtp_username="sender@example.com",
+                smtp_password="secret",
+                default_language="zh-CN",
+                outreach_generation_mode="llm",
+            )
+            llm_profile = LLMProfile(
+                name="OpenAI",
+                provider="openai",
+                api_key="test-key",
+                model_name="gpt-test",
+            )
+            professor = Professor(
+                name="批量导师",
+                email="batch-draft@example.edu",
+                university="示例大学",
+                school="计算机学院",
+                research_direction="信息抽取",
+            )
+            batch_task = BatchTask(
+                identity=identity,
+                llm_profile=llm_profile,
+                name="批量草稿任务",
+                status=BatchTaskStatus.RUNNING.value,
+                target_count=1,
+            )
+            task = EmailTask(
+                batch_task=batch_task,
+                identity=identity,
+                llm_profile=llm_profile,
+                professor=professor,
+                selected_material_ids=[],
+            )
+            session.add_all([batch_task, task])
+            await session.flush()
+            session.add(
+                EmailLog(
+                    email_task_id=task.id,
+                    identity_id=identity.id,
+                    llm_profile_id=llm_profile.id,
+                    professor_id=professor.id,
+                    direction=EmailDirection.DRAFT.value,
+                    subject="批量草稿",
+                    content="批量导师您好",
+                    provider_payload={
+                        "source": "llm",
+                        "usage": {
+                            "prompt_tokens": 612,
+                            "completion_tokens": 248,
+                            "total_tokens": 860,
+                        },
+                    },
+                    created_at=now,
+                ),
+            )
+            await session.commit()
+
     def test_lists_recent_function_level_token_records(self) -> None:
         self._run_async(self._seed_records())
 
@@ -483,6 +551,21 @@ class TokenUsageRecordsServiceTests(unittest.TestCase):
         self.assertEqual(result.summary.total_tokens, 330)
         self.assertEqual(result.records[0].id, "match_analysis_job:1")
         self.assertEqual(result.records[0].title, "批量匹配分析 2026-05-03 10:00")
+
+    def test_batch_draft_generation_email_log_enters_token_records(self) -> None:
+        self._run_async(self._seed_batch_draft_generation_record())
+
+        async def run_query():
+            async with self.session_factory() as session:
+                return await list_token_usage_records(session, page=1, page_size=20)
+
+        result = self._run_async(run_query())
+
+        self.assertEqual(result.summary.record_count, 1)
+        self.assertEqual(result.summary.input_tokens, 612)
+        self.assertEqual(result.summary.output_tokens, 248)
+        self.assertEqual(result.summary.total_tokens, 860)
+        self.assertEqual(result.records[0].feature_type, "draft_generation")
 
     def test_api_groups_batch_match_analysis_job_as_one_token_record(self) -> None:
         self._run_async(self._seed_batch_match_analysis_job())

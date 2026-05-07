@@ -1475,6 +1475,15 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(generated_workspace.json()["messages"][-1]["prompt_tokens"], 612)
         self.assertEqual(generated_workspace.json()["messages"][-1]["completion_tokens"], 248)
         self.assertEqual(generated_workspace.json()["messages"][-1]["total_tokens"], 860)
+        operation_logs = self.client.get(
+            "/api/diagnostics/operation-logs",
+            params={"event_name": "email_task.draft_generated"},
+        )
+        self.assertEqual(operation_logs.status_code, 200, msg=operation_logs.text)
+        draft_generated_metadata = operation_logs.json()["items"][0]["metadata"]
+        self.assertEqual(draft_generated_metadata["prompt_tokens"], 612)
+        self.assertEqual(draft_generated_metadata["completion_tokens"], 248)
+        self.assertEqual(draft_generated_metadata["total_tokens"], 860)
         self.assertEqual(switched_workspace.status_code, 200)
         self.assertEqual(switched_workspace.json()["current_task"]["primary_material_id"], publication_material_id)
         self.assertEqual(switched_workspace.json()["current_task"]["status"], "review_required")
