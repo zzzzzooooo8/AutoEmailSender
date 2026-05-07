@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from math import ceil
 from time import perf_counter
 from textwrap import dedent
@@ -21,6 +21,11 @@ from app.services.rich_text import (
     normalize_email_html,
     render_rich_text_document,
     text_to_email_html,
+)
+from app.services.template_run_rewrite import (
+    TemplateRunDocument,
+    apply_template_run_replacements,
+    build_template_run_document,
 )
 
 
@@ -196,6 +201,22 @@ SYSTEM_DRAFT_PROMPT = dedent(
     """
 ).strip()
 
+SYSTEM_TEMPLATE_RUN_REWRITE_PROMPT = dedent(
+    """
+    你是研究生套磁邮件改写助理。你必须只输出 JSON。
+    你不能输出 HTML、Markdown 或解释。
+    你只能改写 body_segments 中已有 run 的 text。
+    你不能新增、删除、合并、拆分或重排 segment/run。
+    你不能修改任何格式、样式、表格结构或链接地址。
+    占位符 token 例如 [[PH_1]] 必须留在原 run 中，不能改写、删除、新增或移动。
+
+    JSON 字段必须包含：
+    - subject: 邮件主题
+    - replacements: segment 替换数组
+    - suggested_material_ids: 整数数组，只能从可选材料 ID 中选择
+    """
+).strip()
+
 
 class LLMRuntimeError(RuntimeError):
     def __init__(
@@ -277,6 +298,22 @@ class DraftGenerationResult(BaseModel):
     body_text: str | None = None
     body_html: str | None = None
     rich_body: dict[str, object] | None = None
+    suggested_material_ids: list[int] = Field(default_factory=list)
+
+
+class TemplateRunReplacement(BaseModel):
+    run_id: str
+    text: str
+
+
+class TemplateSegmentReplacement(BaseModel):
+    segment_id: str
+    runs: list[TemplateRunReplacement] = Field(default_factory=list)
+
+
+class TemplateRunRewriteResult(BaseModel):
+    subject: str
+    replacements: list[TemplateSegmentReplacement] = Field(default_factory=list)
     suggested_material_ids: list[int] = Field(default_factory=list)
 
 
@@ -400,6 +437,7 @@ StructuredResultT = TypeVar(
     MatchAndDraftResult,
     MatchEvaluationResult,
     DraftGenerationResult,
+    TemplateRunRewriteResult,
 )
 
 
@@ -558,6 +596,63 @@ async def generate_draft_content(
     max_tokens: int | None = None,
     rewrite_preferences: DraftRewritePreferences | None = None,
 ) -> GeneratedDraftContent:
+    template_html = custom_body_html
+    if not template_html and custom_body:
+        template_html = text_to_email_html(custom_body).html
+
+    if template_html:
+        template_document = build_template_run_document(template_html)
+        prompt = build_template_run_rewrite_prompt(
+            identity=identity,
+            primary_material=primary_material,
+            professor=professor,
+            available_materials=available_materials,
+            subject_template=custom_subject,
+            template_document=template_document,
+            current_match=current_match,
+            rewrite_preferences=rewrite_preferences,
+        )
+        completion = await request_chat_completion(
+            llm_profile,
+            {
+                "model": llm_profile.model_name,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": SYSTEM_TEMPLATE_RUN_REWRITE_PROMPT,
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    },
+                ],
+                "temperature": llm_profile.temperature if llm_profile.temperature is not None else DEFAULT_LLM_TEMPERATURE,
+                "max_tokens": max_tokens or DEFAULT_LLM_MAX_TOKENS,
+            },
+        )
+        rewrite_result = parse_structured_result(completion.content, TemplateRunRewriteResult)
+        try:
+            rendered = apply_template_run_replacements(
+                template_document,
+                [item.model_dump() for item in rewrite_result.replacements],
+            )
+        except ValueError as exc:
+            raise LLMRuntimeError(str(exc)) from exc
+        valid_material_ids = {material.id for material in available_materials}
+        return GeneratedDraftContent(
+            result=DraftGenerationResult(
+                subject=rewrite_result.subject,
+                body_text=rendered.text,
+                body_html=rendered.html,
+                suggested_material_ids=[
+                    material_id
+                    for material_id in rewrite_result.suggested_material_ids
+                    if material_id in valid_material_ids
+                ],
+            ),
+            usage=completion.usage,
+        )
+
     prompt = build_draft_prompt(
         identity=identity,
         primary_material=primary_material,
@@ -973,6 +1068,61 @@ def estimate_match_and_draft_tokens(
     )
 
 
+def estimate_template_run_draft_tokens(
+    *,
+    identity: IdentityProfile,
+    primary_material: IdentityMaterial | None,
+    llm_profile: LLMProfile,
+    professor: Professor,
+    available_materials: list[IdentityMaterial],
+    custom_subject: str | None = None,
+    custom_body: str | None = None,
+    custom_body_html: str | None = None,
+    max_tokens: int | None = None,
+) -> DraftTokenEstimate:
+    template_html = custom_body_html
+    if not template_html and custom_body:
+        template_html = text_to_email_html(custom_body).html
+
+    if template_html:
+        document = build_template_run_document(template_html)
+        prompt = build_template_run_rewrite_prompt(
+            identity=identity,
+            primary_material=primary_material,
+            professor=professor,
+            available_materials=available_materials,
+            subject_template=custom_subject,
+            template_document=document,
+            current_match=None,
+            rewrite_preferences=DraftRewritePreferences(),
+        )
+        estimated_prompt_tokens = estimate_text_tokens(
+            f"{SYSTEM_TEMPLATE_RUN_REWRITE_PROMPT}\n{prompt}",
+        )
+    else:
+        prompt = build_draft_prompt(
+            identity=identity,
+            primary_material=primary_material,
+            professor=professor,
+            available_materials=available_materials,
+            custom_subject=custom_subject,
+            custom_body=custom_body,
+            custom_body_html=custom_body_html,
+            current_match=None,
+            rewrite_preferences=DraftRewritePreferences(),
+        )
+        estimated_prompt_tokens = estimate_text_tokens(f"{SYSTEM_DRAFT_PROMPT}\n{prompt}")
+
+    estimated_completion_tokens_upper_bound = max_tokens or DEFAULT_LLM_MAX_TOKENS
+    return DraftTokenEstimate(
+        estimated_prompt_tokens=estimated_prompt_tokens,
+        estimated_completion_tokens_upper_bound=estimated_completion_tokens_upper_bound,
+        estimated_total_tokens_upper_bound=(
+            estimated_prompt_tokens + estimated_completion_tokens_upper_bound
+        ),
+    )
+
+
 def build_match_prompt(
     *,
     identity: IdentityProfile,
@@ -1118,10 +1268,92 @@ def build_draft_prompt(
         8. 必须围绕导师研究方向进行个性化改写，研究方向来自“导师信息 - 研究方向”。
         9. 按上面的改写幅度要求控制改动大小，同时尽量保留可表达的富文本标记，例如加粗、斜体、链接和列表。
         10. 如果模板包含表格，保留表格中的信息顺序和语义，但不要输出 schema 不支持的表格节点。
-        11. 如果提供了套磁信模板正文 HTML，优先参考其中的富文本标记；将 HTML 中的 strong/b 标签转换为 rich_body 的 strong 节点，em/i 转换为 emphasis，a 转换为 link，ul/ol 转换为列表节点，不要把 HTML 原样放进 text。
         """,
         current_match=current_match,
     )
+
+
+def build_template_run_rewrite_prompt(
+    *,
+    identity: IdentityProfile,
+    primary_material: IdentityMaterial | None,
+    professor: Professor,
+    available_materials: list[IdentityMaterial],
+    subject_template: str | None,
+    template_document: TemplateRunDocument,
+    current_match: MatchEvaluationResult | None,
+    rewrite_preferences: DraftRewritePreferences | None,
+) -> str:
+    primary_material_text = (primary_material.extracted_text if primary_material else "") or ""
+    if len(primary_material_text) > 5000:
+        primary_material_text = f"{primary_material_text[:5000]}\n...(已截断)"
+
+    payload = {
+        "task": "rewrite_email_template_runs",
+        "context": {
+            "identity": {
+                "name": _format_nullable(identity.name),
+                "email_address": _format_nullable(identity.email_address),
+                "default_language": _format_nullable(identity.default_language),
+                "match_threshold": identity.match_threshold,
+            },
+            "professor": {
+                "name": _format_nullable(professor.name),
+                "email": _format_nullable(professor.email),
+                "title": _format_nullable(professor.title),
+                "university": _format_nullable(professor.university),
+                "school": _format_nullable(professor.school),
+                "department": _format_nullable(professor.department),
+                "research_direction": _format_nullable(professor.research_direction),
+                "profile_url": _format_nullable(professor.profile_url),
+                "recent_papers": professor.recent_papers or [],
+            },
+            "student": {
+                "primary_material": {
+                    "id": primary_material.id if primary_material else None,
+                    "name": _format_nullable(primary_material.display_name if primary_material else None),
+                    "type": _format_nullable(primary_material.material_type if primary_material else None),
+                    "extracted_text": primary_material_text,
+                },
+            },
+            "current_match": current_match.model_dump() if current_match is not None else None,
+            "rewrite_preferences": asdict(rewrite_preferences or DraftRewritePreferences()),
+        },
+        "subject_template": subject_template or "",
+        "body_segments": [
+            {
+                "segment_id": segment.segment_id,
+                "role": segment.role,
+                "runs": [
+                    {
+                        "run_id": run.run_id,
+                        "text": run.text,
+                        "marks": run.marks,
+                        "locked_placeholders": run.locked_placeholders,
+                    }
+                    for run in segment.runs
+                ],
+            }
+            for segment in template_document.segments
+        ],
+        "available_materials": [
+            {
+                "id": material.id,
+                "name": _format_nullable(material.display_name),
+                "type": _format_nullable(material.material_type),
+            }
+            for material in available_materials
+        ],
+        "instructions": [
+            "只返回 JSON 对象。",
+            "只改写 replacements 中已有 run 的 text。",
+            "segment_id 和 run_id 必须来自 body_segments。",
+            "不要返回 HTML 或完整正文。",
+            "locked_placeholders 中的 token 必须保留在同一个 run 内。",
+            "suggested_material_ids 只能选择 available_materials 中存在的 id。",
+        ],
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 def build_draft_rewrite_constraints(preferences: DraftRewritePreferences) -> str:
@@ -1278,7 +1510,6 @@ def _build_base_generation_prompt(
 
         套磁信模板主题：{custom_subject or "无"}
         套磁信模板正文：{custom_body or "无"}
-        套磁信模板正文 HTML（如有，用于保留加粗、斜体、链接、列表等格式）：{custom_body_html or "无"}
         {current_match_block}
 
         {dedent(extra_requirements).strip()}
@@ -1360,6 +1591,10 @@ def parse_structured_result(
         return _normalize_match_and_draft_result(result)  # type: ignore[return-value]
     if isinstance(result, MatchEvaluationResult):
         return _normalize_match_evaluation_result(result)  # type: ignore[return-value]
+    if isinstance(result, TemplateRunRewriteResult):
+        result.subject = _normalize_text_field(result.subject, "subject")
+        result.suggested_material_ids = _normalize_integer_list(result.suggested_material_ids)
+        return result  # type: ignore[return-value]
     if isinstance(result, DraftGenerationResult):
         return _normalize_draft_generation_result(result)  # type: ignore[return-value]
     return result

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from unittest.mock import patch
 
@@ -9,7 +10,9 @@ from app.services.llm_runtime import (
     build_match_prompt_parts,
     build_draft_prompt,
     build_draft_rewrite_preferences,
+    build_template_run_rewrite_prompt,
     DraftRewritePreferences,
+    estimate_template_run_draft_tokens,
     fetch_llm_profile_models,
     generate_draft_content,
     generate_match_evaluation,
@@ -282,9 +285,9 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
                         {
                             "message": {
                                 "content": (
-                                    '{"subject":"申请交流","rich_body":{"type":"doc","blocks":['
-                                    '{"type":"paragraph","children":[{"type":"text","text":"李老师您好"}]}'
-                                    ']},"suggested_material_ids":[7]}'
+                                    '{"subject":"申请交流","replacements":['
+                                    '{"segment_id":"seg_1","runs":[{"run_id":"run_1","text":"模板正文"}]}'
+                                    '],"suggested_material_ids":[7]}'
                                 ),
                             },
                         },
@@ -312,6 +315,256 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["max_tokens"], 4800)
         self.assertEqual(result.result.suggested_material_ids, [7])
 
+    async def test_generate_draft_content_sends_template_runs_without_full_html(self) -> None:
+        from app.models import IdentityMaterial, IdentityProfile, Professor
+
+        identity = IdentityProfile(
+            id=3,
+            name="张三",
+            email_address="sender@example.com",
+            smtp_host="smtp.example.com",
+            smtp_port=465,
+            smtp_username="sender@example.com",
+            smtp_password="secret",
+            default_language="zh-CN",
+            outreach_generation_mode="llm",
+        )
+        primary_material = IdentityMaterial(
+            id=7,
+            identity_id=3,
+            display_name="简历",
+            file_path="data/materials/resume.txt",
+            original_filename="resume.txt",
+            material_type="resume",
+            extracted_text="我做过医学 NLP 和信息抽取项目。",
+        )
+        profile = LLMProfile(
+            id=5,
+            name="openai",
+            provider="openai",
+            api_base_url=None,
+            api_key="test-key",
+            model_name="gpt-test",
+        )
+        professor = Professor(
+            name="李老师",
+            email="prof@example.edu",
+            title="Professor",
+            university="Example University",
+            school="Computer Science",
+            research_direction="Information Extraction",
+        )
+        calls: list[tuple[str, dict[str, object] | None]] = []
+        responses = [
+            _FakeResponse(
+                status_code=200,
+                payload={
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    '{"subject":"申请交流","replacements":['
+                                    '{"segment_id":"seg_1","runs":[{"run_id":"run_1","text":"[[PH_1]]老师，您好："}]},'
+                                    '{"segment_id":"seg_2","runs":[{"run_id":"run_1","text":"我近期关注到您在 "},'
+                                    '{"run_id":"run_2","text":"[[PH_2]]"},'
+                                    '{"run_id":"run_3","text":" 方向的研究。"}]}'
+                                    '],"suggested_material_ids":[7]}'
+                                ),
+                            },
+                        },
+                    ],
+                },
+            ),
+        ]
+
+        with patch(
+            "app.services.llm_runtime.httpx.AsyncClient",
+            side_effect=lambda *args, **kwargs: _FakeAsyncClient(responses, calls),
+        ):
+            result = await generate_draft_content(
+                identity=identity,
+                primary_material=primary_material,
+                llm_profile=profile,
+                professor=professor,
+                available_materials=[primary_material],
+                custom_subject="申请与{{name}}老师交流",
+                custom_body="{{name}}老师，您好：\n我对您的 {{research_direction}} 方向很感兴趣。",
+                custom_body_html=(
+                    '<p style="font-family:SimSun">{{name}}老师，您好：</p>'
+                    '<p>我对您的 <strong>{{research_direction}}</strong> 方向很感兴趣。</p>'
+                ),
+                max_tokens=4800,
+            )
+
+        prompt = calls[0][1]["messages"][1]["content"]
+        self.assertIn("body_segments", prompt)
+        self.assertNotIn("<p style=", prompt)
+        self.assertNotIn("套磁信模板正文 HTML", prompt)
+        self.assertIn('style="font-family:SimSun"', result.result.body_html)
+        self.assertIn("<strong>{{research_direction}}</strong>", result.result.body_html)
+
+    async def test_generate_draft_content_converts_text_template_to_runs(self) -> None:
+        from app.models import IdentityMaterial, IdentityProfile, Professor
+
+        identity = IdentityProfile(
+            id=3,
+            name="张三",
+            email_address="sender@example.com",
+            smtp_host="smtp.example.com",
+            smtp_port=465,
+            smtp_username="sender@example.com",
+            smtp_password="secret",
+            default_language="zh-CN",
+            outreach_generation_mode="llm",
+        )
+        primary_material = IdentityMaterial(
+            id=7,
+            identity_id=3,
+            display_name="简历",
+            file_path="data/materials/resume.txt",
+            original_filename="resume.txt",
+            material_type="resume",
+            extracted_text="我做过信息抽取项目。",
+        )
+        profile = LLMProfile(
+            id=5,
+            name="openai",
+            provider="openai",
+            api_base_url=None,
+            api_key="test-key",
+            model_name="gpt-test",
+        )
+        professor = Professor(
+            name="李老师",
+            email="prof@example.edu",
+            research_direction="Information Extraction",
+        )
+        calls: list[tuple[str, dict[str, object] | None]] = []
+        responses = [
+            _FakeResponse(
+                status_code=200,
+                payload={
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    '{"subject":"申请交流","replacements":['
+                                    '{"segment_id":"seg_1","runs":[{"run_id":"run_1","text":"李老师，您好："}]}'
+                                    '],"suggested_material_ids":[]}'
+                                ),
+                            },
+                        },
+                    ],
+                },
+            ),
+        ]
+
+        with patch(
+            "app.services.llm_runtime.httpx.AsyncClient",
+            side_effect=lambda *args, **kwargs: _FakeAsyncClient(responses, calls),
+        ):
+            result = await generate_draft_content(
+                identity=identity,
+                primary_material=primary_material,
+                llm_profile=profile,
+                professor=professor,
+                available_materials=[primary_material],
+                custom_subject="申请交流",
+                custom_body="老师您好：",
+                custom_body_html=None,
+            )
+
+        self.assertIn("<p>李老师，您好：</p>", result.result.body_html)
+
+    async def test_generate_draft_content_preserves_table_and_inline_styles(self) -> None:
+        from app.models import IdentityMaterial, IdentityProfile, Professor
+
+        identity = IdentityProfile(
+            id=3,
+            name="张三",
+            email_address="sender@example.com",
+            smtp_host="smtp.example.com",
+            smtp_port=465,
+            smtp_username="sender@example.com",
+            smtp_password="secret",
+            default_language="zh-CN",
+            outreach_generation_mode="llm",
+        )
+        primary_material = IdentityMaterial(
+            id=7,
+            identity_id=3,
+            display_name="简历",
+            file_path="data/materials/resume.txt",
+            original_filename="resume.txt",
+            material_type="resume",
+            extracted_text="我做过医学 NLP 和信息抽取项目。",
+        )
+        profile = LLMProfile(
+            id=5,
+            name="openai",
+            provider="openai",
+            api_base_url=None,
+            api_key="test-key",
+            model_name="gpt-test",
+        )
+        professor = Professor(
+            name="李老师",
+            email="prof@example.edu",
+            title="Professor",
+            university="Example University",
+            school="Computer Science",
+            research_direction="Information Extraction",
+        )
+        calls: list[tuple[str, dict[str, object] | None]] = []
+        responses = [
+            _FakeResponse(
+                status_code=200,
+                payload={
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    '{"subject":"申请交流","replacements":['
+                                    '{"segment_id":"seg_1","runs":[{"run_id":"run_1","text":"研究经历"}]},'
+                                    '{"segment_id":"seg_2","runs":[{"run_id":"run_1","text":"我做过医学 NLP 与信息抽取项目。"}]},'
+                                    '{"segment_id":"seg_3","runs":[{"run_id":"run_1","text":"我近期关注到您在 "},'
+                                    '{"run_id":"run_2","text":"[[PH_1]]"},'
+                                    '{"run_id":"run_3","text":" 方向的研究。"}]}'
+                                    '],"suggested_material_ids":[7]}'
+                                ),
+                            },
+                        },
+                    ],
+                },
+            ),
+        ]
+
+        with patch(
+            "app.services.llm_runtime.httpx.AsyncClient",
+            side_effect=lambda *args, **kwargs: _FakeAsyncClient(responses, calls),
+        ):
+            result = await generate_draft_content(
+                identity=identity,
+                primary_material=primary_material,
+                llm_profile=profile,
+                professor=professor,
+                available_materials=[primary_material],
+                custom_subject="申请交流",
+                custom_body="研究经历\n我做过信息抽取项目。\n我对您的 {{research_direction}} 方向很感兴趣。",
+                custom_body_html=(
+                    '<table style="border-collapse:collapse"><tbody><tr>'
+                    '<td style="border:1px solid #ccc">研究经历</td>'
+                    '<td style="font-size:11pt">我做过信息抽取项目。</td>'
+                    '</tr></tbody></table>'
+                    '<p>我对您的 <strong>{{research_direction}}</strong> 方向很感兴趣。</p>'
+                ),
+            )
+
+        self.assertIn("<table", result.result.body_html)
+        self.assertIn('style="font-size:11pt"', result.result.body_html)
+        self.assertIn("<strong>{{research_direction}}</strong>", result.result.body_html)
+        self.assertEqual(result.result.suggested_material_ids, [7])
+
     def test_match_only_prompt_includes_explicit_score_rubric(self) -> None:
         from app.services.llm_runtime import SYSTEM_MATCH_ONLY_PROMPT
 
@@ -334,6 +587,55 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         for fragment in expected_fragments:
             with self.subTest(fragment=fragment):
                 self.assertIn(fragment, SYSTEM_MATCH_ONLY_PROMPT)
+
+    def test_estimate_template_run_draft_tokens_omits_full_html_snapshot(self) -> None:
+        from app.models import IdentityMaterial, IdentityProfile, Professor
+
+        identity = IdentityProfile(
+            id=3,
+            name="张三",
+            email_address="sender@example.com",
+            smtp_host="smtp.example.com",
+            smtp_port=465,
+            smtp_username="sender@example.com",
+            smtp_password="secret",
+            default_language="zh-CN",
+            outreach_generation_mode="llm",
+        )
+        material = IdentityMaterial(
+            id=7,
+            identity_id=3,
+            display_name="简历",
+            file_path="resume.txt",
+            original_filename="resume.txt",
+            material_type="resume",
+            extracted_text="信息抽取经历",
+        )
+        profile = LLMProfile(
+            id=5,
+            name="openai",
+            provider="openai",
+            api_base_url=None,
+            api_key="test-key",
+            model_name="gpt-test",
+        )
+        professor = Professor(name="李老师", research_direction="Information Extraction")
+
+        estimate = estimate_template_run_draft_tokens(
+            identity=identity,
+            primary_material=material,
+            llm_profile=profile,
+            professor=professor,
+            available_materials=[material],
+            custom_subject="申请交流",
+            custom_body="老师您好：",
+            custom_body_html='<p style="font-family:SimSun;font-size:12pt">老师您好：</p>',
+            max_tokens=4800,
+        )
+
+        self.assertGreater(estimate.estimated_prompt_tokens, 0)
+        self.assertEqual(estimate.estimated_completion_tokens_upper_bound, 4800)
+        self.assertLess(estimate.estimated_prompt_tokens, 1200)
 
     def test_build_match_prompt_keeps_specific_research_direction_without_recent_papers(self) -> None:
         from app.models import IdentityMaterial, IdentityProfile, Professor
@@ -443,8 +745,9 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("加粗", prompt)
         self.assertIn("链接", prompt)
 
-    def test_build_draft_prompt_includes_template_html_for_format_preservation(self) -> None:
+    def test_build_template_run_rewrite_prompt_sends_runs_without_template_html(self) -> None:
         from app.models import IdentityMaterial, IdentityProfile, Professor
+        from app.services.template_run_rewrite import build_template_run_document
 
         identity = IdentityProfile(
             name="张三",
@@ -473,21 +776,26 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
             school="Computer Science",
             research_direction="Information Extraction",
         )
+        document = build_template_run_document(
+            "<p>老师您好，我来自 <strong>Example University</strong>。</p>",
+        )
 
-        prompt = build_draft_prompt(
+        prompt = build_template_run_rewrite_prompt(
             identity=identity,
             primary_material=primary_material,
             professor=professor,
             available_materials=[primary_material],
-            custom_subject="申请与{{name}}老师交流",
-            custom_body="老师您好，我来自 Example University。",
-            custom_body_html="<p>老师您好，我来自 <strong>Example University</strong>。</p>",
+            subject_template="申请与{{name}}老师交流",
+            template_document=document,
             current_match=None,
+            rewrite_preferences=None,
         )
 
-        self.assertIn("套磁信模板正文 HTML", prompt)
-        self.assertIn("<strong>Example University</strong>", prompt)
-        self.assertIn("将 HTML 中的 strong/b 标签转换为 rich_body 的 strong 节点", prompt)
+        payload = json.loads(prompt)
+        self.assertIn("body_segments", payload)
+        self.assertEqual(payload["body_segments"][0]["runs"][1]["marks"], ["strong"])
+        self.assertNotIn("<strong>Example University</strong>", prompt)
+        self.assertNotIn("套磁信模板正文 HTML", prompt)
 
     def test_build_draft_prompt_uses_dynamic_rewrite_constraints_for_strong_preferences(self) -> None:
         from app.models import IdentityMaterial, IdentityProfile, Professor

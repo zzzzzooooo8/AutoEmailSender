@@ -81,17 +81,18 @@ async def build_workspace_thread(
             current_task_outreach.body_html_template,
         )
     ):
-        token_estimate = llm_runtime.estimate_match_and_draft_tokens(
+        resolved_body_template = llm_runtime.resolve_template_text(
+            current_task_outreach.body_text_template,
+            current_task_outreach.body_html_template,
+        )
+        token_estimate = llm_runtime.estimate_template_run_draft_tokens(
             identity=identity,
             primary_material=current_task.primary_material,
             llm_profile=llm_profile,
             professor=professor,
             available_materials=list(identity.materials),
             custom_subject=current_task_outreach.subject_template,
-            custom_body=llm_runtime.resolve_template_text(
-                current_task_outreach.body_text_template,
-                current_task_outreach.body_html_template,
-            ),
+            custom_body=resolved_body_template,
             custom_body_html=current_task_outreach.body_html_template,
         )
 

@@ -124,7 +124,9 @@ def sanitize_email_html(value: str) -> str:
 def html_to_text(value: str) -> str:
     soup = BeautifulSoup(value, "html.parser")
     lines: list[str] = []
-    for element in soup.find_all(["p", "li"]):
+    for element in soup.find_all(["p", "li", "td", "th"]):
+        if element.name in {"td", "th"} and element.find(["p", "li"]):
+            continue
         text = element.get_text(" ", strip=True)
         if not text:
             continue
