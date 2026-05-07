@@ -23,12 +23,18 @@ from app.models import (
 from app.schemas.match_analysis_job import MatchAnalysisJobItemRead, MatchAnalysisJobRead
 from app.services.task_runtime import (
     MatchAnalysisAlreadyRunningError,
+    MatchCalculationCanceledError,
     calculate_task_match,
 )
 from app.services.operation_logs import record_operation_log
 
 
 _ACTIVE_MATCH_ANALYSIS_JOB_IDS: set[int] = set()
+_MATCH_ANALYSIS_CANCEL_POLL_SECONDS = 0.2
+
+
+class _MatchAnalysisJobCanceled(RuntimeError):
+    pass
 
 
 async def create_match_analysis_job(
@@ -522,12 +528,14 @@ async def _run_match_analysis_job_item(
         await session.commit()
 
     try:
-        result = await calculate_task_match(
+        result = await _calculate_task_match_until_canceled(
             session_factory,
+            job_id,
             item.email_task_id,
-            force=True,
-            ignore_batch_status=True,
         )
+    except (_MatchAnalysisJobCanceled, MatchCalculationCanceledError):
+        await _mark_item_canceled(session_factory, item_id)
+        return
     except MatchAnalysisAlreadyRunningError as exc:
         await _mark_item_skipped(
             session_factory,
@@ -550,6 +558,10 @@ async def _run_match_analysis_job_item(
         )
         return
 
+    if await _is_match_analysis_job_cancel_requested(session_factory, job_id):
+        await _mark_item_canceled(session_factory, item_id)
+        return
+
     await _mark_item_succeeded(
         session_factory,
         item_id,
@@ -558,6 +570,58 @@ async def _run_match_analysis_job_item(
         completion_tokens=result.usage.completion_tokens or 0,
         total_tokens=result.usage.total_tokens or 0,
     )
+
+
+async def _calculate_task_match_until_canceled(
+    session_factory: async_sessionmaker[AsyncSession],
+    job_id: int,
+    email_task_id: int,
+):
+    async def cancel_requested() -> bool:
+        return await _is_match_analysis_job_cancel_requested(session_factory, job_id)
+
+    calculation_task = asyncio.create_task(
+        calculate_task_match(
+            session_factory,
+            email_task_id,
+            force=True,
+            ignore_batch_status=True,
+            cancel_requested=cancel_requested,
+        )
+    )
+    try:
+        while True:
+            done, _ = await asyncio.wait(
+                {calculation_task},
+                timeout=_MATCH_ANALYSIS_CANCEL_POLL_SECONDS,
+            )
+            if calculation_task in done:
+                return await calculation_task
+            if await cancel_requested():
+                calculation_task.cancel()
+                try:
+                    await calculation_task
+                except asyncio.CancelledError:
+                    pass
+                raise _MatchAnalysisJobCanceled("匹配分析任务已取消")
+    finally:
+        if not calculation_task.done():
+            calculation_task.cancel()
+            try:
+                await calculation_task
+            except asyncio.CancelledError:
+                pass
+
+
+async def _is_match_analysis_job_cancel_requested(
+    session_factory: async_sessionmaker[AsyncSession],
+    job_id: int,
+) -> bool:
+    async with session_factory() as session:
+        cancel_requested_at = await session.scalar(
+            select(MatchAnalysisJob.cancel_requested_at).where(MatchAnalysisJob.id == job_id)
+        )
+        return cancel_requested_at is not None
 
 
 async def _mark_item_succeeded(
@@ -579,6 +643,23 @@ async def _mark_item_succeeded(
         item.prompt_tokens = prompt_tokens
         item.completion_tokens = completion_tokens
         item.total_tokens = total_tokens
+        item.error_message = None
+        item.skip_reason = None
+        item.finished_at = now
+        item.updated_at = now
+        await session.commit()
+
+
+async def _mark_item_canceled(
+    session_factory: async_sessionmaker[AsyncSession],
+    item_id: int,
+) -> None:
+    async with session_factory() as session:
+        item = await session.get(MatchAnalysisJobItem, item_id)
+        if item is None:
+            return
+        now = datetime.now(UTC)
+        item.status = MatchAnalysisJobItemStatus.CANCELED.value
         item.error_message = None
         item.skip_reason = None
         item.finished_at = now

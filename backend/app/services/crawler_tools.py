@@ -947,24 +947,31 @@ async def crawl_page_with_crawl4ai(
     *,
     intent: CrawlPageIntent = "generic",
 ) -> PageSnapshot:
+    await _ensure_crawl_job_can_continue_for_context(ctx)
     absolute_url = urljoin(ctx.start_url, url)
     denied_snapshot = _denied_url_snapshot(ctx, absolute_url, "http")
     if denied_snapshot is not None:
         await record_page_snapshot(ctx, denied_snapshot)
+        await _ensure_crawl_job_can_continue_for_context(ctx)
         return denied_snapshot
 
     cached = ctx.get_cached_page_snapshot(absolute_url)
     if cached is not None:
+        await _ensure_crawl_job_can_continue_for_context(ctx)
         return cached
 
     api_snapshot = await _crawl_known_profile_api(ctx, absolute_url, intent=intent)
     if api_snapshot is not None:
+        await _ensure_crawl_job_can_continue_for_context(ctx)
         return api_snapshot
 
     if ctx.is_http_blocked(absolute_url):
-        return await browser_investigate(ctx, absolute_url, goal="", intent=intent)
+        snapshot = await browser_investigate(ctx, absolute_url, goal="", intent=intent)
+        await _ensure_crawl_job_can_continue_for_context(ctx)
+        return snapshot
 
     http_snapshot = await crawl_page_with_http(ctx, url)
+    await _ensure_crawl_job_can_continue_for_context(ctx)
     if _should_use_crawl4ai_fallback(http_snapshot):
         if _is_http_blocked_snapshot(http_snapshot):
             ctx.mark_http_blocked(http_snapshot.url or absolute_url)
@@ -974,11 +981,13 @@ async def crawl_page_with_crawl4ai(
             goal="",
             intent=intent,
         )
-        return _apply_runtime_url_denylist_after_fetch(
+        processed_browser_snapshot = _apply_runtime_url_denylist_after_fetch(
             ctx,
             requested_url=absolute_url,
             snapshot=browser_snapshot,
         )
+        await _ensure_crawl_job_can_continue_for_context(ctx)
+        return processed_browser_snapshot
     processed_snapshot = _apply_runtime_url_denylist_after_fetch(
         ctx,
         requested_url=absolute_url,
@@ -986,6 +995,7 @@ async def crawl_page_with_crawl4ai(
     )
     if processed_snapshot.status == "succeeded":
         ctx.remember_page_snapshot(processed_snapshot)
+    await _ensure_crawl_job_can_continue_for_context(ctx)
     return processed_snapshot
 
 
@@ -1156,14 +1166,17 @@ async def browser_investigate(
     goal: str,
     intent: CrawlPageIntent = "generic",
 ) -> PageSnapshot:
+    await _ensure_crawl_job_can_continue_for_context(ctx)
     absolute_url = urljoin(ctx.start_url, url)
     denied_snapshot = _denied_url_snapshot(ctx, absolute_url, "browser")
     if denied_snapshot is not None:
         await record_page_snapshot(ctx, denied_snapshot)
+        await _ensure_crawl_job_can_continue_for_context(ctx)
         return denied_snapshot
 
     cached = ctx.get_cached_page_snapshot(absolute_url)
     if cached is not None:
+        await _ensure_crawl_job_can_continue_for_context(ctx)
         return cached
 
     if _has_unsafe_public_crawl_url(ctx.start_url, absolute_url):
@@ -1173,6 +1186,7 @@ async def browser_investigate(
             error_message=UNSAFE_CRAWL_URL_MESSAGE,
         )
         await record_page_snapshot(ctx, snapshot)
+        await _ensure_crawl_job_can_continue_for_context(ctx)
         return snapshot
 
     if not is_allowed_crawl_url(ctx.start_url, url):
@@ -1182,6 +1196,7 @@ async def browser_investigate(
             error_message="URL 不在入口页面同域范围内，已拒绝浏览器调查",
         )
         await record_page_snapshot(ctx, snapshot)
+        await _ensure_crawl_job_can_continue_for_context(ctx)
         return snapshot
 
     snapshot = await _crawl_page_with_crawl4ai_browser(ctx, absolute_url, goal, intent)
@@ -1193,6 +1208,7 @@ async def browser_investigate(
     await record_page_snapshot(ctx, processed_snapshot)
     if processed_snapshot.status == "succeeded":
         ctx.remember_page_snapshot(processed_snapshot)
+    await _ensure_crawl_job_can_continue_for_context(ctx)
     return processed_snapshot
 
 
@@ -1440,6 +1456,7 @@ async def save_candidates(
     ctx: CrawlToolContext,
     candidates: Sequence[ProfessorCandidatePayload],
 ) -> list[CrawlCandidate]:
+    await _ensure_crawl_job_can_continue_for_context(ctx)
     payloads = [
         normalize_candidate_payload(
             candidate,
@@ -1448,13 +1465,16 @@ async def save_candidates(
         )
         for candidate in candidates
     ]
-    return await _save_normalized_candidate_payloads(ctx, payloads)
+    saved = await _save_normalized_candidate_payloads(ctx, payloads)
+    await _ensure_crawl_job_can_continue_for_context(ctx)
+    return saved
 
 
 async def save_candidate_batch(
     ctx: CrawlToolContext,
     candidates: Sequence[ProfessorCandidatePayload],
 ) -> CandidateBatchSaveResult:
+    await _ensure_crawl_job_can_continue_for_context(ctx)
     payloads: list[dict[str, Any]] = []
     failed_items: list[CandidateBatchFailure] = []
     for index, candidate in enumerate(candidates):
@@ -1476,8 +1496,9 @@ async def save_candidate_batch(
             )
 
     if failed_items:
+        await _ensure_crawl_job_can_continue_for_context(ctx)
         budget_fields = record_save_batch_failure(ctx, candidates, failed_items)
-        return {
+        result: CandidateBatchSaveResult = {
             "batch_status": "rejected",
             "attempted_count": len(candidates),
             "saved_count": 0,
@@ -1486,10 +1507,12 @@ async def save_candidate_batch(
             "total_saved_count": await count_saved_candidates(ctx),
             **budget_fields,
         }
+        await _ensure_crawl_job_can_continue_for_context(ctx)
+        return result
 
     saved = await _save_normalized_candidate_payloads(ctx, payloads)
     record_save_batch_success(ctx)
-    return {
+    result = {
         "batch_status": "saved",
         "attempted_count": len(candidates),
         "saved_count": len(saved),
@@ -1502,6 +1525,8 @@ async def save_candidate_batch(
         "total_save_failures": ctx.save_failure_budget.total_save_failures,
         "terminal_reason": None,
     }
+    await _ensure_crawl_job_can_continue_for_context(ctx)
+    return result
 
 
 async def count_saved_candidates(ctx: CrawlToolContext) -> int:
@@ -1722,6 +1747,11 @@ async def ensure_crawl_job_can_continue(session: AsyncSession, job_id: int) -> N
         raise CrawlJobPaused()
     if status == CrawlJobStatus.CANCELED.value:
         raise CrawlJobCanceled()
+
+
+async def _ensure_crawl_job_can_continue_for_context(ctx: CrawlToolContext) -> None:
+    async with ctx.session_factory() as session:
+        await ensure_crawl_job_can_continue(session, ctx.job_id)
 
 
 async def _is_crawl_job_stopped(session: AsyncSession, job_id: int) -> bool:

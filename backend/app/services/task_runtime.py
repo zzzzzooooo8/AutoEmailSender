@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, tzinfo
 
@@ -83,6 +85,10 @@ class MatchCalculationActionResult:
 
 
 class MatchAnalysisAlreadyRunningError(RuntimeError):
+    pass
+
+
+class MatchCalculationCanceledError(RuntimeError):
     pass
 
 
@@ -418,6 +424,7 @@ async def calculate_task_match(
     *,
     force: bool,
     ignore_batch_status: bool = False,
+    cancel_requested: Callable[[], Awaitable[bool]] | None = None,
 ) -> MatchCalculationActionResult:
     async with session_factory() as session:
         task = await _load_email_task(session, task_id)
@@ -447,6 +454,7 @@ async def calculate_task_match(
             return _match_action_result(task)
 
         run = await _create_running_match_analysis_run(session, task)
+        await session.commit()
         try:
             generation = await llm_runtime.generate_match_evaluation(
                 identity=task.identity,
@@ -455,6 +463,15 @@ async def calculate_task_match(
                 professor=task.professor,
                 available_materials=list(task.identity.materials),
             )
+        except asyncio.CancelledError:
+            _mark_match_analysis_run_failed(
+                run,
+                error_kind="canceled",
+                error_message="匹配分析任务已取消",
+            )
+            task.updated_at = datetime.now(UTC)
+            await session.commit()
+            raise
         except llm_runtime.LLMRuntimeError as exc:
             _mark_match_analysis_run_failed(
                 run,
@@ -478,6 +495,16 @@ async def calculate_task_match(
             task.updated_at = datetime.now(UTC)
             await session.commit()
             raise
+
+        if cancel_requested is not None and await cancel_requested():
+            _mark_match_analysis_run_failed(
+                run,
+                error_kind="canceled",
+                error_message="匹配分析任务已取消",
+            )
+            task.updated_at = datetime.now(UTC)
+            await session.commit()
+            raise MatchCalculationCanceledError("匹配分析任务已取消")
 
         result = generation.result
         run.status = "succeeded"
@@ -888,6 +915,11 @@ async def dispatch_email_task(
         task = await _load_email_task(session, task_id)
         if not task:
             raise ValueError(f"EmailTask {task_id} 不存在")
+        if task.status not in {
+            EmailTaskStatus.APPROVED.value,
+            EmailTaskStatus.SCHEDULED.value,
+        }:
+            return task.professor_id, task.identity_id, task.llm_profile_id
         if task.batch_task and task.batch_task.status != BatchTaskStatus.RUNNING.value:
             return task.professor_id, task.identity_id, task.llm_profile_id
 

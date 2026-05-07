@@ -22,7 +22,7 @@ from app.models import (
     Professor,
 )
 from app.services.mail_runtime import SendMailResult
-from app.services.task_runtime import dispatch_due_tasks_once
+from app.services.task_runtime import dispatch_due_tasks_once, dispatch_email_task
 
 
 class BatchTaskDispatchScheduleTests(unittest.TestCase):
@@ -140,6 +140,19 @@ class BatchTaskDispatchScheduleTests(unittest.TestCase):
         self.assertEqual(processed, 1)
         self.assertEqual(self._run_async(self._get_task_status(task_id)), EmailTaskStatus.SENT.value)
         mocked_send.assert_awaited_once()
+
+    def test_dispatch_email_task_skips_task_no_longer_dispatchable(self) -> None:
+        task_id = self._run_async(self._create_manual_approved_task())
+        self._run_async(self._set_task_status(task_id, EmailTaskStatus.REVIEW_REQUIRED.value))
+
+        with patch(
+            "app.services.task_runtime.mail_runtime.send_email",
+            AsyncMock(return_value=self._build_send_result()),
+        ) as mocked_send:
+            self._run_async(dispatch_email_task(self.session_factory, task_id))
+
+        self.assertEqual(self._run_async(self._get_task_status(task_id)), EmailTaskStatus.REVIEW_REQUIRED.value)
+        mocked_send.assert_not_awaited()
 
     def test_dispatch_due_tasks_does_not_let_blocked_scheduled_task_consume_limit(self) -> None:
         blocked_task_id, dispatchable_task_id = self._run_async(
@@ -398,6 +411,52 @@ class BatchTaskDispatchScheduleTests(unittest.TestCase):
             await session.commit()
             return tuple(task.id for task in tasks)
 
+    async def _create_manual_approved_task(self) -> int:
+        async with self.session_factory() as session:
+            identity = IdentityProfile(
+                name="测试身份",
+                profile_name="测试身份",
+                sender_name="王同学",
+                email_address=f"sender-manual-{datetime.now(UTC).timestamp()}@example.com",
+                smtp_host="smtp.example.com",
+                smtp_port=465,
+                smtp_username="sender@example.com",
+                smtp_password="secret",
+                default_language="zh-CN",
+                outreach_generation_mode="template",
+                outreach_template_subject="申请与{{name}}老师交流",
+                outreach_template_body_text="老师您好，我是{{sender_name}}。",
+                is_default=True,
+            )
+            llm_profile = LLMProfile(
+                name=f"默认模型-manual-{datetime.now(UTC).timestamp()}",
+                provider="openai",
+                api_base_url="https://api.example.com/v1",
+                api_key="sk-test-key",
+                model_name="gpt-test",
+                is_default=True,
+            )
+            professor = Professor(
+                name="张教授",
+                email=f"manual-{datetime.now(UTC).timestamp()}@example.edu",
+                title="Professor",
+                university="Example University",
+                school="School of AI",
+                department="Computer Science",
+                research_direction="Large language models",
+                recent_papers=[],
+            )
+            task = self._build_email_task(
+                batch_task=None,
+                identity=identity,
+                llm_profile=llm_profile,
+                professor=professor,
+                status=EmailTaskStatus.APPROVED.value,
+            )
+            session.add(task)
+            await session.commit()
+            return task.id
+
     async def _create_blocked_scheduled_task_before_dispatchable_task(self) -> tuple[int, int]:
         async with self.session_factory() as session:
             identity = IdentityProfile(
@@ -474,6 +533,14 @@ class BatchTaskDispatchScheduleTests(unittest.TestCase):
             session.add_all([blocked_batch_task, blocked_task, dispatchable_task])
             await session.commit()
             return blocked_task.id, dispatchable_task.id
+
+    async def _set_task_status(self, task_id: int, status: str) -> None:
+        async with self.session_factory() as session:
+            task = await session.get(EmailTask, task_id)
+            assert task is not None
+            task.status = status
+            task.updated_at = datetime.now(UTC)
+            await session.commit()
 
     def _build_email_task(
         self,

@@ -14,6 +14,8 @@ from app.models import CrawlCandidate, CrawlJob, CrawlJobStatus, CrawlPage
 from app.models.base import Base
 from app.services.crawler_tools import (
     CrawlJobSaveBudgetExceeded,
+    CrawlJobCanceled,
+    CrawlJobPaused,
     CrawlToolContext,
     CandidateEnrichmentPayload,
     PageSnapshot,
@@ -902,17 +904,17 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
             session_factory=session_factory,  # type: ignore[arg-type]
         )
 
-        saved = await save_candidates(
-            ctx,
-            [
-                ProfessorCandidatePayload(
-                    name="张三",
-                    email="zhang@example.edu",
-                ),
-            ],
-        )
+        with self.assertRaises(CrawlJobCanceled):
+            await save_candidates(
+                ctx,
+                [
+                    ProfessorCandidatePayload(
+                        name="张三",
+                        email="zhang@example.edu",
+                    ),
+                ],
+            )
 
-        self.assertEqual(saved, [])
         self.assertEqual(session_factory.added, [])
 
     async def test_save_candidates_skips_paused_job(self) -> None:
@@ -925,17 +927,17 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
             session_factory=session_factory,  # type: ignore[arg-type]
         )
 
-        saved = await save_candidates(
-            ctx,
-            [
-                ProfessorCandidatePayload(
-                    name="张三",
-                    email="zhang@example.edu",
-                ),
-            ],
-        )
+        with self.assertRaises(CrawlJobPaused):
+            await save_candidates(
+                ctx,
+                [
+                    ProfessorCandidatePayload(
+                        name="张三",
+                        email="zhang@example.edu",
+                    ),
+                ],
+            )
 
-        self.assertEqual(saved, [])
         self.assertEqual(session_factory.added, [])
 
     async def test_save_candidates_rolls_back_when_job_is_canceled_before_commit(self) -> None:
@@ -948,19 +950,19 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
             session_factory=session_factory,  # type: ignore[arg-type]
         )
 
-        saved = await save_candidates(
-            ctx,
-            [
-                ProfessorCandidatePayload(
-                    name="张三",
-                    email="zhang@example.edu",
-                ),
-            ],
-        )
+        with self.assertRaises(CrawlJobCanceled):
+            await save_candidates(
+                ctx,
+                [
+                    ProfessorCandidatePayload(
+                        name="张三",
+                        email="zhang@example.edu",
+                    ),
+                ],
+            )
 
-        self.assertEqual(saved, [])
         self.assertEqual(session_factory.added, [])
-        self.assertEqual(session_factory.rollback_count, 1)
+        self.assertEqual(session_factory.rollback_count, 0)
 
     async def test_save_candidate_batch_returns_counts_without_candidate_details(self) -> None:
         async with _RealCrawlerSessionHarness() as harness:
@@ -1071,16 +1073,79 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
                 session_factory=harness.session_factory,
             )
 
-            result = await save_candidate_batch(
-                ctx,
-                [ProfessorCandidatePayload(name="张三", email="zhang@example.edu")],
-            )
+            with self.assertRaises(CrawlJobCanceled):
+                await save_candidate_batch(
+                    ctx,
+                    [ProfessorCandidatePayload(name="张三", email="zhang@example.edu")],
+                )
 
-            self.assertEqual(result["batch_status"], "saved")
-            self.assertEqual(result["saved_count"], 0)
             self.assertEqual(ctx.save_failure_budget.total_save_failures, 0)
             self.assertEqual(ctx.save_failure_budget.same_batch_save_failures, 0)
             self.assertEqual(await harness.count_rows(CrawlCandidate), 0)
+
+    async def test_crawl_page_with_crawl4ai_raises_when_job_is_canceled_before_fetch(self) -> None:
+        session_factory = _FakeSessionFactory(job_status="canceled")
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://cs.example.edu/faculty",
+            university="示例大学",
+            school="计算机学院",
+            session_factory=session_factory,  # type: ignore[arg-type]
+        )
+        snapshot = PageSnapshot(
+            url="https://cs.example.edu/faculty",
+            title="Faculty",
+            text="教师名录 张三 教授",
+            html="<html></html>",
+            links=[],
+            fetch_method="http",
+            status="succeeded",
+        )
+
+        with patch(
+            "app.services.crawler_tools.crawl_page_with_http",
+            new=AsyncMock(return_value=snapshot),
+        ) as mocked_http, patch(
+            "app.services.crawler_tools.browser_investigate",
+            new=AsyncMock(return_value=snapshot),
+        ) as mocked_browser:
+            with self.assertRaises(CrawlJobCanceled):
+                await crawl_page_with_crawl4ai(ctx, "https://cs.example.edu/faculty")
+
+        mocked_http.assert_not_called()
+        mocked_browser.assert_not_called()
+
+    async def test_browser_investigate_raises_when_job_is_canceled_before_fetch(self) -> None:
+        session_factory = _FakeSessionFactory(job_status="canceled")
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://cs.example.edu/faculty",
+            university="示例大学",
+            school="计算机学院",
+            session_factory=session_factory,  # type: ignore[arg-type]
+        )
+        snapshot = PageSnapshot(
+            url="https://cs.example.edu/faculty/zhang",
+            title="张三",
+            text="张三 教授",
+            html="<html></html>",
+            links=[],
+            fetch_method="browser",
+            status="succeeded",
+        )
+
+        with patch(
+            "app.services.crawler_tools._crawl_page_with_crawl4ai_browser",
+            new=AsyncMock(return_value=snapshot),
+        ) as mocked_browser:
+            with self.assertRaises(CrawlJobCanceled):
+                await crawler_tools.browser_investigate(
+                    ctx,
+                    "https://cs.example.edu/faculty/zhang",
+                    goal="提取导师主页",
+                )
+
+        mocked_browser.assert_not_called()
 
     async def test_record_page_snapshot_skips_canceled_job(self) -> None:
         session_factory = _FakeSessionFactory(job_status="canceled")
@@ -1166,17 +1231,17 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
                 session_factory=harness.cancel_on_second_status_factory(job_id),  # type: ignore[arg-type]
             )
 
-            saved = await save_candidates(
-                ctx,
-                [
-                    ProfessorCandidatePayload(
-                        name="张三",
-                        email="zhang@example.edu",
-                    ),
-                ],
-            )
+            with self.assertRaises(CrawlJobCanceled):
+                await save_candidates(
+                    ctx,
+                    [
+                        ProfessorCandidatePayload(
+                            name="张三",
+                            email="zhang@example.edu",
+                        ),
+                    ],
+                )
 
-            self.assertEqual(saved, [])
             self.assertEqual(await harness.count_rows(CrawlCandidate), 0)
 
     async def test_record_page_snapshot_sees_canceled_status_changed_by_other_session(self) -> None:

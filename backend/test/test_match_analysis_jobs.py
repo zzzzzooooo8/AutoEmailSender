@@ -225,6 +225,17 @@ class MatchAnalysisJobRuntimeTests(unittest.TestCase):
         items = self._run_async(self._get_job_items(job.id))
         self.assertEqual(items[0].status, "canceled")
 
+    def test_cancel_running_job_cancels_active_llm_call(self) -> None:
+        llm_call_canceled, stored, items = self._run_async(
+            self._cancel_running_job_during_active_llm_call(),
+        )
+
+        self.assertTrue(llm_call_canceled)
+        self.assertEqual(stored.status, "canceled")
+        self.assertEqual(stored.succeeded_count, 0)
+        self.assertEqual(stored.total_tokens, 0)
+        self.assertEqual(items[0].status, "canceled")
+
     def test_cancel_requested_job_with_success_and_canceled_items_stays_canceled(self) -> None:
         identity_id, llm_profile_id, professor_ids = self._run_async(
             self._seed_create_job_data(extra_analyzable_professor=True),
@@ -413,6 +424,50 @@ class MatchAnalysisJobRuntimeTests(unittest.TestCase):
             assert job is not None
             job.status = MatchAnalysisJobStatus.RUNNING.value
             await session.commit()
+
+    async def _cancel_running_job_during_active_llm_call(
+        self,
+    ) -> tuple[bool, MatchAnalysisJob, list[MatchAnalysisJobItem]]:
+        identity_id, llm_profile_id, professor_ids = await self._seed_create_job_data()
+        job = await create_match_analysis_job(
+            self.session_factory,
+            identity_id=identity_id,
+            llm_profile_id=llm_profile_id,
+            professor_ids=[professor_ids[0]],
+            name=None,
+        )
+        llm_call_started = asyncio.Event()
+        llm_call_canceled = asyncio.Event()
+        release_llm_call = asyncio.Event()
+
+        async def fake_generate_match_evaluation(**kwargs):
+            llm_call_started.set()
+            try:
+                await release_llm_call.wait()
+            except asyncio.CancelledError:
+                llm_call_canceled.set()
+                raise
+            return self._build_match_evaluation_result(match_score=88)
+
+        with patch(
+            "app.services.task_runtime.llm_runtime.generate_match_evaluation",
+            AsyncMock(side_effect=fake_generate_match_evaluation),
+        ):
+            worker_task = asyncio.create_task(
+                run_queued_match_analysis_jobs_once(
+                    self.session_factory,
+                    item_concurrency=1,
+                ),
+            )
+            await asyncio.wait_for(llm_call_started.wait(), timeout=1)
+            await request_match_analysis_job_cancel(self.session_factory, job.id)
+            try:
+                await asyncio.wait_for(llm_call_canceled.wait(), timeout=0.5)
+            except TimeoutError:
+                release_llm_call.set()
+            await asyncio.wait_for(worker_task, timeout=1)
+
+        return llm_call_canceled.is_set(), await self._get_job(job.id), await self._get_job_items(job.id)
 
     @staticmethod
     def _run_async(awaitable):

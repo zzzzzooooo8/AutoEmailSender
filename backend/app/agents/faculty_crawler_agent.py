@@ -22,6 +22,7 @@ from app.services.crawler_tools import (
     browser_investigate,
     count_saved_candidates,
     crawl_page_with_crawl4ai,
+    ensure_crawl_job_can_continue,
     record_save_batch_failure,
     save_candidate_batch,
 )
@@ -543,15 +544,23 @@ async def run_faculty_crawler_agent(
     input_payload = {"messages": [{"role": "user", "content": prompt}]}
     last_event: Any = None
 
+    await _ensure_agent_job_can_continue(ctx)
     async for event in agent.astream(
         input_payload,
         subgraphs=True,
         version="v2",
     ):
+        await _ensure_agent_job_can_continue(ctx)
         last_event = event
         if trace_callback is not None:
             result = trace_callback(build_trace_event(event))
             if inspect.isawaitable(result):
                 await result
+        await _ensure_agent_job_can_continue(ctx)
 
     return build_trace_event(last_event)
+
+
+async def _ensure_agent_job_can_continue(ctx: CrawlToolContext) -> None:
+    async with ctx.session_factory() as session:
+        await ensure_crawl_job_can_continue(session, ctx.job_id)
