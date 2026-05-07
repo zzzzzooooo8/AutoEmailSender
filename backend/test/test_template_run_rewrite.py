@@ -87,6 +87,33 @@ class TemplateRunRewriteTests(unittest.TestCase):
         self.assertIn("<strong>{{sender_name}}</strong>", result.html)
         self.assertIn("想和您交流", result.text)
 
+    def test_duplicate_placeholder_token_is_rejected(self) -> None:
+        document = build_template_run_document(
+            "<p>我对您的 <strong>{{research_direction}}</strong> 方向很感兴趣。</p>",
+        )
+
+        result = apply_template_run_replacements(
+            document,
+            [
+                {
+                    "segment_id": "seg_1",
+                    "runs": [
+                        {
+                            "run_id": "run_1",
+                            "text": "我近期关注到您在 ",
+                        },
+                        {
+                            "run_id": "run_2",
+                            "text": "[[PH_1]] 和 [[PH_1]]",
+                        },
+                    ],
+                },
+            ],
+        )
+
+        self.assertIn("<strong>{{research_direction}}</strong>", result.html)
+        self.assertNotIn("{{research_direction}} 和 {{research_direction}}", result.html)
+
 
 if __name__ == "__main__":
     unittest.main()

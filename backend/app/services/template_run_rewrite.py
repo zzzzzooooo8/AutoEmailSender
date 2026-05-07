@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 
 from bs4 import BeautifulSoup, NavigableString, Tag
@@ -195,8 +196,8 @@ def _lock_placeholders(
 
 
 def _replacement_preserves_placeholders(run: TemplateRun, text: str) -> bool:
-    expected_tokens = {item["token"] for item in run.locked_placeholders}
-    actual_tokens = set(re.findall(r"\[\[PH_\d+\]\]", text))
+    expected_tokens = Counter(item["token"] for item in run.locked_placeholders)
+    actual_tokens = Counter(re.findall(r"\[\[PH_\d+\]\]", text))
     return actual_tokens == expected_tokens
 
 
