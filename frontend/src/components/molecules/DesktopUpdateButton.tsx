@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import { Loader2, RefreshCw, X } from "lucide-react";
 import { useNotification } from "@/context/NotificationContext";
@@ -303,7 +304,7 @@ function DesktopUpdateReleaseNotesDialog({
 
   const releaseNotes = status.releaseNotes?.trim() || "新版本已发布，更新内容暂不可用。";
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-[90] flex items-center justify-center bg-stone-950/35 p-4 backdrop-blur-md"
       role="presentation"
@@ -338,7 +339,7 @@ function DesktopUpdateReleaseNotesDialog({
           data-testid="desktop-update-release-notes"
           className="max-h-[50vh] overflow-y-auto px-6 py-5"
         >
-          <article className="prose prose-sm max-w-none break-words text-stone-700 prose-headings:text-stone-900 prose-a:text-primary prose-code:text-stone-900">
+          <article className={RELEASE_NOTES_MARKDOWN_CLASS_NAME}>
             <ReactMarkdown>{releaseNotes}</ReactMarkdown>
           </article>
         </div>
@@ -367,8 +368,26 @@ function DesktopUpdateReleaseNotesDialog({
         </div>
       </section>
     </div>
+    ,
+    document.body,
   );
 }
+
+const RELEASE_NOTES_MARKDOWN_CLASS_NAME =
+  "space-y-4 break-words text-sm leading-7 text-stone-700 " +
+  "[&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:leading-tight [&_h1]:tracking-[0.01em] [&_h1]:text-stone-900 " +
+  "[&_h2]:mt-6 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:leading-tight [&_h2]:tracking-[0.01em] [&_h2]:text-stone-900 " +
+  "[&_h3]:mt-5 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:leading-tight [&_h3]:text-stone-900 " +
+  "[&_p]:m-0 [&_p]:leading-7 " +
+  "[&_ul]:my-0 [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-5 " +
+  "[&_ol]:my-0 [&_ol]:list-decimal [&_ol]:space-y-2 [&_ol]:pl-5 " +
+  "[&_li]:leading-7 " +
+  "[&_strong]:font-semibold [&_strong]:text-stone-900 " +
+  "[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2 " +
+  "[&_code]:rounded-md [&_code]:bg-stone-100 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.92em] [&_code]:text-stone-900 " +
+  "[&_pre]:overflow-x-auto [&_pre]:rounded-2xl [&_pre]:bg-stone-950 [&_pre]:p-4 [&_pre]:text-stone-100 " +
+  "[&_pre_code]:rounded-none [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit " +
+  "[&_blockquote]:border-l-4 [&_blockquote]:border-stone-200 [&_blockquote]:pl-4 [&_blockquote]:text-stone-500";
 
 function DesktopUpdateStatusBar({
   status,

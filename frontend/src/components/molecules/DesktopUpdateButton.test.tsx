@@ -119,6 +119,52 @@ describe("DesktopUpdateButton", () => {
     expect(screen.getByTestId("desktop-update-release-notes")).toHaveClass("max-h-[50vh]", "overflow-y-auto");
   });
 
+  it("renders the release notes dialog through a portal on document.body", async () => {
+    window.autoEmailSender = buildDesktopApi({
+      checkForUpdate: async () => ({
+        state: "available",
+        version: "2.1.5",
+        nextVersion: "2.1.6",
+        fullDownloadBytes: 200 * 1024 * 1024,
+        releaseNotes: "# v2.1.6\n\n## 更新内容\n\n- 修复公告弹窗高度",
+      }),
+    });
+
+    const { container } = render(
+      <div className="translate-y-10">
+        <DesktopUpdateButton />
+      </div>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /检查更新/ }));
+
+    const dialog = await screen.findByRole("dialog", { name: /发现新版本 v2\.1\.6/ });
+    expect(container).not.toHaveTextContent("发现新版本 v2.1.6");
+    expect(document.body).toContainElement(dialog);
+  });
+
+  it("renders release notes markdown with heading and list styles", async () => {
+    window.autoEmailSender = buildDesktopApi({
+      checkForUpdate: async () => ({
+        state: "available",
+        version: "2.1.5",
+        nextVersion: "2.1.6",
+        fullDownloadBytes: 200 * 1024 * 1024,
+        releaseNotes: "# v2.1.6\n\n## 更新内容\n\n- 修复公告弹窗高度\n- 保持 markdown 排版\n\n```ts\nconsole.log('ok');\n```",
+      }),
+    });
+
+    render(<DesktopUpdateButton />);
+    fireEvent.click(await screen.findByRole("button", { name: /检查更新/ }));
+
+    const dialog = await screen.findByRole("dialog", { name: /发现新版本 v2\.1\.6/ });
+    const releaseNotes = within(dialog).getByTestId("desktop-update-release-notes");
+    const markdown = releaseNotes.querySelector("article");
+    expect(markdown).toHaveClass("space-y-4", "break-words");
+    expect(within(dialog).getByRole("heading", { name: "更新内容" })).toBeInTheDocument();
+    expect(within(dialog).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(dialog).getByText("console.log('ok');")).toBeInTheDocument();
+  });
+
   it("starts the selected download mode from the release notes dialog", async () => {
     const downloadUpdate = vi.fn(async () => ({
       state: "downloaded_pending_install" as const,
