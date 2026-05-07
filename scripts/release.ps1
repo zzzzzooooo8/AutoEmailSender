@@ -9,7 +9,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $true
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+$OutputEncoding = [System.Text.UTF8Encoding]::new()
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$ReleaseTag = "v$Version"
+$CuratedReleaseNotesPath = Join-Path $RepoRoot "docs\releases\$ReleaseTag.md"
+$DesktopReleaseNotesPath = Join-Path $RepoRoot "desktop\release-notes.md"
 
 function Run-Git {
   param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Args)
@@ -45,9 +50,31 @@ function Assert-CleanRepository {
   }
 
   $status = git -C $RepoRoot status --porcelain
-  if ($status) {
+  $allowedReleaseNotesPath = "docs/releases/$ReleaseTag.md"
+  $unexpectedStatus = @(
+    $status | Where-Object {
+      $path = $_.Substring(3).Replace("\", "/")
+      $path -ne $allowedReleaseNotesPath
+    }
+  )
+  if ($unexpectedStatus.Count -gt 0) {
     throw "工作区存在未提交改动，请先提交或清理后再发布。"
   }
+}
+
+function Assert-ReleaseNotes {
+  $relativePath = "docs/releases/$ReleaseTag.md"
+  if (-not (Test-Path $CuratedReleaseNotesPath)) {
+    throw "缺少 $relativePath，请先运行 .\scripts\prepare-release.ps1 $Version 并润色公告后再发布。"
+  }
+}
+
+function Copy-ReleaseNotes {
+  if ($DryRun) {
+    Write-Host "[dry-run] copy docs/releases/$ReleaseTag.md to desktop/release-notes.md"
+    return
+  }
+  Copy-Item -LiteralPath $CuratedReleaseNotesPath -Destination $DesktopReleaseNotesPath -Force
 }
 
 function Invoke-Verification {
@@ -101,18 +128,20 @@ function Set-NpmVersion {
 }
 
 Assert-CleanRepository
+Assert-ReleaseNotes
 Invoke-Verification
 Set-NpmVersion "desktop"
 Set-NpmVersion "frontend"
+Copy-ReleaseNotes
 
-Run-Git add desktop/package.json desktop/package-lock.json frontend/package.json frontend/package-lock.json
-Run-Git commit -m "chore(release): v$Version"
-Run-Git tag "v$Version"
+Run-Git add desktop/package.json desktop/package-lock.json frontend/package.json frontend/package-lock.json desktop/release-notes.md "docs/releases/$ReleaseTag.md"
+Run-Git commit -m "chore(release): $ReleaseTag"
+Run-Git tag $ReleaseTag
 Run-Git push origin master
-Run-Git push origin "v$Version"
+Run-Git push origin $ReleaseTag
 
 if ($DryRun) {
   Write-Host "[dry-run] 未创建提交、tag 或推送。真实发布会触发 GitHub Actions 创建 Release。"
 } else {
-  Write-Host "已发布 v$Version。GitHub Actions 将自动创建 Release。"
+  Write-Host "已发布 $ReleaseTag。GitHub Actions 将自动创建 Release。"
 }

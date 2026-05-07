@@ -51,9 +51,6 @@ jobs:
         working-directory: desktop
         run: npm ci
 
-      - name: Generate release notes
-        run: node ./scripts/release-notes.mjs --version "${{ github.ref_name }}" --upper-ref "${{ github.sha }}" --output ./desktop/release-notes.md
-
       - name: Build and publish desktop release
         working-directory: desktop
         env:
