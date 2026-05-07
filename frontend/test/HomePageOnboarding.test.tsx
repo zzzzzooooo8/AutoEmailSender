@@ -171,7 +171,7 @@ describe("HomePage onboarding", () => {
       });
     });
 
-    expect(screen.getByText("正在加载导师列表...")).toBeInTheDocument();
+    expect(screen.getByLabelText("首页内容加载中")).toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: "完成首次配置" }),
     ).not.toBeInTheDocument();
