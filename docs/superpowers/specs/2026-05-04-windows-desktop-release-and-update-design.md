@@ -255,7 +255,7 @@ update:on-status
 第一版新增发布脚本：
 
 ```powershell
-rtk pwsh -NoProfile -Command ".\scripts\release.ps1 0.1.1"
+pwsh -NoProfile -Command ".\scripts\release.ps1 0.1.1"
 ```
 
 脚本职责：

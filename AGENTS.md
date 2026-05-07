@@ -3,7 +3,10 @@
 - 请保持使用中文和用户进行交流。
 - 终端和文件均使用 UTF-8 编码，避免中文出现乱码。
 - Python 使用 uv 进行包管理。
-- Always prefix shell commands with `rtk`.
+- Shell 命令按第一个真实程序分流：外部 CLI 用 `rtk`，PowerShell 语法或内建命令直接用 `pwsh`。
+- 正例：`rtk git status --short`、`rtk npm run lint`、`rtk uv run python dev_entry.py`。
+- 正例：`pwsh -NoLogo -NoProfile -Command "Get-Content -Raw -Encoding UTF8 'AGENTS.md'"`。
+- 禁止：不要写 `rtk pwsh -Command "git status"` 或 `rtk pwsh -Command "npm run lint"`。
 
 ## Project Structure & Module Organization
 - `frontend/` contains the Vite + React UI. App code is in `frontend/src`, with routes in `pages`, reusable UI in `components/{atoms,molecules,organisms}`, feature logic in `features`, and shared helpers in `lib`.
