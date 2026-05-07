@@ -10,6 +10,7 @@ import type {
   CrawlJobRetryPayloadDTO,
   CrawlJobSummaryDTO,
   CrawlPageDTO,
+  TaskListView,
 } from '@/types';
 
 export const createCrawlJob = (payload: CrawlJobCreatePayloadDTO) =>
@@ -18,10 +19,11 @@ export const createCrawlJob = (payload: CrawlJobCreatePayloadDTO) =>
     body: JSON.stringify(payload),
   });
 
-export const listCrawlJobs = (params: { limit?: number } = {}) =>
-  params.limit === undefined
-    ? apiFetch<CrawlJobSummaryDTO[]>('/api/crawl-jobs')
-    : apiFetch<CrawlJobSummaryDTO[]>('/api/crawl-jobs', undefined, params);
+export const listCrawlJobs = (params: { limit?: number; view?: TaskListView } = {}) =>
+  apiFetch<CrawlJobSummaryDTO[]>('/api/crawl-jobs', undefined, {
+    limit: params.limit,
+    view: params.view,
+  });
 
 export const getCrawlJob = (jobId: number) =>
   apiFetch<CrawlJobSummaryDTO>(`/api/crawl-jobs/${jobId}`);
@@ -79,5 +81,15 @@ export const retryCrawlJob = (jobId: number, payload: CrawlJobRetryPayloadDTO) =
 
 export const resumeCrawlJobReview = (jobId: number) =>
   apiFetch<CrawlJobDTO>(`/api/crawl-jobs/${jobId}/resume-review`, {
+    method: 'POST',
+  });
+
+export const deleteCrawlJob = (jobId: number) =>
+  apiFetch<CrawlJobDTO>(`/api/crawl-jobs/${jobId}/delete`, {
+    method: 'POST',
+  });
+
+export const restoreCrawlJob = (jobId: number) =>
+  apiFetch<CrawlJobDTO>(`/api/crawl-jobs/${jobId}/restore`, {
     method: 'POST',
   });

@@ -20,6 +20,7 @@ const buildCrawlJob = (
   error_message: null,
   created_at: "2026-05-01T14:40:00",
   updated_at: "2026-05-01T14:49:02",
+  deleted_at: null,
   page_count: 5,
   candidate_count: 1,
   latest_event_message:
