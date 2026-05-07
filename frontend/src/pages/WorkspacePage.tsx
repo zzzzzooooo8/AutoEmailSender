@@ -35,6 +35,8 @@ import {
 const WORKSPACE_STATUS_LABELS: Record<WorkspaceTaskStatusLabelKey, string> = {
   discovered: '待处理',
   matched: PROFESSOR_STATUS_LABELS.matched,
+  generating_draft: PROFESSOR_STATUS_LABELS.generating_draft,
+  draft_failed: PROFESSOR_STATUS_LABELS.draft_failed,
   review_required: PROFESSOR_STATUS_LABELS.review_required,
   approved: '待发送',
   scheduled: PROFESSOR_STATUS_LABELS.scheduled,

@@ -243,6 +243,11 @@ type CrawlJobCardProps = {
   formatUpdatedAt: (value: string) => string;
 };
 
+type TaskListViewSwitchProps = {
+  activeView: TaskListView;
+  onViewChange: (view: TaskListView) => void;
+};
+
 const canDeleteCrawlJob = (job: CrawlJobSummaryDTO) =>
   job.status === "completed" ||
   job.status === "failed" ||
@@ -256,6 +261,30 @@ const canDeleteMatchJob = (job: MatchAnalysisJobDTO) =>
   job.status === "partial_failed" ||
   job.status === "failed" ||
   job.status === "canceled";
+
+export const TaskListViewSwitch = ({
+  activeView,
+  onViewChange,
+}: TaskListViewSwitchProps) => (
+  <div data-testid="task-list-view-switch" className="flex justify-end">
+    <div className="inline-flex gap-1 rounded-2xl border border-stone-200 bg-white p-1 shadow-sm">
+      {(["current", "trash"] as TaskListView[]).map((view) => (
+        <button
+          key={view}
+          type="button"
+          onClick={() => onViewChange(view)}
+          className={
+            activeView === view
+              ? "inline-flex min-h-9 items-center rounded-xl bg-primary px-4 text-sm font-medium text-white shadow-sm shadow-primary/20"
+              : "inline-flex min-h-9 items-center rounded-xl px-4 text-sm font-medium text-stone-600 hover:bg-stone-50"
+          }
+        >
+          {view === "current" ? "当前任务" : "回收站"}
+        </button>
+      ))}
+    </div>
+  </div>
+);
 
 export const CrawlJobCard = ({
   job,
@@ -1858,88 +1887,78 @@ export const TasksPage = () => {
         </div>
       </div>
 
-      <div className="mt-6 inline-flex gap-2 rounded-2xl border border-stone-200 bg-white p-1.5 shadow-sm">
-        <button
-          type="button"
-          aria-label="批量邮件"
-          disabled={!hasTaskSelection}
-          onClick={() => setActiveTab("batch")}
-          className={
-            activeTab === "batch"
-              ? "inline-flex min-h-10 items-center gap-2 rounded-xl bg-primary px-5 text-sm font-medium text-white"
-              : "inline-flex min-h-10 items-center gap-2 rounded-xl px-5 text-sm font-medium text-stone-600 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
-          }
-        >
-          <Mail className="h-4 w-4" />
-          批量邮件
-          <span
-            className={
-              activeTab === "batch" ? "text-white/80" : "text-stone-400"
-            }
-          >
-            {currentBatchTasks.length}
-          </span>
-        </button>
-        <button
-          type="button"
-          aria-label="教师抓取"
-          onClick={() => setActiveTab("crawl")}
-          className={
-            activeTab === "crawl"
-              ? "inline-flex min-h-10 items-center gap-2 rounded-xl bg-primary px-5 text-sm font-medium text-white"
-              : "inline-flex min-h-10 items-center gap-2 rounded-xl px-5 text-sm font-medium text-stone-600 hover:bg-stone-50"
-          }
-        >
-          <FileSearch className="h-4 w-4" />
-          教师抓取
-          <span
-            className={
-              activeTab === "crawl" ? "text-white/80" : "text-stone-400"
-            }
-          >
-            {currentCrawlJobs.length}
-          </span>
-        </button>
-        <button
-          type="button"
-          aria-label="匹配分析"
-          disabled={!hasTaskSelection}
-          onClick={() => setActiveTab("match")}
-          className={
-            activeTab === "match"
-              ? "inline-flex min-h-10 items-center gap-2 rounded-xl bg-primary px-5 text-sm font-medium text-white"
-              : "inline-flex min-h-10 items-center gap-2 rounded-xl px-5 text-sm font-medium text-stone-600 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
-          }
-        >
-          <Sparkles className="h-4 w-4" />
-          匹配分析
-          <span
-            className={
-              activeTab === "match" ? "text-white/80" : "text-stone-400"
-            }
-          >
-            {currentMatchAnalysisJobs.length}
-          </span>
-        </button>
-      </div>
-
-      <div className="mt-4 inline-flex gap-1 rounded-2xl border border-stone-200 bg-white p-1 shadow-sm">
-        {(["current", "trash"] as TaskListView[]).map((view) => (
+      <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="inline-flex gap-2 rounded-2xl border border-stone-200 bg-white p-1.5 shadow-sm">
           <button
-            key={view}
             type="button"
-            onClick={() =>
-              setTaskListViews((current) => ({ ...current, [activeTab]: view }))
-            }
+            aria-label="批量邮件"
+            disabled={!hasTaskSelection}
+            onClick={() => setActiveTab("batch")}
             className={
-              activeTaskListView === view
-                ? "inline-flex min-h-9 items-center rounded-xl bg-stone-900 px-4 text-sm font-medium text-white"
-                : "inline-flex min-h-9 items-center rounded-xl px-4 text-sm font-medium text-stone-600 hover:bg-stone-50"
+              activeTab === "batch"
+                ? "inline-flex min-h-10 items-center gap-2 rounded-xl bg-primary px-5 text-sm font-medium text-white"
+                : "inline-flex min-h-10 items-center gap-2 rounded-xl px-5 text-sm font-medium text-stone-600 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
             }
           >
-            {view === "current" ? "当前任务" : "回收站"}
+            <Mail className="h-4 w-4" />
+            批量邮件
+            <span
+              className={
+                activeTab === "batch" ? "text-white/80" : "text-stone-400"
+              }
+            >
+              {currentBatchTasks.length}
+            </span>
           </button>
-        ))}
+          <button
+            type="button"
+            aria-label="教师抓取"
+            onClick={() => setActiveTab("crawl")}
+            className={
+              activeTab === "crawl"
+                ? "inline-flex min-h-10 items-center gap-2 rounded-xl bg-primary px-5 text-sm font-medium text-white"
+                : "inline-flex min-h-10 items-center gap-2 rounded-xl px-5 text-sm font-medium text-stone-600 hover:bg-stone-50"
+            }
+          >
+            <FileSearch className="h-4 w-4" />
+            教师抓取
+            <span
+              className={
+                activeTab === "crawl" ? "text-white/80" : "text-stone-400"
+              }
+            >
+              {currentCrawlJobs.length}
+            </span>
+          </button>
+          <button
+            type="button"
+            aria-label="匹配分析"
+            disabled={!hasTaskSelection}
+            onClick={() => setActiveTab("match")}
+            className={
+              activeTab === "match"
+                ? "inline-flex min-h-10 items-center gap-2 rounded-xl bg-primary px-5 text-sm font-medium text-white"
+                : "inline-flex min-h-10 items-center gap-2 rounded-xl px-5 text-sm font-medium text-stone-600 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
+            }
+          >
+            <Sparkles className="h-4 w-4" />
+            匹配分析
+            <span
+              className={
+                activeTab === "match" ? "text-white/80" : "text-stone-400"
+              }
+            >
+              {currentMatchAnalysisJobs.length}
+            </span>
+          </button>
+        </div>
+
+        <TaskListViewSwitch
+          activeView={activeTaskListView}
+          onViewChange={(view) =>
+            setTaskListViews((current) => ({ ...current, [activeTab]: view }))
+          }
+        />
       </div>
 
       {activeTab === "batch" && loading ? (

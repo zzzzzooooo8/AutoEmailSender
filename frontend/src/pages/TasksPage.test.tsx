@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { describe, expect, it, vi } from "vitest";
 import type { CrawlJobSummaryDTO } from "@/types";
-import { CrawlJobCard } from "./TasksPage";
+import { CrawlJobCard, TaskListViewSwitch } from "./TasksPage";
 
 const buildCrawlJob = (
   overrides: Partial<CrawlJobSummaryDTO> = {},
@@ -119,5 +119,24 @@ describe("CrawlJobCard", () => {
     expect(screen.getByRole("button", { name: "恢复" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "删除" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "重启抓取" })).not.toBeInTheDocument();
+  });
+});
+
+describe("TaskListViewSwitch", () => {
+  it("aligns the current/trash switch to the right edge", () => {
+    render(
+      <TaskListViewSwitch
+        activeView="current"
+        onViewChange={vi.fn()}
+      />,
+    );
+
+    const switchContainer = screen.getByTestId("task-list-view-switch");
+    expect(switchContainer).toHaveClass("justify-end");
+    expect(switchContainer).not.toHaveClass("mt-4");
+
+    const activeButton = screen.getByRole("button", { name: "当前任务" });
+    expect(activeButton).toHaveClass("bg-primary");
+    expect(activeButton).not.toHaveClass("bg-stone-900");
   });
 });
