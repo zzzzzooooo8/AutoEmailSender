@@ -13,7 +13,7 @@ from app.services.outreach_templates import import_outreach_template_file
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "e8f2a4b6c9d0"
+HEAD_REVISION = "e8f7a6b5c4d3"
 LEGACY_RUNTIME_REVISION = "7a1d5e42c9bd"
 
 
@@ -253,6 +253,11 @@ class DatabaseSchemaTests(unittest.TestCase):
                 "ix_match_analysis_job_items_match_analysis_run_id",
             }.issubset(match_job_item_indexes),
         )
+
+    def test_task_tables_have_deleted_at_for_trash(self) -> None:
+        self.assertIn("deleted_at", self._get_columns("batch_tasks"))
+        self.assertIn("deleted_at", self._get_columns("crawl_jobs"))
+        self.assertIn("deleted_at", self._get_columns("match_analysis_jobs"))
 
     def test_crawl_job_tables_exist(self) -> None:
         rows = self.connection.execute(

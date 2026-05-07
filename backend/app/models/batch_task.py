@@ -76,6 +76,11 @@ class BatchTask(Base):
         server_default=text("CURRENT_TIMESTAMP"),
         onupdate=lambda: datetime.now(UTC),
     )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        index=True,
+        nullable=True,
+    )
 
     identity: Mapped["IdentityProfile"] = relationship(
         back_populates="batch_tasks",
