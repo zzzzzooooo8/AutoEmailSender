@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   cancelCrawlJob,
   createCrawlJob,
+  deleteCrawlJob,
   enrichCrawlCandidates,
   getCrawlJob,
   getCrawlJobEvents,
   listCrawlJobs,
   listCrawlPages,
+  restoreCrawlJob,
   resumeCrawlJobReview,
 } from '@/lib/api/crawlJobsApi';
 import type { CrawlJobCreatePayloadDTO, CrawlJobDTO, CrawlJobSummaryDTO } from '@/types';
@@ -74,7 +76,10 @@ describe('crawlJobsApi', () => {
 
     await expect(listCrawlJobs()).resolves.toBe(jobs);
 
-    expect(mockedApiFetch).toHaveBeenCalledWith('/api/crawl-jobs');
+    expect(mockedApiFetch).toHaveBeenCalledWith('/api/crawl-jobs', undefined, {
+      limit: undefined,
+      view: undefined,
+    });
   });
 
   it('gets a crawl job summary from the expected URL', async () => {
@@ -180,6 +185,26 @@ describe('crawlJobsApi', () => {
     await expect(resumeCrawlJobReview(7)).resolves.toBe(job);
 
     expect(mockedApiFetch).toHaveBeenCalledWith('/api/crawl-jobs/7/resume-review', {
+      method: 'POST',
+    });
+  });
+
+  it('moves a crawl job to trash with the expected URL', async () => {
+    mockedApiFetch.mockResolvedValue({});
+
+    await deleteCrawlJob(7);
+
+    expect(mockedApiFetch).toHaveBeenCalledWith('/api/crawl-jobs/7/delete', {
+      method: 'POST',
+    });
+  });
+
+  it('restores a crawl job from trash with the expected URL', async () => {
+    mockedApiFetch.mockResolvedValue({});
+
+    await restoreCrawlJob(7);
+
+    expect(mockedApiFetch).toHaveBeenCalledWith('/api/crawl-jobs/7/restore', {
       method: 'POST',
     });
   });

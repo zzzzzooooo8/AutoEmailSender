@@ -36,6 +36,8 @@ describe("professor dashboard status helper", () => {
     expect(PROFESSOR_STATUS_LABELS).toEqual({
       discovered: "待处理",
       matched: "待生成",
+      generating_draft: "正在生成草稿",
+      draft_failed: "草稿生成失败",
       review_required: "待审核",
       approved: "待发送",
       scheduled: "已排程",
