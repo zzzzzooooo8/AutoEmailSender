@@ -60,6 +60,7 @@ class BatchTaskItemRead(BaseModel):
     professor_title: str | None
     professor_school: str | None
     status: str
+    cancellation_reason: str | None
     match_score: int | None
     scheduled_at: datetime | None
     sent_at: datetime | None

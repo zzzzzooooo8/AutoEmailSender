@@ -744,12 +744,14 @@ export const TasksPage = () => {
     () =>
       selectedBatchTaskItems.filter(
         (item) =>
-          item.status !== "sent" &&
+          (item.status === "canceled" &&
+            item.cancellation_reason === "batch_stopped") ||
+          (item.status !== "sent" &&
           item.status !== "reply_detected" &&
           item.status !== "generating_draft" &&
           item.status !== "draft_failed" &&
           item.status !== "send_failed" &&
-          item.status !== "canceled",
+            item.status !== "canceled"),
       ),
     [selectedBatchTaskItems],
   );

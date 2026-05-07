@@ -145,6 +145,24 @@ const draftFailedTaskItem = {
   updated_at: "2026-04-26T11:26:00Z",
 } as const;
 
+const canceledBatchStoppedTaskItem = {
+  id: 35,
+  professor_id: 105,
+  professor_name: "周老师",
+  professor_email: "zhou@example.edu",
+  professor_title: "教授",
+  professor_school: "数据科学学院",
+  status: "canceled",
+  cancellation_reason: "batch_stopped",
+  match_score: 81,
+  scheduled_at: null,
+  sent_at: null,
+  last_send_attempt_at: null,
+  last_error: null,
+  is_replied: false,
+  updated_at: "2026-04-26T11:27:00Z",
+} as const;
+
 describe("TasksPage layout", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -221,6 +239,7 @@ describe("TasksPage layout", () => {
       pendingTaskItem,
       generatingDraftTaskItem,
       draftFailedTaskItem,
+      canceledBatchStoppedTaskItem,
     ]);
 
     renderPage();
@@ -240,6 +259,18 @@ describe("TasksPage layout", () => {
     expect(within(dialog).getByText("王老师")).toBeInTheDocument();
     expect(within(dialog).getByText("还未发送给")).toBeInTheDocument();
     expect(within(dialog).getByText("李老师")).toBeInTheDocument();
+    const pendingSection = within(dialog)
+      .getByRole("heading", { name: "还未发送给" })
+      .closest("section") as HTMLElement;
+    const canceledItem = within(pendingSection)
+      .getByText("周老师")
+      .closest(".rounded-2xl") as HTMLElement;
+    expect(canceledItem).toBeInTheDocument();
+    expect(within(canceledItem).getByText("已取消")).toBeInTheDocument();
+    expect(within(canceledItem).getByRole("link", { name: "去处理" })).toHaveAttribute(
+      "href",
+      "/workspace/105",
+    );
     expect(within(dialog).getByRole("heading", { name: "正在生成草稿" })).toBeInTheDocument();
     expect(within(dialog).getByText("赵老师")).toBeInTheDocument();
     expect(within(dialog).getByRole("heading", { name: "草稿生成失败" })).toBeInTheDocument();

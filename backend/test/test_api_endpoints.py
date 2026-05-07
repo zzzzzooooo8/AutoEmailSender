@@ -2039,6 +2039,20 @@ class ApiEndpointTests(unittest.TestCase):
         stop_response = self.client.post(f"/api/batch-tasks/{batch_task_id}/stop")
         self.assertEqual(stop_response.status_code, 200, msg=stop_response.text)
 
+        items_response = self.client.get(f"/api/batch-tasks/{batch_task_id}/items")
+        self.assertEqual(items_response.status_code, 200, msg=items_response.text)
+        self.assertEqual(
+            [
+                (item["id"], item["status"], item["cancellation_reason"])
+                for item in items_response.json()
+            ],
+            [
+                (task_ids[0], "canceled", "batch_stopped"),
+                (task_ids[1], "canceled", "batch_stopped"),
+                (task_ids[2], "sent", None),
+            ],
+        )
+
         connection = sqlite3.connect(self.db_path)
         try:
             rows = connection.execute(

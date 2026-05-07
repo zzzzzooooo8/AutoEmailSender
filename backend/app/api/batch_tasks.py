@@ -423,6 +423,7 @@ def _serialize_batch_task_item(email_task: EmailTask) -> BatchTaskItemRead:
         professor_title=professor.title,
         professor_school=professor.school,
         status=email_task.status,
+        cancellation_reason=email_task.cancellation_reason,
         match_score=email_task.match_score,
         scheduled_at=email_task.scheduled_at,
         sent_at=email_task.sent_at,

@@ -540,6 +540,7 @@ export type WorkspaceTaskStatus =
   | 'canceled';
 
 export type WorkspaceTaskStatusLabelKey = WorkspaceTaskStatus;
+export type WorkspaceTaskCancellationReason = 'batch_stopped';
 
 export interface BatchTaskCardDTO {
   id: number;
@@ -576,6 +577,7 @@ export interface BatchTaskItemDTO {
   professor_title: string | null;
   professor_school: string | null;
   status: WorkspaceTaskStatus;
+  cancellation_reason?: WorkspaceTaskCancellationReason | null;
   match_score: number | null;
   scheduled_at: string | null;
   sent_at: string | null;
