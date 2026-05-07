@@ -9,6 +9,8 @@ const mockedUseSelectionContext = vi.hoisted(() => vi.fn());
 const mockedListProfessors = vi.hoisted(() => vi.fn());
 const mockedCreateBatchTask = vi.hoisted(() => vi.fn());
 const mockedConfirm = vi.hoisted(() => vi.fn());
+const mockedNotifyError = vi.hoisted(() => vi.fn());
+const mockedNotifyFormErrors = vi.hoisted(() => vi.fn());
 
 vi.mock("@/context/SelectionContext", () => ({
   useSelectionContext: mockedUseSelectionContext,
@@ -16,8 +18,8 @@ vi.mock("@/context/SelectionContext", () => ({
 
 vi.mock("@/context/NotificationContext", () => ({
   useNotification: () => ({
-    notifyError: vi.fn(),
-    notifyFormErrors: vi.fn(),
+    notifyError: mockedNotifyError,
+    notifyFormErrors: mockedNotifyFormErrors,
   }),
 }));
 
@@ -115,6 +117,8 @@ describe("CreateTaskPage copy", () => {
     mockedCreateBatchTask.mockResolvedValue({ id: 1 });
     mockedConfirm.mockReset();
     mockedConfirm.mockResolvedValue(true);
+    mockedNotifyError.mockReset();
+    mockedNotifyFormErrors.mockReset();
     mockedListProfessors.mockResolvedValue([professor]);
     mockedUseSelectionContext.mockReturnValue({
       selectedIdentityId: selectedIdentity.id,
@@ -153,7 +157,15 @@ describe("CreateTaskPage copy", () => {
   it("uses template-specific confirmation copy", async () => {
     renderPage();
 
-    const templateModeButton = await screen.findByRole("button", { name: /直接套用模板/ });
+    await screen.findByRole("heading", { name: "创建批量任务" });
+    await waitFor(() => {
+      expect(mockedListProfessors).toHaveBeenCalledTimes(1);
+    });
+    await mockedListProfessors.mock.results[0]?.value;
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /直接套用模板/ })).toBeInTheDocument();
+    });
+    const templateModeButton = screen.getByRole("button", { name: /直接套用模板/ });
     fireEvent.click(templateModeButton);
     fireEvent.click(await screen.findByRole("button", { name: "创建任务" }));
 
