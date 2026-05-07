@@ -4,7 +4,7 @@ import re
 from collections import Counter
 from datetime import UTC, datetime, time
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -251,13 +251,20 @@ async def list_batch_task_items(
 @router.post("/{task_id}/pause", response_model=BatchTaskActionResponse)
 async def pause_batch_task(
     task_id: int,
+    request: Request,
     session: AsyncSession = Depends(get_async_session),
 ) -> BatchTaskActionResponse:
     task = await _get_batch_task(session, task_id)
     task.status = BatchTaskStatus.PAUSED.value
     task.updated_at = datetime.now(UTC)
+    for email_task in task.email_tasks:
+        if email_task.status == EmailTaskStatus.GENERATING_DRAFT.value:
+            email_task.status = email_task.draft_generation_previous_status or EmailTaskStatus.DISCOVERED.value
+            email_task.draft_generation_previous_status = None
+            email_task.updated_at = datetime.now(UTC)
     await _record_batch_task_action(session, task, "batch_task.paused")
     await session.commit()
+    _cancel_running_batch_drafts(request, task_id)
     await session.refresh(task, attribute_names=["email_tasks"])
     return BatchTaskActionResponse(ok=True, task=_serialize_batch_task(task))
 
@@ -279,6 +286,7 @@ async def resume_batch_task(
 @router.post("/{task_id}/stop", response_model=BatchTaskActionResponse)
 async def stop_batch_task(
     task_id: int,
+    request: Request,
     session: AsyncSession = Depends(get_async_session),
 ) -> BatchTaskActionResponse:
     task = await _get_batch_task(session, task_id)
@@ -292,9 +300,11 @@ async def stop_batch_task(
         }:
             email_task.status = EmailTaskStatus.CANCELED.value
             email_task.cancellation_reason = EmailTaskCancellationReason.BATCH_STOPPED.value
+            email_task.draft_generation_previous_status = None
             email_task.updated_at = datetime.now(UTC)
     await _record_batch_task_action(session, task, "batch_task.stopped")
     await session.commit()
+    _cancel_running_batch_drafts(request, task_id)
     await session.refresh(task, attribute_names=["email_tasks"])
     return BatchTaskActionResponse(ok=True, task=_serialize_batch_task(task))
 
@@ -328,6 +338,12 @@ async def _record_batch_task_action(
             "llm_profile_id": task.llm_profile_id,
         },
     )
+
+
+def _cancel_running_batch_drafts(request: Request, task_id: int) -> None:
+    runtime_manager = getattr(request.app.state, "runtime_manager", None)
+    if runtime_manager is not None:
+        runtime_manager.cancel_batch_draft_generation(task_id)
 
 
 def _serialize_batch_task_item(email_task: EmailTask) -> BatchTaskItemRead:

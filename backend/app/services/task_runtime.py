@@ -261,16 +261,23 @@ async def generate_task_draft(
     *,
     force: bool,
     ignore_batch_status: bool = False,
+    automatic_batch: bool = False,
+    require_running_batch: bool = False,
 ) -> tuple[int, int, int]:
     async with session_factory() as session:
         task = await _load_email_task(session, task_id)
         if not task:
             raise ValueError(f"EmailTask {task_id} 不存在")
+        if task.status == EmailTaskStatus.GENERATING_DRAFT.value and not automatic_batch:
+            raise ValueError("草稿正在后台生成，请稍后刷新")
         if (
             task.batch_task
             and task.batch_task.status != BatchTaskStatus.RUNNING.value
             and not ignore_batch_status
         ):
+            if automatic_batch or require_running_batch:
+                _restore_or_cancel_interrupted_draft_generation(task)
+                await session.commit()
             return task.professor_id, task.identity_id, task.llm_profile_id
 
         batch_task = task.batch_task
@@ -371,15 +378,41 @@ async def generate_task_draft(
                         else None
                     ),
                 }
+                if require_running_batch and task.batch_task_id is not None:
+                    batch_status = await session.scalar(
+                        select(BatchTask.status).where(BatchTask.id == task.batch_task_id),
+                    )
+                    if batch_status != BatchTaskStatus.RUNNING.value:
+                        _restore_or_cancel_interrupted_draft_generation(task, batch_status=batch_status)
+                        await session.commit()
+                        return task.professor_id, task.identity_id, task.llm_profile_id
+        except asyncio.CancelledError:
+            if automatic_batch:
+                batch_status = (
+                    await session.scalar(select(BatchTask.status).where(BatchTask.id == task.batch_task_id))
+                    if task.batch_task_id is not None
+                    else None
+                )
+                _restore_or_cancel_interrupted_draft_generation(task, batch_status=batch_status)
+                await session.commit()
+            raise
         except llm_runtime.LLMRuntimeError as exc:
             task.last_error = str(exc)
+            if automatic_batch:
+                task.status = EmailTaskStatus.DRAFT_FAILED.value
+                task.draft_generation_previous_status = None
             task.updated_at = datetime.now(UTC)
             await session.commit()
             return task.professor_id, task.identity_id, task.llm_profile_id
         except ValueError as exc:
             task.last_error = str(exc)
+            if automatic_batch:
+                task.status = EmailTaskStatus.DRAFT_FAILED.value
+                task.draft_generation_previous_status = None
             task.updated_at = datetime.now(UTC)
             await session.commit()
+            if automatic_batch:
+                return task.professor_id, task.identity_id, task.llm_profile_id
             raise
 
         task.generated_subject = subject
@@ -388,6 +421,7 @@ async def generate_task_draft(
         if suggested_material_ids is not None:
             task.selected_material_ids = suggested_material_ids
         task.status = EmailTaskStatus.REVIEW_REQUIRED.value
+        task.draft_generation_previous_status = None
         task.updated_at = datetime.now(UTC)
         task.last_error = None
 
@@ -1272,6 +1306,21 @@ async def _record_email_task_log(
         entity_id=str(task.id),
         metadata=base_metadata,
     )
+
+
+def _restore_or_cancel_interrupted_draft_generation(
+    task: EmailTask,
+    *,
+    batch_status: str | None = None,
+) -> None:
+    resolved_batch_status = batch_status or (task.batch_task.status if task.batch_task else None)
+    if resolved_batch_status == BatchTaskStatus.PAUSED.value:
+        task.status = task.draft_generation_previous_status or EmailTaskStatus.DISCOVERED.value
+    else:
+        task.status = EmailTaskStatus.CANCELED.value
+        task.cancellation_reason = EmailTaskCancellationReason.BATCH_STOPPED.value
+    task.draft_generation_previous_status = None
+    task.updated_at = datetime.now(UTC)
 
 
 def _resolve_task_outreach_config(task: EmailTask):
