@@ -108,6 +108,7 @@ class CrawlJobRead(BaseModel):
     error_message: str | None
     created_at: datetime
     updated_at: datetime
+    deleted_at: datetime | None
 
     @model_validator(mode="after")
     def _normalize_read_start_urls(self) -> "CrawlJobRead":
