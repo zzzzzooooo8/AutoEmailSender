@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DiagnosticLogPanel } from "@/components/organisms/DiagnosticLogPanel";
 import {
@@ -201,6 +201,47 @@ describe("DiagnosticLogPanel", () => {
     expect(crawlJobWrapper).toHaveClass("flex-1");
     expect(crawlJobWrapper).toHaveClass("max-w-full");
     expect(crawlJobSelect).toHaveClass("min-w-0");
+  });
+
+  it("把诊断日志导出和抓取任务日志导出拆成两个明确区域", async () => {
+    render(<DiagnosticLogPanel />);
+    await expandPanel();
+
+    const diagnosticExportGroup = screen.getByRole("group", {
+      name: "诊断日志导出",
+    });
+    expect(
+      within(diagnosticExportGroup).getByRole("button", {
+        name: "导出诊断日志",
+      }),
+    ).toBeInTheDocument();
+    expect(within(diagnosticExportGroup).getByLabelText("导出日期")).toBeInTheDocument();
+    expect(within(diagnosticExportGroup).getByRole("button", { name: "Level" })).toBeInTheDocument();
+    expect(within(diagnosticExportGroup).getByRole("button", { name: "Category" })).toBeInTheDocument();
+    expect(
+      within(diagnosticExportGroup).queryByRole("button", {
+        name: "导出抓取日志",
+      }),
+    ).not.toBeInTheDocument();
+
+    const crawlerLogExportGroup = screen.getByRole("group", {
+      name: "抓取任务日志",
+    });
+    expect(
+      within(crawlerLogExportGroup).getByRole("button", {
+        name: "智能抓取任务",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(crawlerLogExportGroup).getByRole("button", {
+        name: "导出抓取日志",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(crawlerLogExportGroup).queryByRole("button", {
+        name: "导出诊断日志",
+      }),
+    ).not.toBeInTheDocument();
   });
 
   it("诊断过滤下拉菜单向上浮起展开，避免被折叠卡片裁剪", async () => {

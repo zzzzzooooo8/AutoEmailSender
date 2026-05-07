@@ -330,113 +330,149 @@ export const DiagnosticLogPanel = () => {
               <SummaryMetric label="导出日期" value={exportDate || "全部"} />
             </div>
 
-            <div className="mt-5 flex min-w-0 flex-wrap items-end gap-3">
-              <NativeSelectField
-                label="智能抓取任务"
-                ariaLabel="智能抓取任务"
-                wrapperClassName="min-w-0 max-w-full flex-1 basis-72"
-                shellClassName="h-10 min-w-0"
-                menuPlacement="floating-up"
-                value={selectedCrawlJobId}
-                onChange={(event) => setSelectedCrawlJobId(event.target.value)}
+            <div className="mt-5 space-y-5">
+              <div
+                role="group"
+                aria-labelledby="diagnostic-log-export-heading"
+                className="min-w-0 border-t border-stone-100 pt-5"
               >
-                <option value="">选择最近 50 次抓取任务</option>
-                {crawlJobs.map((job) => (
-                  <option key={job.id} value={String(job.id)}>
-                    {formatCrawlJobOption(job)}
-                  </option>
-                ))}
-              </NativeSelectField>
-              <label className="block min-w-0 max-w-48 flex-1 basis-40">
-                <span className="mb-2 block text-xs font-medium text-stone-500">
-                  导出日期
-                </span>
-                <input
-                  type="date"
-                  value={exportDate}
-                  onChange={(event) => setExportDate(event.target.value)}
-                  className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
-                />
-              </label>
-              <NativeSelectField
-                label="Level"
-                ariaLabel="Level"
-                wrapperClassName="min-w-0 max-w-48 flex-1 basis-36"
-                shellClassName="h-10 min-w-0"
-                menuPlacement="floating-up"
-                value={level}
-                onChange={(event) => setLevel(event.target.value)}
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h3
+                    id="diagnostic-log-export-heading"
+                    className="text-sm font-semibold text-stone-900"
+                  >
+                    诊断日志导出
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={handleRefresh}
+                    disabled={loadingBackendLogs}
+                    className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {loadingBackendLogs ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4" />
+                    )}
+                    刷新
+                  </button>
+                </div>
+                <div className="mt-3 flex min-w-0 flex-wrap items-end gap-3">
+                  <label className="block min-w-0 max-w-48 flex-1 basis-40">
+                    <span className="mb-2 block text-xs font-medium text-stone-500">
+                      导出日期
+                    </span>
+                    <input
+                      type="date"
+                      value={exportDate}
+                      onChange={(event) => setExportDate(event.target.value)}
+                      className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                    />
+                  </label>
+                  <NativeSelectField
+                    label="Level"
+                    ariaLabel="Level"
+                    wrapperClassName="min-w-0 max-w-48 flex-1 basis-36"
+                    shellClassName="h-10 min-w-0"
+                    menuPlacement="floating-up"
+                    value={level}
+                    onChange={(event) => setLevel(event.target.value)}
+                  >
+                    <option value="">全部</option>
+                    {levelOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </NativeSelectField>
+                  <NativeSelectField
+                    label="Category"
+                    ariaLabel="Category"
+                    wrapperClassName="min-w-0 max-w-56 flex-1 basis-44"
+                    shellClassName="h-10 min-w-0"
+                    menuPlacement="floating-up"
+                    value={category}
+                    onChange={(event) => setCategory(event.target.value)}
+                  >
+                    <option value="">全部</option>
+                    {categoryOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </NativeSelectField>
+                  <button
+                    type="button"
+                    onClick={() => void handleExport()}
+                    disabled={exporting}
+                    className="ui-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {exporting ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Download className="h-4 w-4" />
+                    )}
+                    导出诊断日志
+                  </button>
+                </div>
+              </div>
+
+              <div
+                role="group"
+                aria-labelledby="crawler-log-export-heading"
+                className="min-w-0 border-t border-stone-100 pt-5"
               >
-                <option value="">全部</option>
-                {levelOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </NativeSelectField>
-              <NativeSelectField
-                label="Category"
-                ariaLabel="Category"
-                wrapperClassName="min-w-0 max-w-56 flex-1 basis-44"
-                shellClassName="h-10 min-w-0"
-                menuPlacement="floating-up"
-                value={category}
-                onChange={(event) => setCategory(event.target.value)}
-              >
-                <option value="">全部</option>
-                {categoryOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </NativeSelectField>
-              <button
-                type="button"
-                onClick={handleRefresh}
-                disabled={loadingBackendLogs}
-                className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {loadingBackendLogs ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-4 w-4" />
-                )}
-                刷新
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleExport()}
-                disabled={exporting}
-                className="ui-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {exporting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Download className="h-4 w-4" />
-                )}
-                导出诊断日志
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleExportCrawlerLog()}
-                disabled={!selectedCrawlJobId || exportingCrawlerLog}
-                className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {exportingCrawlerLog ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Download className="h-4 w-4" />
-                )}
-                导出抓取日志
-              </button>
-              <button
-                type="button"
-                onClick={handleClearLocalLogs}
-                className="ui-btn-danger"
-              >
-                <Trash2 className="h-4 w-4" />
-                清空本地日志
-              </button>
+                <h3
+                  id="crawler-log-export-heading"
+                  className="text-sm font-semibold text-stone-900"
+                >
+                  抓取任务日志
+                </h3>
+                <div className="mt-3 flex min-w-0 flex-wrap items-end gap-3">
+                  <NativeSelectField
+                    label="智能抓取任务"
+                    ariaLabel="智能抓取任务"
+                    wrapperClassName="min-w-0 max-w-full flex-1 basis-72"
+                    shellClassName="h-10 min-w-0"
+                    menuPlacement="floating-up"
+                    value={selectedCrawlJobId}
+                    onChange={(event) =>
+                      setSelectedCrawlJobId(event.target.value)
+                    }
+                  >
+                    <option value="">选择最近 50 次抓取任务</option>
+                    {crawlJobs.map((job) => (
+                      <option key={job.id} value={String(job.id)}>
+                        {formatCrawlJobOption(job)}
+                      </option>
+                    ))}
+                  </NativeSelectField>
+                  <button
+                    type="button"
+                    onClick={() => void handleExportCrawlerLog()}
+                    disabled={!selectedCrawlJobId || exportingCrawlerLog}
+                    className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {exportingCrawlerLog ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Download className="h-4 w-4" />
+                    )}
+                    导出抓取日志
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex justify-end border-t border-stone-100 pt-5">
+                <button
+                  type="button"
+                  onClick={handleClearLocalLogs}
+                  className="ui-btn-danger"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  清空本地日志
+                </button>
+              </div>
             </div>
 
             {backendError ? (
