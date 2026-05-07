@@ -64,6 +64,11 @@ class AppSetting(Base):
         nullable=False,
         server_default=text("6000"),
     )
+    batch_draft_generation_concurrency: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("3"),
+    )
     draft_rewrite_intensity: Mapped[str] = mapped_column(
         String(32),
         nullable=False,

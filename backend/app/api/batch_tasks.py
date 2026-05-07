@@ -4,7 +4,7 @@ import re
 from collections import Counter
 from datetime import UTC, datetime, time
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -31,7 +31,9 @@ from app.services.batch_schedule import normalize_scheduled_dates
 from app.services.materials import material_can_be_primary
 from app.services.operation_logs import record_operation_log
 from app.services.outreach_templates import (
+    OUTREACH_GENERATION_MODE_TEMPLATE,
     get_outreach_template_defaults_validation_error,
+    render_outreach_template,
     resolve_outreach_template_config,
 )
 
@@ -170,6 +172,28 @@ async def create_batch_task(
     await session.flush()
 
     for professor in professors:
+        generated_subject = None
+        generated_body_text = None
+        generated_body_html = None
+        task_status = EmailTaskStatus.DISCOVERED.value
+        approved_at = None
+        if outreach_config.generation_mode == OUTREACH_GENERATION_MODE_TEMPLATE:
+            try:
+                rendered = render_outreach_template(
+                    identity,
+                    professor,
+                    subject_template=outreach_config.subject_template,
+                    body_text_template=outreach_config.body_text_template,
+                    body_html_template=outreach_config.body_html_template,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            generated_subject = rendered.subject
+            generated_body_text = rendered.body_text
+            generated_body_html = rendered.body_html
+            task_status = EmailTaskStatus.APPROVED.value
+            approved_at = datetime.now(UTC)
+
         session.add(
             EmailTask(
                 source=EmailTaskSource.BATCH.value,
@@ -182,7 +206,14 @@ async def create_batch_task(
                 outreach_template_subject=_normalize_nullable_text(outreach_config.subject_template),
                 outreach_template_body_text=_normalize_nullable_text(outreach_config.body_text_template),
                 outreach_template_body_html=_normalize_nullable_text(outreach_config.body_html_template),
-                status=EmailTaskStatus.DISCOVERED.value,
+                status=task_status,
+                generated_subject=generated_subject,
+                generated_content_text=generated_body_text,
+                generated_content_html=generated_body_html,
+                approved_subject=generated_subject,
+                approved_body_text=generated_body_text,
+                approved_body_html=generated_body_html,
+                approved_at=approved_at,
                 selected_material_ids=selected_material_ids,
             ),
         )
@@ -227,13 +258,20 @@ async def list_batch_task_items(
 @router.post("/{task_id}/pause", response_model=BatchTaskActionResponse)
 async def pause_batch_task(
     task_id: int,
+    request: Request,
     session: AsyncSession = Depends(get_async_session),
 ) -> BatchTaskActionResponse:
     task = await _get_batch_task(session, task_id)
     task.status = BatchTaskStatus.PAUSED.value
     task.updated_at = datetime.now(UTC)
+    for email_task in task.email_tasks:
+        if email_task.status == EmailTaskStatus.GENERATING_DRAFT.value:
+            email_task.status = email_task.draft_generation_previous_status or EmailTaskStatus.DISCOVERED.value
+            email_task.draft_generation_previous_status = None
+            email_task.updated_at = datetime.now(UTC)
     await _record_batch_task_action(session, task, "batch_task.paused")
     await session.commit()
+    _cancel_running_batch_drafts(request, task_id)
     await session.refresh(task, attribute_names=["email_tasks"])
     return BatchTaskActionResponse(ok=True, task=_serialize_batch_task(task))
 
@@ -255,6 +293,7 @@ async def resume_batch_task(
 @router.post("/{task_id}/stop", response_model=BatchTaskActionResponse)
 async def stop_batch_task(
     task_id: int,
+    request: Request,
     session: AsyncSession = Depends(get_async_session),
 ) -> BatchTaskActionResponse:
     task = await _get_batch_task(session, task_id)
@@ -268,9 +307,11 @@ async def stop_batch_task(
         }:
             email_task.status = EmailTaskStatus.CANCELED.value
             email_task.cancellation_reason = EmailTaskCancellationReason.BATCH_STOPPED.value
+            email_task.draft_generation_previous_status = None
             email_task.updated_at = datetime.now(UTC)
     await _record_batch_task_action(session, task, "batch_task.stopped")
     await session.commit()
+    _cancel_running_batch_drafts(request, task_id)
     await session.refresh(task, attribute_names=["email_tasks"])
     return BatchTaskActionResponse(ok=True, task=_serialize_batch_task(task))
 
@@ -366,6 +407,12 @@ async def _record_batch_task_action(
     )
 
 
+def _cancel_running_batch_drafts(request: Request, task_id: int) -> None:
+    runtime_manager = getattr(request.app.state, "runtime_manager", None)
+    if runtime_manager is not None:
+        runtime_manager.cancel_batch_draft_generation(task_id)
+
+
 def _serialize_batch_task_item(email_task: EmailTask) -> BatchTaskItemRead:
     professor = email_task.professor
     return BatchTaskItemRead(
@@ -428,6 +475,8 @@ def _serialize_batch_task(task: BatchTask) -> BatchTaskCardRead:
         identity_id=task.identity_id,
         llm_profile_id=task.llm_profile_id,
         pending_generation_count=pending_generation_count,
+        generating_draft_count=status_counter.get(EmailTaskStatus.GENERATING_DRAFT.value, 0),
+        draft_failed_count=status_counter.get(EmailTaskStatus.DRAFT_FAILED.value, 0),
         review_required_count=status_counter.get(EmailTaskStatus.REVIEW_REQUIRED.value, 0),
         scheduled_count=status_counter.get(EmailTaskStatus.SCHEDULED.value, 0),
         sent_count=status_counter.get(EmailTaskStatus.SENT.value, 0),

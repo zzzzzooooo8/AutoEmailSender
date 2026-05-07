@@ -33,6 +33,14 @@ SENSITIVE_KEYS = {
     "requestbody",
     "responsebody",
 }
+TOKEN_USAGE_KEYS = {
+    "cachedtokens",
+    "completiontokens",
+    "inputtokens",
+    "outputtokens",
+    "prompttokens",
+    "totaltokens",
+}
 MAX_STRING_LENGTH = 1000
 MAX_DEPTH = 10
 REDACTED = "[REDACTED]"
@@ -154,6 +162,8 @@ def _to_jsonable(value: object, *, seen: set[int], depth: int) -> object:
 
 def _is_sensitive_key(key: str) -> bool:
     normalized = "".join(char for char in key.lower() if char.isalnum())
+    if normalized in TOKEN_USAGE_KEYS:
+        return False
     return normalized in SENSITIVE_KEYS or any(part in normalized for part in SENSITIVE_KEY_PARTS)
 
 

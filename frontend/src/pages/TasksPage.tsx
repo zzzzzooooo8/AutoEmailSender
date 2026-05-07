@@ -127,6 +127,8 @@ const CRAWL_CANDIDATE_REVIEW_STATUS_TONES: Record<
 const BATCH_ITEM_STATUS_TONES: Record<WorkspaceTaskStatus, string> = {
   discovered: "bg-stone-100 text-stone-700",
   matched: "bg-sky-50 text-sky-700",
+  generating_draft: "bg-sky-50 text-sky-700",
+  draft_failed: "bg-red-50 text-red-700",
   review_required: "bg-amber-50 text-amber-700",
   approved: "bg-primary/10 text-primary",
   scheduled: "bg-indigo-50 text-indigo-700",
@@ -667,7 +669,8 @@ export const TasksPage = () => {
   const batchAttentionCount = useMemo(
     () =>
       currentBatchTasks.reduce(
-        (total, task) => total + task.review_required_count + task.failed_count,
+        (total, task) =>
+          total + task.review_required_count + task.draft_failed_count + task.failed_count,
         0,
       ),
     [currentBatchTasks],
@@ -714,9 +717,20 @@ export const TasksPage = () => {
         (item) =>
           item.status !== "sent" &&
           item.status !== "reply_detected" &&
+          item.status !== "generating_draft" &&
+          item.status !== "draft_failed" &&
           item.status !== "send_failed" &&
           item.status !== "canceled",
       ),
+    [selectedBatchTaskItems],
+  );
+  const generatingDraftBatchTaskItems = useMemo(
+    () =>
+      selectedBatchTaskItems.filter((item) => item.status === "generating_draft"),
+    [selectedBatchTaskItems],
+  );
+  const draftFailedBatchTaskItems = useMemo(
+    () => selectedBatchTaskItems.filter((item) => item.status === "draft_failed"),
     [selectedBatchTaskItems],
   );
   const failedBatchTaskItems = useMemo(
@@ -1991,6 +2005,16 @@ export const TasksPage = () => {
                       <span className="rounded-full bg-stone-50 px-2.5 py-1 text-xs text-stone-600">
                         待生成 {task.pending_generation_count}
                       </span>
+                      {task.generating_draft_count > 0 ? (
+                        <span className="rounded-full bg-sky-50 px-2.5 py-1 text-xs text-sky-700">
+                          生成中 {task.generating_draft_count}
+                        </span>
+                      ) : null}
+                      {task.draft_failed_count > 0 ? (
+                        <span className="rounded-full bg-red-50 px-2.5 py-1 text-xs text-red-700">
+                          草稿失败 {task.draft_failed_count}
+                        </span>
+                      ) : null}
                       <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-700">
                         待审核 {task.review_required_count}
                       </span>
@@ -2461,6 +2485,75 @@ export const TasksPage = () => {
                   )}
                 </div>
               </section>
+
+              {generatingDraftBatchTaskItems.length > 0 ? (
+                <section className="mt-6">
+                  <h3 className="text-sm font-semibold text-stone-900">
+                    正在生成草稿
+                  </h3>
+                  <div className="mt-3 space-y-2">
+                    {generatingDraftBatchTaskItems.map((item) => (
+                      <div
+                        key={item.id}
+                        className="rounded-2xl border border-sky-100 bg-sky-50/50 px-4 py-3"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-stone-900">
+                              {item.professor_name}
+                            </p>
+                            <p className="mt-1 text-xs text-stone-500">
+                              {[
+                                item.professor_title,
+                                item.professor_school,
+                                item.professor_email,
+                              ]
+                                .filter(Boolean)
+                                .join(" / ") || "暂无补充信息"}
+                            </p>
+                          </div>
+                          <span className="rounded-full bg-sky-100 px-2.5 py-1 text-xs text-sky-700">
+                            {PROFESSOR_STATUS_LABELS[item.status]}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+
+              {draftFailedBatchTaskItems.length > 0 ? (
+                <section className="mt-6">
+                  <h3 className="text-sm font-semibold text-stone-900">
+                    草稿生成失败
+                  </h3>
+                  <div className="mt-3 space-y-2">
+                    {draftFailedBatchTaskItems.map((item) => (
+                      <div
+                        key={item.id}
+                        className="rounded-2xl border border-red-100 bg-red-50/60 px-4 py-3"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-stone-900">
+                              {item.professor_name}
+                            </p>
+                            <p className="mt-1 text-xs text-red-700">
+                              {item.last_error || "暂无失败原因"}
+                            </p>
+                          </div>
+                          <Link
+                            to={`/workspace/${item.professor_id}`}
+                            className="text-xs font-medium text-primary"
+                          >
+                            查看并处理
+                          </Link>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
 
               {failedBatchTaskItems.length > 0 ? (
                 <section className="mt-6">

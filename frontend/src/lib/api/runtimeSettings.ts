@@ -15,6 +15,7 @@ export interface RuntimeSettingsDTO {
   crawler_profile_enrichment_concurrency: number;
   crawler_host_concurrency: number;
   draft_max_tokens: number;
+  batch_draft_generation_concurrency: number;
   draft_rewrite_intensity: DraftRewriteIntensity;
   draft_rewrite_tone: DraftRewriteTone;
   draft_rewrite_formality: DraftRewriteFormality;

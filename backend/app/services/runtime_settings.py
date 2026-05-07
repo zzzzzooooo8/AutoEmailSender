@@ -19,6 +19,7 @@ def serialize_runtime_settings(settings: AppSetting) -> RuntimeSettingsRead:
         crawler_profile_enrichment_concurrency=settings.crawler_profile_enrichment_concurrency,
         crawler_host_concurrency=settings.crawler_host_concurrency,
         draft_max_tokens=settings.draft_max_tokens,
+        batch_draft_generation_concurrency=settings.batch_draft_generation_concurrency,
         draft_rewrite_intensity=settings.draft_rewrite_intensity,
         draft_rewrite_tone=settings.draft_rewrite_tone,
         draft_rewrite_formality=settings.draft_rewrite_formality,

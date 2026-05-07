@@ -7,6 +7,10 @@ from collections.abc import Awaitable, Callable
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import get_settings
+from app.services.batch_draft_generation_runtime import (
+    BatchDraftGenerationCoordinator,
+    run_queued_batch_drafts_once,
+)
 from app.services.crawl_job_runtime import run_queued_crawl_jobs_once
 from app.services.match_analysis_job_runtime import run_queued_match_analysis_jobs_once
 from app.services.runtime_settings import get_runtime_settings
@@ -24,6 +28,7 @@ class RuntimeManager:
         self._session_factory = session_factory
         self._tasks: list[asyncio.Task[None]] = []
         self._stopped = asyncio.Event()
+        self._batch_draft_coordinator = BatchDraftGenerationCoordinator()
 
     async def start(self) -> None:
         if self._tasks:
@@ -50,6 +55,16 @@ class RuntimeManager:
             )
             for index in range(1, settings.match_analysis_job_worker_count + 1)
         ]
+
+        async def run_batch_draft_worker(session_factory: async_sessionmaker[AsyncSession]) -> int:
+            async with session_factory() as session:
+                runtime_settings = await get_runtime_settings(session)
+            return await run_queued_batch_drafts_once(
+                session_factory,
+                concurrency=runtime_settings.batch_draft_generation_concurrency,
+                coordinator=self._batch_draft_coordinator,
+            )
+
         self._tasks = [
             asyncio.create_task(
                 self._loop(
@@ -65,6 +80,13 @@ class RuntimeManager:
                     poll_for_replies_once,
                 ),
             ),
+            asyncio.create_task(
+                self._loop(
+                    "batch-draft-worker",
+                    settings.dispatcher_interval_seconds,
+                    run_batch_draft_worker,
+                ),
+            ),
             *match_analysis_tasks,
             *crawler_tasks,
         ]
@@ -77,6 +99,9 @@ class RuntimeManager:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
+
+    def cancel_batch_draft_generation(self, batch_task_id: int) -> None:
+        self._batch_draft_coordinator.cancel_batch(batch_task_id)
 
     async def _loop(
         self,

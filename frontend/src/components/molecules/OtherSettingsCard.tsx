@@ -41,6 +41,13 @@ const numberFields: Array<{
     max: 20,
   },
   {
+    key: "batch_draft_generation_concurrency",
+    label: "批量邮件 LLM 草稿并发数",
+    hint: "后台批量生成 AI 草稿时同时执行的 LLM 请求数量，保存后下一轮任务生效。",
+    min: 1,
+    max: 20,
+  },
+  {
     key: "match_analysis_job_interval_seconds",
     label: "批量匹配轮询间隔",
     hint: "后端检查待处理批量匹配任务的间隔秒数。",
@@ -188,9 +195,10 @@ export function OtherSettingsCard() {
     const matchConcurrency = form.match_analysis_job_item_concurrency || "3";
     const crawlConcurrency = form.crawler_profile_enrichment_concurrency || "3";
     const draftMaxTokens = form.draft_max_tokens || "6000";
+    const draftConcurrency = form.batch_draft_generation_concurrency || "3";
     const draftMode =
       getPreferenceOptionLabel("draft_rewrite_intensity", form.draft_rewrite_intensity) || "默认";
-    return `草稿 ${draftMaxTokens} / 偏好 ${draftMode} / 匹配 ${matchConcurrency} / 抓取 ${crawlConcurrency}`;
+    return `草稿 ${draftMaxTokens} / 草稿并发 ${draftConcurrency} / 偏好 ${draftMode} / 匹配 ${matchConcurrency} / 抓取 ${crawlConcurrency}`;
   }, [form]);
   const draftPreview = useMemo(() => buildDraftPreferencePreview(form), [form]);
 
