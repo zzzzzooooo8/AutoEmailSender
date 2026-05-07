@@ -5,6 +5,7 @@ import {
   estimateRemainingSeconds,
   formatByteSize,
   formatDownloadProgress,
+  normalizeReleaseNotes,
   shouldOfferFullDownload,
 } from "../src/updates.js";
 
@@ -98,5 +99,24 @@ describe("update helpers", () => {
     expect(source).toContain("clearStaleUpdateCache");
     expect(source).toContain('app.getPath("userData")');
     expect(source).toContain("updates");
+  });
+
+  it("normalizes electron-updater release notes into markdown text", () => {
+    expect(normalizeReleaseNotes("## 更新内容\n\n- 修复问题")).toBe("## 更新内容\n\n- 修复问题");
+    expect(
+      normalizeReleaseNotes([
+        { version: "2.1.6", note: "- 修复公告弹窗高度" },
+        { version: "2.1.5", note: "- 优化更新下载" },
+      ]),
+    ).toBe("## v2.1.6\n\n- 修复公告弹窗高度\n\n## v2.1.5\n\n- 优化更新下载");
+    expect(normalizeReleaseNotes(undefined)).toBeUndefined();
+  });
+
+  it("adds release notes to the available update status", () => {
+    const source = readFileSync(path.resolve("src", "updates.ts"), "utf8");
+    const types = readFileSync(path.resolve("src", "types.ts"), "utf8");
+
+    expect(types).toContain("releaseNotes?: string");
+    expect(source).toContain("releaseNotes: normalizeReleaseNotes(info.releaseNotes)");
   });
 });

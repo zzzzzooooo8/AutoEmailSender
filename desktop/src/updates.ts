@@ -26,6 +26,11 @@ type DownloadStatusPayload = {
   nextVersion: string;
 } & UpdateDownloadProgress;
 
+type ElectronReleaseNote = {
+  version?: string | null;
+  note?: string | null;
+};
+
 export function formatDownloadProgress(percent: number): number {
   return Math.round(percent * 10) / 10;
 }
@@ -62,6 +67,32 @@ export function shouldOfferFullDownload(input: {
     input.remainingSeconds !== null &&
     input.remainingSeconds > SLOW_REMAINING_SECONDS
   );
+}
+
+export function normalizeReleaseNotes(
+  releaseNotes: string | ElectronReleaseNote[] | null | undefined,
+): string | undefined {
+  if (typeof releaseNotes === "string") {
+    const trimmed = releaseNotes.trim();
+    return trimmed ? trimmed : undefined;
+  }
+
+  if (!Array.isArray(releaseNotes)) {
+    return undefined;
+  }
+
+  const sections = releaseNotes
+    .map((entry) => {
+      const note = entry.note?.trim();
+      if (!note) {
+        return "";
+      }
+      const version = entry.version?.trim();
+      return version ? `## v${version.replace(/^v/, "")}\n\n${note}` : note;
+    })
+    .filter(Boolean);
+
+  return sections.length ? sections.join("\n\n") : undefined;
 }
 
 export function buildProgressStatus(progress: {
@@ -155,6 +186,7 @@ export function registerUpdateIpc(getWindow: () => BrowserWindow | null): void {
       version: app.getVersion(),
       nextVersion: info.version,
       fullDownloadBytes: activeFullDownloadBytes,
+      releaseNotes: normalizeReleaseNotes(info.releaseNotes),
     });
   });
   autoUpdater.on("update-not-available", () =>
