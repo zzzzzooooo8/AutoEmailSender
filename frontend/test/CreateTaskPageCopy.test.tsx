@@ -144,6 +144,23 @@ describe("CreateTaskPage copy", () => {
       expect(mockedConfirm).toHaveBeenCalledWith(
         expect.objectContaining({
           title: "确认创建真实发送任务？",
+          description: expect.stringMatching(/生成草稿并人工审核/),
+        }),
+      );
+    });
+  });
+
+  it("uses template-specific confirmation copy", async () => {
+    renderPage();
+
+    const templateModeButton = await screen.findByRole("button", { name: /直接套用模板/ });
+    fireEvent.click(templateModeButton);
+    fireEvent.click(await screen.findByRole("button", { name: "创建任务" }));
+
+    await waitFor(() => {
+      expect(mockedConfirm).toHaveBeenCalledWith(
+        expect.objectContaining({
+          description: expect.stringMatching(/直接套用模板.*创建后会按立即发送策略发送/),
         }),
       );
     });

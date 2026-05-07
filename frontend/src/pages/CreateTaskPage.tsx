@@ -202,12 +202,18 @@ export const CreateTaskPage = () => {
       return;
     }
 
+    const confirmDescription =
+      taskMode === 'template'
+        ? scheduleType === 'scheduled'
+          ? '将直接套用模板生成可发送内容，创建后会按定时发送策略发送。'
+          : '将直接套用模板生成可发送内容，创建后会按立即发送策略发送。'
+        : scheduleType === 'scheduled'
+          ? '将创建批量任务，后台生成草稿并人工审核后，再按定时发送策略发送。'
+          : '将创建批量任务，后台生成草稿并人工审核后，再手动确认发送。';
+
     const confirmed = await confirm({
       title: scheduleType === 'scheduled' ? '确认创建定时批量发送任务？' : '确认创建真实发送任务？',
-      description:
-        scheduleType === 'scheduled'
-          ? '将创建自动定时发送任务。'
-          : '创建后需在工作区审核并发送。',
+      description: confirmDescription,
       confirmLabel: '继续创建',
       cancelLabel: '再检查一下',
       tone: 'danger',

@@ -60,8 +60,8 @@ const runningTask = {
   identity_id: 1,
   llm_profile_id: 2,
   pending_generation_count: 2,
-  generating_draft_count: 0,
-  draft_failed_count: 0,
+  generating_draft_count: 1,
+  draft_failed_count: 1,
   review_required_count: 1,
   scheduled_count: 3,
   sent_count: 4,
@@ -109,6 +109,40 @@ const pendingTaskItem = {
   last_error: null,
   is_replied: false,
   updated_at: "2026-04-26T11:20:00Z",
+} as const;
+
+const generatingDraftTaskItem = {
+  id: 33,
+  professor_id: 103,
+  professor_name: "赵老师",
+  professor_email: "zhao@example.edu",
+  professor_title: "助理教授",
+  professor_school: "人工智能学院",
+  status: "generating_draft",
+  match_score: 82,
+  scheduled_at: null,
+  sent_at: null,
+  last_send_attempt_at: null,
+  last_error: null,
+  is_replied: false,
+  updated_at: "2026-04-26T11:25:00Z",
+} as const;
+
+const draftFailedTaskItem = {
+  id: 34,
+  professor_id: 104,
+  professor_name: "陈老师",
+  professor_email: "chen@example.edu",
+  professor_title: "教授",
+  professor_school: "自动化学院",
+  status: "draft_failed",
+  match_score: 79,
+  scheduled_at: null,
+  sent_at: null,
+  last_send_attempt_at: null,
+  last_error: "LLM 请求失败",
+  is_replied: false,
+  updated_at: "2026-04-26T11:26:00Z",
 } as const;
 
 describe("TasksPage layout", () => {
@@ -180,9 +214,17 @@ describe("TasksPage layout", () => {
 
   it("opens batch task details from the single-column task list", async () => {
     vi.mocked(listBatchTasks).mockResolvedValue([runningTask]);
-    vi.mocked(listBatchTaskItems).mockResolvedValue([sentTaskItem, pendingTaskItem]);
+    vi.mocked(listBatchTaskItems).mockResolvedValue([
+      sentTaskItem,
+      pendingTaskItem,
+      generatingDraftTaskItem,
+      draftFailedTaskItem,
+    ]);
 
     renderPage();
+
+    expect(await screen.findByText("生成中 1")).toBeInTheDocument();
+    expect(screen.getByText("草稿失败 1")).toBeInTheDocument();
 
     const detailButton = await screen.findByRole("button", { name: "查看详情" });
     fireEvent.click(detailButton);
@@ -196,6 +238,10 @@ describe("TasksPage layout", () => {
     expect(within(dialog).getByText("王老师")).toBeInTheDocument();
     expect(within(dialog).getByText("还未发送给")).toBeInTheDocument();
     expect(within(dialog).getByText("李老师")).toBeInTheDocument();
+    expect(within(dialog).getByRole("heading", { name: "正在生成草稿" })).toBeInTheDocument();
+    expect(within(dialog).getByText("赵老师")).toBeInTheDocument();
+    expect(within(dialog).getByRole("heading", { name: "草稿生成失败" })).toBeInTheDocument();
+    expect(within(dialog).getByText("LLM 请求失败")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "关闭" }));
 

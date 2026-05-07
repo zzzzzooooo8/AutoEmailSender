@@ -49,12 +49,16 @@ describe("OtherSettingsCard", () => {
     fireEvent.click(screen.getByRole("button", { name: /其他设置/ }));
     expect(await screen.findByLabelText("批量匹配分析并发数")).toHaveValue(3);
     expect(screen.getByLabelText("AI 草稿输出 token 上限")).toHaveValue(6000);
+    expect(screen.getByLabelText("批量邮件 LLM 草稿并发数")).toHaveValue(3);
 
     fireEvent.change(screen.getByLabelText("批量匹配分析并发数"), {
       target: { value: "4" },
     });
     fireEvent.change(screen.getByLabelText("AI 草稿输出 token 上限"), {
       target: { value: "4800" },
+    });
+    fireEvent.change(screen.getByLabelText("批量邮件 LLM 草稿并发数"), {
+      target: { value: "6" },
     });
     fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
 
@@ -63,6 +67,7 @@ describe("OtherSettingsCard", () => {
         expect.objectContaining({
           match_analysis_job_item_concurrency: 4,
           draft_max_tokens: 4800,
+          batch_draft_generation_concurrency: 6,
         }),
       );
     });
@@ -70,6 +75,7 @@ describe("OtherSettingsCard", () => {
       expect(screen.getByRole("button", { name: "保存设置" })).toBeEnabled();
     });
     expect(screen.getByLabelText("批量匹配分析并发数")).toHaveValue(4);
+    expect(screen.getByLabelText("批量邮件 LLM 草稿并发数")).toHaveValue(6);
   });
 
   it("loads saves and resets draft rewrite preferences", async () => {
