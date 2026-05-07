@@ -1268,7 +1268,6 @@ def build_draft_prompt(
         8. 必须围绕导师研究方向进行个性化改写，研究方向来自“导师信息 - 研究方向”。
         9. 按上面的改写幅度要求控制改动大小，同时尽量保留可表达的富文本标记，例如加粗、斜体、链接和列表。
         10. 如果模板包含表格，保留表格中的信息顺序和语义，但不要输出 schema 不支持的表格节点。
-        11. 如果提供了套磁信模板正文 HTML，优先参考其中的富文本标记；将 HTML 中的 strong/b 标签转换为 rich_body 的 strong 节点，em/i 转换为 emphasis，a 转换为 link，ul/ol 转换为列表节点，不要把 HTML 原样放进 text。
         """,
         current_match=current_match,
     )
@@ -1511,7 +1510,6 @@ def _build_base_generation_prompt(
 
         套磁信模板主题：{custom_subject or "无"}
         套磁信模板正文：{custom_body or "无"}
-        套磁信模板正文 HTML（如有，用于保留加粗、斜体、链接、列表等格式）：{custom_body_html or "无"}
         {current_match_block}
 
         {dedent(extra_requirements).strip()}

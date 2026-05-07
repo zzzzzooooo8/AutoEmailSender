@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from unittest.mock import patch
 
@@ -9,6 +10,7 @@ from app.services.llm_runtime import (
     build_match_prompt_parts,
     build_draft_prompt,
     build_draft_rewrite_preferences,
+    build_template_run_rewrite_prompt,
     DraftRewritePreferences,
     estimate_template_run_draft_tokens,
     fetch_llm_profile_models,
@@ -743,8 +745,9 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("加粗", prompt)
         self.assertIn("链接", prompt)
 
-    def test_build_draft_prompt_includes_template_html_for_format_preservation(self) -> None:
+    def test_build_template_run_rewrite_prompt_sends_runs_without_template_html(self) -> None:
         from app.models import IdentityMaterial, IdentityProfile, Professor
+        from app.services.template_run_rewrite import build_template_run_document
 
         identity = IdentityProfile(
             name="张三",
@@ -773,21 +776,26 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
             school="Computer Science",
             research_direction="Information Extraction",
         )
+        document = build_template_run_document(
+            "<p>老师您好，我来自 <strong>Example University</strong>。</p>",
+        )
 
-        prompt = build_draft_prompt(
+        prompt = build_template_run_rewrite_prompt(
             identity=identity,
             primary_material=primary_material,
             professor=professor,
             available_materials=[primary_material],
-            custom_subject="申请与{{name}}老师交流",
-            custom_body="老师您好，我来自 Example University。",
-            custom_body_html="<p>老师您好，我来自 <strong>Example University</strong>。</p>",
+            subject_template="申请与{{name}}老师交流",
+            template_document=document,
             current_match=None,
+            rewrite_preferences=None,
         )
 
-        self.assertIn("套磁信模板正文 HTML", prompt)
-        self.assertIn("<strong>Example University</strong>", prompt)
-        self.assertIn("将 HTML 中的 strong/b 标签转换为 rich_body 的 strong 节点", prompt)
+        payload = json.loads(prompt)
+        self.assertIn("body_segments", payload)
+        self.assertEqual(payload["body_segments"][0]["runs"][1]["marks"], ["strong"])
+        self.assertNotIn("<strong>Example University</strong>", prompt)
+        self.assertNotIn("套磁信模板正文 HTML", prompt)
 
     def test_build_draft_prompt_uses_dynamic_rewrite_constraints_for_strong_preferences(self) -> None:
         from app.models import IdentityMaterial, IdentityProfile, Professor
