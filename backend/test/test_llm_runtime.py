@@ -312,6 +312,94 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["max_tokens"], 4800)
         self.assertEqual(result.result.suggested_material_ids, [7])
 
+    async def test_generate_draft_content_sends_template_runs_without_full_html(self) -> None:
+        from app.models import IdentityMaterial, IdentityProfile, Professor
+
+        identity = IdentityProfile(
+            id=3,
+            name="张三",
+            email_address="sender@example.com",
+            smtp_host="smtp.example.com",
+            smtp_port=465,
+            smtp_username="sender@example.com",
+            smtp_password="secret",
+            default_language="zh-CN",
+            outreach_generation_mode="llm",
+        )
+        primary_material = IdentityMaterial(
+            id=7,
+            identity_id=3,
+            display_name="简历",
+            file_path="data/materials/resume.txt",
+            original_filename="resume.txt",
+            material_type="resume",
+            extracted_text="我做过医学 NLP 和信息抽取项目。",
+        )
+        profile = LLMProfile(
+            id=5,
+            name="openai",
+            provider="openai",
+            api_base_url=None,
+            api_key="test-key",
+            model_name="gpt-test",
+        )
+        professor = Professor(
+            name="李老师",
+            email="prof@example.edu",
+            title="Professor",
+            university="Example University",
+            school="Computer Science",
+            research_direction="Information Extraction",
+        )
+        calls: list[tuple[str, dict[str, object] | None]] = []
+        responses = [
+            _FakeResponse(
+                status_code=200,
+                payload={
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    '{"subject":"申请交流","replacements":['
+                                    '{"segment_id":"seg_1","runs":[{"run_id":"run_1","text":"[[PH_1]]老师，您好："}]},'
+                                    '{"segment_id":"seg_2","runs":[{"run_id":"run_1","text":"我近期关注到您在 "},'
+                                    '{"run_id":"run_2","text":"[[PH_2]]"},'
+                                    '{"run_id":"run_3","text":" 方向的研究。"}]}'
+                                    '],"suggested_material_ids":[7]}'
+                                ),
+                            },
+                        },
+                    ],
+                },
+            ),
+        ]
+
+        with patch(
+            "app.services.llm_runtime.httpx.AsyncClient",
+            side_effect=lambda *args, **kwargs: _FakeAsyncClient(responses, calls),
+        ):
+            result = await generate_draft_content(
+                identity=identity,
+                primary_material=primary_material,
+                llm_profile=profile,
+                professor=professor,
+                available_materials=[primary_material],
+                custom_subject="申请与{{name}}老师交流",
+                custom_body="{{name}}老师，您好：\n我对您的 {{research_direction}} 方向很感兴趣。",
+                custom_body_html=(
+                    '<p style="font-family:SimSun">{{name}}老师，您好：</p>'
+                    '<p>我对您的 <strong>{{research_direction}}</strong> 方向很感兴趣。</p>'
+                ),
+                max_tokens=4800,
+            )
+
+        prompt = calls[0][1]["messages"][1]["content"]
+        self.assertIn("body_segments", prompt)
+        self.assertNotIn("<p style=", prompt)
+        self.assertNotIn("套磁信模板正文 HTML", prompt)
+        self.assertIn('style="font-family:SimSun"', result.result.body_html)
+        self.assertIn("<strong>{{research_direction}}</strong>", result.result.body_html)
+
     def test_match_only_prompt_includes_explicit_score_rubric(self) -> None:
         from app.services.llm_runtime import SYSTEM_MATCH_ONLY_PROMPT
 
