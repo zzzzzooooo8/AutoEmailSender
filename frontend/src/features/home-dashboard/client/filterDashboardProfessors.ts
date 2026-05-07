@@ -42,15 +42,24 @@ const addNonEmpty = (set: Set<string>, value: string | null | undefined) => {
 
 export const buildDashboardFilterOptions = (
   professors: ProfessorDashboardItemDTO[],
+  filters: Pick<DashboardFilterState, "universities"> = {
+    universities: [],
+  },
 ): DashboardFilterOptions => {
   const universities = new Set<string>();
   const schools = new Set<string>();
   const departments = new Set<string>();
   const titles = new Set<string>();
+  const selectedUniversities = filters.universities;
 
   professors.forEach((professor) => {
     addNonEmpty(universities, professor.university);
-    addNonEmpty(schools, professor.school);
+    if (
+      selectedUniversities.length === 0 ||
+      selectedUniversities.includes(professor.university ?? "")
+    ) {
+      addNonEmpty(schools, professor.school);
+    }
     addNonEmpty(departments, professor.department);
     addNonEmpty(titles, professor.title);
   });

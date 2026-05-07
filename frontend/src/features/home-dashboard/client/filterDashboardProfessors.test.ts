@@ -130,6 +130,15 @@ describe("filterDashboardProfessors", () => {
     expect(options.titles).toEqual(["副教授", "教授", "助理教授"]);
   });
 
+  it("limits school options to the selected universities", () => {
+    const options = buildDashboardFilterOptions(professors, {
+      ...createDefaultDashboardFilters(),
+      universities: ["MIT"],
+    });
+
+    expect(options.schools).toEqual(["AI Institute", "School of Engineering"]);
+  });
+
   it("counts active advanced filters", () => {
     expect(
       getActiveDashboardFilterCount({

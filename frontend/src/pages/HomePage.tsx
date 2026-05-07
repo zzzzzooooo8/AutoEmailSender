@@ -229,7 +229,7 @@ export const HomePage = () => {
     void loadProfessors();
   }, [loadProfessors]);
 
-  const filterOptions = buildDashboardFilterOptions(professors);
+  const filterOptions = buildDashboardFilterOptions(professors, filters);
   const activeAdvancedFilterCount = getActiveDashboardFilterCount(filters);
   const selectedStatusLabels = filters.statuses.map((item) =>
     getProfessorDashboardStatusLabel(item),
@@ -237,6 +237,20 @@ export const HomePage = () => {
 
   const updateFilters = (nextFilters: Partial<DashboardFilterState>) => {
     setFilters((previous) => ({ ...previous, ...nextFilters }));
+  };
+
+  const keepSchoolsForUniversities = (
+    schools: string[],
+    universities: string[],
+  ) => {
+    if (universities.length === 0 || schools.length === 0) {
+      return schools;
+    }
+
+    const availableSchools = new Set(
+      buildDashboardFilterOptions(professors, { universities }).schools,
+    );
+    return schools.filter((school) => availableSchools.has(school));
   };
 
   const toggleStringFilterValue = (
@@ -248,6 +262,14 @@ export const HomePage = () => {
       const nextValues = currentValues.includes(value)
         ? currentValues.filter((item) => item !== value)
         : [...currentValues, value];
+
+      if (key === "universities") {
+        return {
+          ...previous,
+          universities: nextValues,
+          schools: keepSchoolsForUniversities(previous.schools, nextValues),
+        };
+      }
 
       return { ...previous, [key]: nextValues };
     });
@@ -549,7 +571,10 @@ export const HomePage = () => {
   ) {
     return (
       <>
-        <main className="mx-auto max-w-6xl px-6 py-8">
+          <main
+            data-testid="home-onboarding"
+            className="mx-auto max-w-6xl px-6 py-8"
+          >
           <OnboardingChecklistCard
             title="完成首次配置"
             description={onboardingState.description}
@@ -579,7 +604,7 @@ export const HomePage = () => {
 
   return (
     <>
-      <main className="mx-auto max-w-7xl px-6 py-8">
+      <main data-testid="home-dashboard" className="mx-auto max-w-7xl px-6 py-8">
         <section className="rounded-3xl border border-stone-200 bg-[#fcfbf8] p-6 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>

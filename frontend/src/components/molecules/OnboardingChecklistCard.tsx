@@ -22,7 +22,10 @@ export const OnboardingChecklistCard = ({
   nextActionLabel,
   items,
 }: OnboardingChecklistCardProps) => (
-  <section className="rounded-3xl border border-stone-200 bg-[#fcfbf8] p-6 shadow-sm sm:p-8">
+  <section
+    data-testid="onboarding-checklist-card"
+    className="rounded-3xl border border-stone-200 bg-[#fcfbf8] p-6 shadow-sm sm:p-8"
+  >
     <div className="max-w-3xl">
       <div className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800">
         首次上手引导

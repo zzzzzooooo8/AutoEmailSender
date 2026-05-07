@@ -105,6 +105,7 @@ const createProfessor = (
   id: number,
   name: string,
   status: ProfessorDashboardItemDTO["status"],
+  overrides: Partial<ProfessorDashboardItemDTO> = {},
 ): ProfessorDashboardItemDTO => ({
   id,
   name,
@@ -118,6 +119,7 @@ const createProfessor = (
   match_score: 92,
   sent_count: 0,
   status,
+  ...overrides,
 });
 
 const createDeferred = <T,>() => {
@@ -171,10 +173,8 @@ describe("HomePage onboarding", () => {
       });
     });
 
-    expect(screen.getByText("正在加载导师列表...")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("heading", { name: "完成首次配置" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("home-page-loading-skeleton")).toBeInTheDocument();
+    expect(screen.queryByTestId("onboarding-checklist-card")).not.toBeInTheDocument();
 
     deferred.resolve([professor]);
   });
@@ -182,14 +182,9 @@ describe("HomePage onboarding", () => {
   it("shows the materials onboarding stage and links to profile when materials or templates are missing", async () => {
     renderPage();
 
-    const heading = await screen.findByRole("heading", {
-      name: "完成首次配置",
-    });
+    const card = await screen.findByTestId("onboarding-checklist-card");
 
-    expect(heading).toBeInTheDocument();
-    const card = heading.closest("section");
-    expect(card).not.toBeNull();
-    expect(within(card as HTMLElement).getByRole("link", { name: "继续配置" })).toHaveAttribute(
+    expect(within(card).getByRole("link", { name: "继续配置" })).toHaveAttribute(
       "href",
       "/profile",
     );
@@ -210,9 +205,7 @@ describe("HomePage onboarding", () => {
 
     renderPage();
 
-    expect(
-      await screen.findByRole("heading", { name: "完成首次配置" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByTestId("onboarding-checklist-card")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "继续配置" })).toHaveAttribute(
       "href",
       "/professors",
@@ -233,13 +226,9 @@ describe("HomePage onboarding", () => {
 
     renderPage();
 
-    expect(
-      await screen.findByRole("heading", { name: "导师看板" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByTestId("home-dashboard")).toBeInTheDocument();
     expect(screen.queryByText(/模式：/)).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("heading", { name: "完成首次配置" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("onboarding-checklist-card")).not.toBeInTheDocument();
   });
 
   it("shows relationship status labels and filter controls on the dashboard", async () => {
@@ -256,9 +245,7 @@ describe("HomePage onboarding", () => {
 
     renderPage();
 
-    expect(
-      await screen.findByRole("heading", { name: "导师看板" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByTestId("home-dashboard")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "高级筛选" }));
     expect(screen.getByRole("button", { name: "状态：全部状态" })).toBeInTheDocument();
   });
@@ -277,9 +264,7 @@ describe("HomePage onboarding", () => {
 
     renderPage();
 
-    expect(
-      await screen.findByRole("heading", { name: "导师看板" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByTestId("home-dashboard")).toBeInTheDocument();
     const selectButton = screen.getByRole("button", { name: "选择 王教授" });
     expect(selectButton).toHaveAttribute(
       "aria-pressed",
@@ -320,9 +305,7 @@ describe("HomePage onboarding", () => {
 
     renderPage();
 
-    expect(
-      await screen.findByRole("heading", { name: "导师看板" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByTestId("home-dashboard")).toBeInTheDocument();
     expect(await screen.findByText("未开始导师")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "高级筛选" }));
@@ -344,5 +327,60 @@ describe("HomePage onboarding", () => {
       expect(screen.queryByText("已回复导师")).not.toBeInTheDocument();
       expect(screen.queryByText("需处理导师")).not.toBeInTheDocument();
     });
+  });
+
+  it("limits college options to the selected school on the dashboard", async () => {
+    mockedListProfessors.mockResolvedValue([
+      createProfessor(101, "MIT 工程导师", "not_contacted", {
+        university: "MIT",
+        school: "School of Engineering",
+      }),
+      createProfessor(102, "MIT 智能导师", "not_contacted", {
+        university: "MIT",
+        school: "AI Institute",
+      }),
+      createProfessor(103, "Stanford 医学导师", "not_contacted", {
+        university: "Stanford",
+        school: "School of Medicine",
+      }),
+    ]);
+    mockedUseSelectionContext.mockReturnValue({
+      selectedIdentityId: 1,
+      selectedLlmProfileId: 1,
+      selectedIdentity: createIdentity({
+        current_primary_material_id: 11,
+        outreach_template_body_text: "老师您好",
+      }),
+      selectedLlmProfile,
+    });
+
+    renderPage();
+
+    expect(await screen.findByTestId("home-dashboard")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "高级筛选" }));
+    fireEvent.click(screen.getByRole("button", { name: "学院：全部学院" }));
+    fireEvent.click(screen.getByRole("option", { name: "School of Medicine" }));
+    expect(
+      screen.getByRole("button", { name: "学院：School of Medicine" }),
+    ).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    fireEvent.click(screen.getByRole("button", { name: "学校：全部学校" }));
+    fireEvent.click(screen.getByRole("option", { name: "MIT" }));
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(
+      screen.getByRole("button", { name: "学院：全部学院" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "学院：全部学院" }));
+
+    expect(screen.getByRole("option", { name: "AI Institute" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "School of Engineering" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "School of Medicine" }),
+    ).not.toBeInTheDocument();
   });
 });
