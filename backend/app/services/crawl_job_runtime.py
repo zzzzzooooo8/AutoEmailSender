@@ -102,7 +102,10 @@ async def run_queued_crawl_jobs_once(
     async with session_factory() as session:
         job_id = await session.scalar(
             select(CrawlJob.id)
-            .where(CrawlJob.status == CrawlJobStatus.QUEUED.value)
+            .where(
+                CrawlJob.status == CrawlJobStatus.QUEUED.value,
+                CrawlJob.deleted_at.is_(None),
+            )
             .order_by(CrawlJob.created_at.asc(), CrawlJob.id.asc())
             .limit(1),
         )
@@ -115,6 +118,7 @@ async def run_queued_crawl_jobs_once(
             .where(
                 CrawlJob.id == job_id,
                 CrawlJob.status == CrawlJobStatus.QUEUED.value,
+                CrawlJob.deleted_at.is_(None),
             )
             .values(
                 status=CrawlJobStatus.RUNNING.value,

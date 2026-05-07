@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, tzinfo
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
@@ -135,7 +135,10 @@ async def dispatch_due_tasks_once(
                             ),
                             or_(
                                 BatchTask.id.is_(None),
-                                BatchTask.status == BatchTaskStatus.RUNNING.value,
+                                and_(
+                                    BatchTask.status == BatchTaskStatus.RUNNING.value,
+                                    BatchTask.deleted_at.is_(None),
+                                ),
                             ),
                         )
                         .order_by(

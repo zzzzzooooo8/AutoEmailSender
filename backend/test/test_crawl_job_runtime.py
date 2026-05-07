@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -235,6 +236,16 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(processed, 0)
         job = await self._get_job(job_id)
         self.assertEqual(job.status, CrawlJobStatus.PAUSED.value)
+
+    async def test_run_queued_crawl_jobs_ignores_deleted_job(self) -> None:
+        job_id = await self._create_default_profile_and_job()
+        await self._mark_job_deleted(job_id)
+
+        processed = await run_queued_crawl_jobs_once(self.session_factory)
+
+        self.assertEqual(processed, 0)
+        job = await self._get_job(job_id)
+        self.assertEqual(job.status, CrawlJobStatus.QUEUED.value)
 
     async def test_running_job_paused_by_tool_stays_paused(self) -> None:
         job_id = await self._create_default_profile_and_job()
@@ -1775,6 +1786,14 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             if job is None:
                 raise AssertionError(f"crawl job {job_id} not found")
             return job
+
+    async def _mark_job_deleted(self, job_id: int) -> None:
+        async with self.session_factory() as session:
+            job = await session.get(CrawlJob, job_id)
+            if job is None:
+                raise AssertionError(f"crawl job {job_id} not found")
+            job.deleted_at = datetime.now(UTC)
+            await session.commit()
 
     def _build_crawl_context(self, job_id: int) -> CrawlToolContext:
         return CrawlToolContext(

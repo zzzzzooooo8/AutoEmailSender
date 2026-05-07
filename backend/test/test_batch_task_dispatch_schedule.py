@@ -263,6 +263,31 @@ class BatchTaskDispatchScheduleTests(unittest.TestCase):
         self.assertEqual(list(statuses.values()).count(EmailTaskStatus.APPROVED.value), 1)
         mocked_send.assert_awaited_once()
 
+    def test_dispatch_due_tasks_ignores_deleted_batch_task(self) -> None:
+        approved_task_id = self._run_async(
+            self._create_batch_task_with_approved_task(
+                scheduled_dates=["2026-05-04"],
+                emails_per_window=20,
+            ),
+        )
+        self._run_async(self._mark_batch_task_deleted_by_email_task_id(approved_task_id))
+
+        with patch(
+            "app.services.task_runtime.mail_runtime.send_email",
+            AsyncMock(return_value=self._build_send_result()),
+        ) as mocked_send:
+            processed = self._run_async(
+                dispatch_due_tasks_once(
+                    self.session_factory,
+                    now=datetime(2026, 5, 4, 10, 0, tzinfo=UTC),
+                    local_timezone=UTC,
+                ),
+            )
+
+        self.assertEqual(processed, 0)
+        self.assertEqual(self._run_async(self._get_task_status(approved_task_id)), EmailTaskStatus.APPROVED.value)
+        mocked_send.assert_not_called()
+
     async def _create_schema(self) -> None:
         async with self.engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
@@ -410,6 +435,15 @@ class BatchTaskDispatchScheduleTests(unittest.TestCase):
             session.add_all([batch_task, *tasks])
             await session.commit()
             return tuple(task.id for task in tasks)
+
+    async def _mark_batch_task_deleted_by_email_task_id(self, email_task_id: int) -> None:
+        async with self.session_factory() as session:
+            task = await session.get(EmailTask, email_task_id)
+            assert task is not None
+            batch_task = await session.get(BatchTask, task.batch_task_id)
+            assert batch_task is not None
+            batch_task.deleted_at = datetime.now(UTC)
+            await session.commit()
 
     async def _create_manual_approved_task(self) -> int:
         async with self.session_factory() as session:

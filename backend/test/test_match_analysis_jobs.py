@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import tempfile
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -196,6 +197,32 @@ class MatchAnalysisJobRuntimeTests(unittest.TestCase):
         self.assertEqual(stored.status, "partial_failed")
         self.assertEqual(stored.failed_count, 1)
         self.assertEqual(stored.succeeded_count, 1)
+
+    def test_run_queued_match_analysis_jobs_ignores_deleted_job(self) -> None:
+        identity_id, llm_profile_id, professor_ids = self._run_async(
+            self._seed_create_job_data(),
+        )
+        job = self._run_async(
+            create_match_analysis_job(
+                self.session_factory,
+                identity_id=identity_id,
+                llm_profile_id=llm_profile_id,
+                professor_ids=[professor_ids[0]],
+                name=None,
+            ),
+        )
+        self._run_async(self._mark_job_deleted(job.id))
+
+        processed = self._run_async(
+            run_queued_match_analysis_jobs_once(
+                self.session_factory,
+                item_concurrency=1,
+            ),
+        )
+
+        self.assertEqual(processed, 0)
+        stored = self._run_async(self._get_job(job.id))
+        self.assertEqual(stored.status, "queued")
 
     def test_cancel_job_marks_queued_items_canceled(self) -> None:
         identity_id, llm_profile_id, professor_ids = self._run_async(
@@ -416,6 +443,13 @@ class MatchAnalysisJobRuntimeTests(unittest.TestCase):
             items[0].completion_tokens = 40
             items[0].total_tokens = 100
             items[1].status = MatchAnalysisJobItemStatus.CANCELED.value
+            await session.commit()
+
+    async def _mark_job_deleted(self, job_id: int) -> None:
+        async with self.session_factory() as session:
+            job = await session.get(MatchAnalysisJob, job_id)
+            assert job is not None
+            job.deleted_at = datetime.now(UTC)
             await session.commit()
 
     async def _mark_job_running_after_interrupted_worker(self, job_id: int) -> None:
