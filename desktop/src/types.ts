@@ -46,7 +46,13 @@ export type UpdateDownloadProgress = {
 export type UpdateStatus =
   | { state: "idle"; version: string }
   | { state: "checking"; version: string }
-  | { state: "available"; version: string; nextVersion: string; fullDownloadBytes?: number }
+  | {
+      state: "available";
+      version: string;
+      nextVersion: string;
+      fullDownloadBytes?: number;
+      releaseNotes?: string;
+    }
   | { state: "not_available"; version: string }
   | ({ state: "downloading"; version: string; nextVersion: string } & UpdateDownloadProgress)
   | ({ state: "slow_download_offered"; version: string; nextVersion: string; fullDownloadBytes?: number } & UpdateDownloadProgress)

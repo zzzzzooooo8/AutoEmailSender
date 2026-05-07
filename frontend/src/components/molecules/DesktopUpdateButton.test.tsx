@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DesktopUpdateButton } from "@/components/molecules/DesktopUpdateButton";
 import type { DesktopUpdateStatus } from "@/types/desktop";
@@ -89,14 +89,79 @@ describe("DesktopUpdateButton", () => {
     render(<DesktopUpdateButton />);
     fireEvent.click(await screen.findByRole("button", { name: /检查更新/ }));
 
-    expect(await screen.findByRole("button", { name: /增量下载/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /全量下载/ })).toBeInTheDocument();
+    expect((await screen.findAllByRole("button", { name: /增量下载/ })).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: /全量下载/ }).length).toBeGreaterThan(0);
     expect(screen.getByText(/增量下载：开始后显示实际大小/)).toBeInTheDocument();
     expect(screen.getByText(/全量约 200.0 MB/)).toBeInTheDocument();
-    expect(screen.getByText(/v0\.1\.1/)).toBeInTheDocument();
+    expect(screen.getAllByText(/v0\.1\.1/).length).toBeGreaterThan(0);
     expect(confirm).not.toHaveBeenCalled();
     expect(await screen.findByText("NEW")).toBeInTheDocument();
     expect(window.localStorage.getItem("desktop_pending_update_version")).toBe("0.1.1");
+  });
+
+  it("opens a release notes dialog when an update is available", async () => {
+    window.autoEmailSender = buildDesktopApi({
+      checkForUpdate: async () => ({
+        state: "available",
+        version: "2.1.5",
+        nextVersion: "2.1.6",
+        fullDownloadBytes: 200 * 1024 * 1024,
+        releaseNotes: "# v2.1.6\n\n## 更新内容\n\n- 修复公告弹窗高度",
+      }),
+    });
+
+    render(<DesktopUpdateButton />);
+    fireEvent.click(await screen.findByRole("button", { name: /检查更新/ }));
+
+    expect(await screen.findByRole("dialog", { name: /发现新版本 v2\.1\.6/ })).toBeInTheDocument();
+    expect(screen.getByText("更新内容")).toBeInTheDocument();
+    expect(screen.getByText("修复公告弹窗高度")).toBeInTheDocument();
+    expect(screen.getByTestId("desktop-update-release-notes")).toHaveClass("max-h-[50vh]", "overflow-y-auto");
+  });
+
+  it("starts the selected download mode from the release notes dialog", async () => {
+    const downloadUpdate = vi.fn(async () => ({
+      state: "downloaded_pending_install" as const,
+      version: "2.1.5",
+      nextVersion: "2.1.6",
+    }));
+    window.autoEmailSender = buildDesktopApi({
+      checkForUpdate: async () => ({
+        state: "available",
+        version: "2.1.5",
+        nextVersion: "2.1.6",
+        releaseNotes: "- 更新公告",
+      }),
+      downloadUpdate,
+    });
+
+    render(<DesktopUpdateButton />);
+    fireEvent.click(await screen.findByRole("button", { name: /检查更新/ }));
+    const dialog = await screen.findByRole("dialog", { name: /发现新版本/ });
+    fireEvent.click(within(dialog).getByRole("button", { name: /全量下载/ }));
+
+    await waitFor(() => {
+      expect(downloadUpdate).toHaveBeenCalledWith({ mode: "full" });
+    });
+    expect(screen.queryByRole("dialog", { name: /发现新版本/ })).not.toBeInTheDocument();
+  });
+
+  it("uses fallback release notes and keeps the pending marker when users dismiss the dialog", async () => {
+    window.autoEmailSender = buildDesktopApi({
+      checkForUpdate: async () => ({
+        state: "available",
+        version: "2.1.5",
+        nextVersion: "2.1.6",
+      }),
+    });
+
+    render(<DesktopUpdateButton />);
+    fireEvent.click(await screen.findByRole("button", { name: /检查更新/ }));
+    expect(await screen.findByText("新版本已发布，更新内容暂不可用。")).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: /稍后/ }));
+    expect(screen.queryByRole("dialog", { name: /发现新版本/ })).not.toBeInTheDocument();
+    expect(await screen.findByText("NEW")).toBeInTheDocument();
   });
 
   it("shows persistent update progress without blocking the page", async () => {
@@ -149,7 +214,8 @@ describe("DesktopUpdateButton", () => {
 
     render(<DesktopUpdateButton />);
     fireEvent.click(await screen.findByRole("button", { name: /检查更新/ }));
-    fireEvent.click(await screen.findByRole("button", { name: /全量下载/ }));
+    const dialog = await screen.findByRole("dialog", { name: /发现新版本/ });
+    fireEvent.click(within(dialog).getByRole("button", { name: /全量下载/ }));
 
     await waitFor(() => {
       expect(downloadUpdate).toHaveBeenCalledWith({ mode: "full" });
