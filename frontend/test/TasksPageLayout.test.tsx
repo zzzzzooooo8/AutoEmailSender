@@ -60,6 +60,8 @@ const runningTask = {
   identity_id: 1,
   llm_profile_id: 2,
   pending_generation_count: 2,
+  generating_draft_count: 0,
+  draft_failed_count: 0,
   review_required_count: 1,
   scheduled_count: 3,
   sent_count: 4,

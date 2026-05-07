@@ -31,7 +31,9 @@ from app.services.batch_schedule import normalize_scheduled_dates
 from app.services.materials import material_can_be_primary
 from app.services.operation_logs import record_operation_log
 from app.services.outreach_templates import (
+    OUTREACH_GENERATION_MODE_TEMPLATE,
     get_outreach_template_defaults_validation_error,
+    render_outreach_template,
     resolve_outreach_template_config,
 )
 
@@ -163,6 +165,28 @@ async def create_batch_task(
     await session.flush()
 
     for professor in professors:
+        generated_subject = None
+        generated_body_text = None
+        generated_body_html = None
+        task_status = EmailTaskStatus.DISCOVERED.value
+        approved_at = None
+        if outreach_config.generation_mode == OUTREACH_GENERATION_MODE_TEMPLATE:
+            try:
+                rendered = render_outreach_template(
+                    identity,
+                    professor,
+                    subject_template=outreach_config.subject_template,
+                    body_text_template=outreach_config.body_text_template,
+                    body_html_template=outreach_config.body_html_template,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            generated_subject = rendered.subject
+            generated_body_text = rendered.body_text
+            generated_body_html = rendered.body_html
+            task_status = EmailTaskStatus.APPROVED.value
+            approved_at = datetime.now(UTC)
+
         session.add(
             EmailTask(
                 source=EmailTaskSource.BATCH.value,
@@ -175,7 +199,14 @@ async def create_batch_task(
                 outreach_template_subject=_normalize_nullable_text(outreach_config.subject_template),
                 outreach_template_body_text=_normalize_nullable_text(outreach_config.body_text_template),
                 outreach_template_body_html=_normalize_nullable_text(outreach_config.body_html_template),
-                status=EmailTaskStatus.DISCOVERED.value,
+                status=task_status,
+                generated_subject=generated_subject,
+                generated_content_text=generated_body_text,
+                generated_content_html=generated_body_html,
+                approved_subject=generated_subject,
+                approved_body_text=generated_body_text,
+                approved_body_html=generated_body_html,
+                approved_at=approved_at,
                 selected_material_ids=selected_material_ids,
             ),
         )
@@ -361,6 +392,8 @@ def _serialize_batch_task(task: BatchTask) -> BatchTaskCardRead:
         identity_id=task.identity_id,
         llm_profile_id=task.llm_profile_id,
         pending_generation_count=pending_generation_count,
+        generating_draft_count=status_counter.get(EmailTaskStatus.GENERATING_DRAFT.value, 0),
+        draft_failed_count=status_counter.get(EmailTaskStatus.DRAFT_FAILED.value, 0),
         review_required_count=status_counter.get(EmailTaskStatus.REVIEW_REQUIRED.value, 0),
         scheduled_count=status_counter.get(EmailTaskStatus.SCHEDULED.value, 0),
         sent_count=status_counter.get(EmailTaskStatus.SENT.value, 0),

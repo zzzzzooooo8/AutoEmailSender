@@ -526,6 +526,8 @@ export type BatchTaskRuntimeStatus = 'running' | 'paused' | 'stopped' | 'complet
 export type WorkspaceTaskStatus =
   | 'discovered'
   | 'matched'
+  | 'generating_draft'
+  | 'draft_failed'
   | 'review_required'
   | 'approved'
   | 'scheduled'
@@ -551,6 +553,8 @@ export interface BatchTaskCardDTO {
   identity_id: number;
   llm_profile_id: number;
   pending_generation_count: number;
+  generating_draft_count: number;
+  draft_failed_count: number;
   review_required_count: number;
   scheduled_count: number;
   sent_count: number;
@@ -801,6 +805,8 @@ export interface TokenUsageChartDTO {
 export const PROFESSOR_STATUS_LABELS = {
   discovered: '待处理',
   matched: '待生成',
+  generating_draft: '正在生成草稿',
+  draft_failed: '草稿生成失败',
   review_required: '待审核',
   approved: '待发送',
   scheduled: '已排程',
