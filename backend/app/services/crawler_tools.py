@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from html import escape
@@ -38,6 +39,7 @@ MAX_TEXT_CHARS = 12000
 MAX_LINKS = 200
 MAX_HTTP_REDIRECTS = 5
 MAX_RETRIES_FOR_BROWSER_RENDER = 2
+MAX_PAGE_SNAPSHOT_CACHE_ENTRIES = 64
 CRAWL4AI_BROWSER_FALLBACK_STATUS = {403, 412, 429}
 INVALID_PROFILE_PAGE_MARKERS = (
     "{{name}}",
@@ -289,7 +291,7 @@ class CrawlToolContext:
     http_blocked_hosts: set[str] = field(default_factory=set)
     denied_urls: dict[str, str] = field(default_factory=dict)
     save_failure_budget: SaveFailureBudgetState = field(default_factory=SaveFailureBudgetState)
-    page_snapshot_cache: dict[str, PageSnapshot] = field(default_factory=dict)
+    page_snapshot_cache: OrderedDict[str, PageSnapshot] = field(default_factory=OrderedDict)
 
     def mark_http_blocked(self, url: str) -> None:
         host = (urlparse(url).hostname or "").lower()
@@ -312,11 +314,19 @@ class CrawlToolContext:
         return self.denied_urls.get(_normalize_page_cache_url(url))
 
     def get_cached_page_snapshot(self, url: str) -> PageSnapshot | None:
-        return self.page_snapshot_cache.get(_normalize_page_cache_url(url))
+        normalized = _normalize_page_cache_url(url)
+        snapshot = self.page_snapshot_cache.get(normalized)
+        if snapshot is not None:
+            self.page_snapshot_cache.move_to_end(normalized)
+        return snapshot
 
     def remember_page_snapshot(self, snapshot: PageSnapshot) -> None:
         if snapshot.url:
-            self.page_snapshot_cache[_normalize_page_cache_url(snapshot.url)] = snapshot
+            normalized = _normalize_page_cache_url(snapshot.url)
+            self.page_snapshot_cache[normalized] = snapshot
+            self.page_snapshot_cache.move_to_end(normalized)
+            while len(self.page_snapshot_cache) > MAX_PAGE_SNAPSHOT_CACHE_ENTRIES:
+                self.page_snapshot_cache.popitem(last=False)
 
 
 class CrawlJobPaused(RuntimeError):
