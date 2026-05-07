@@ -17,7 +17,6 @@ class Settings:
     uploads_dir: Path
     crawler_debug_dir: Path
     database_url: str
-    default_mail_delivery_mode: str
     draft_worker_interval_seconds: int
     dispatcher_interval_seconds: int
     imap_poll_interval_seconds: int
@@ -89,7 +88,6 @@ def get_settings() -> Settings:
         uploads_dir=uploads_dir,
         crawler_debug_dir=crawler_debug_dir,
         database_url=database_url,
-        default_mail_delivery_mode=os.getenv("DEFAULT_MAIL_DELIVERY_MODE", "dry_run"),
         draft_worker_interval_seconds=_get_int_env("DRAFT_WORKER_INTERVAL_SECONDS", 10),
         dispatcher_interval_seconds=_get_int_env("DISPATCHER_INTERVAL_SECONDS", 30),
         imap_poll_interval_seconds=_get_int_env("IMAP_POLL_INTERVAL_SECONDS", 60),

@@ -3455,8 +3455,7 @@ class ApiEndpointTests(unittest.TestCase):
             "/api/batch-tasks",
             params={"identity_id": identity_id, "llm_profile_id": llm_id},
         ).json()[0]
-        self.assertNotIn("dry_run_count", task_payload)
-        self.assertNotIn("live_count", task_payload)
+        self.assertNotIn("delivery_mode", task_payload)
 
     def test_batch_task_card_counts_draft_generation_statuses(self) -> None:
         identity_id = self._create_identity(with_imap=False)

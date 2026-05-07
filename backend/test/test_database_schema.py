@@ -304,6 +304,25 @@ class DatabaseSchemaTests(unittest.TestCase):
         ).fetchone()[0]
         self.assertEqual(version, HEAD_REVISION)
 
+    def test_runtime_code_has_no_mail_delivery_mode_residue(self) -> None:
+        banned_terms = [
+            "dry_run",
+            "mail_delivery_mode",
+            "MailDeliveryMode",
+            "default_mail_delivery_mode",
+            "SystemSettingsRead",
+            "SystemSettingsUpdate",
+        ]
+        runtime_files = sorted((BACKEND_DIR / "app").rglob("*.py"))
+        violations: list[str] = []
+        for path in runtime_files:
+            content = path.read_text(encoding="utf-8")
+            for term in banned_terms:
+                if term in content:
+                    violations.append(f"{path.relative_to(BACKEND_DIR)}: {term}")
+
+        self.assertEqual(violations, [])
+
     def test_defaults_and_foreign_keys_work(self) -> None:
         identity_id = self._insert_identity()
         llm_profile_id = self._insert_llm_profile()

@@ -1,4 +1,4 @@
-from app.models.app_setting import AppSetting, MailDeliveryMode
+from app.models.app_setting import AppSetting
 from app.models.base import Base
 from app.models.batch_task import BatchTask, BatchTaskStatus
 from app.models.crawl_job import (
@@ -59,7 +59,6 @@ __all__ = [
     "MatchAnalysisJobItemStatus",
     "MatchAnalysisJobStatus",
     "MatchAnalysisRun",
-    "MailDeliveryMode",
     "OperationLog",
     "Professor",
     "TestComposeMessage",

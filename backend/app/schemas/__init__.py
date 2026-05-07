@@ -39,7 +39,6 @@ from app.schemas.professor import (
     ProfessorImportResult,
     ProfessorRead,
 )
-from app.schemas.system_settings import SystemSettingsRead, SystemSettingsUpdate
 from app.schemas.workspace import (
     WorkspaceMessageRead,
     WorkspaceThreadRead,
@@ -73,8 +72,6 @@ __all__ = [
     "ProfessorDashboardItemRead",
     "ProfessorImportResult",
     "ProfessorRead",
-    "SystemSettingsRead",
-    "SystemSettingsUpdate",
     "WorkspaceMessageRead",
     "WorkspaceThreadRead",
 ]
