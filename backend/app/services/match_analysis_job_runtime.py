@@ -165,6 +165,7 @@ def serialize_match_analysis_job(job: MatchAnalysisJob) -> MatchAnalysisJobRead:
         finished_at=job.finished_at,
         created_at=job.created_at,
         updated_at=job.updated_at,
+        deleted_at=job.deleted_at,
         last_error=job.last_error,
     )
 

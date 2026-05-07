@@ -1275,6 +1275,76 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(listed.status_code, 200)
         self.assertEqual(len(listed.json()), 1)
 
+    def test_match_analysis_job_delete_restore_and_trash_view(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        self._upload_material(
+            identity_id,
+            filename="resume.txt",
+            content=b"AI systems",
+            material_type="resume",
+        )
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "回收站导师",
+                "email": "trash-match@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "AI agents",
+                "recent_papers": ["Agent paper"],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        created = self.client.post(
+            "/api/match-analysis-jobs",
+            json={
+                "identity_id": identity_id,
+                "llm_profile_id": llm_id,
+                "professor_ids": [professor_response.json()["id"]],
+            },
+        )
+        self.assertEqual(created.status_code, 201, msg=created.text)
+        job_id = created.json()["id"]
+
+        blocked = self.client.post(f"/api/match-analysis-jobs/{job_id}/delete")
+        self.assertEqual(blocked.status_code, 400)
+        self.assertIn("请先中止/取消任务后再删除", blocked.json()["detail"])
+
+        canceled = self.client.post(f"/api/match-analysis-jobs/{job_id}/cancel")
+        self.assertEqual(canceled.status_code, 200, msg=canceled.text)
+        deleted = self.client.post(f"/api/match-analysis-jobs/{job_id}/delete")
+        self.assertEqual(deleted.status_code, 200, msg=deleted.text)
+        self.assertIsNotNone(deleted.json()["job"]["deleted_at"])
+
+        repeated_delete = self.client.post(f"/api/match-analysis-jobs/{job_id}/delete")
+        self.assertEqual(repeated_delete.status_code, 200, msg=repeated_delete.text)
+
+        current = self.client.get(
+            "/api/match-analysis-jobs",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(current.status_code, 200)
+        self.assertEqual(current.json(), [])
+
+        trash = self.client.get(
+            "/api/match-analysis-jobs",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id, "view": "trash"},
+        )
+        self.assertEqual(trash.status_code, 200)
+        self.assertEqual([item["id"] for item in trash.json()], [job_id])
+
+        restored = self.client.post(f"/api/match-analysis-jobs/{job_id}/restore")
+        self.assertEqual(restored.status_code, 200, msg=restored.text)
+        self.assertIsNone(restored.json()["job"]["deleted_at"])
+
+        repeated_restore = self.client.post(f"/api/match-analysis-jobs/{job_id}/restore")
+        self.assertEqual(repeated_restore.status_code, 200, msg=repeated_restore.text)
+
     def test_cancel_match_analysis_job(self) -> None:
         identity_id = self._create_identity(with_imap=False)
         llm_id = self._create_llm()
