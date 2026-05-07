@@ -3,12 +3,15 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useRef } from 'react';
 import { Loader2 } from 'lucide-react';
 import { NativeSelectField } from '@/components/atoms/NativeSelectField';
+import { EmailTemplateEditor } from '@/components/molecules/EmailTemplateEditor';
 import { SubjectTemplateInput } from '@/components/molecules/SubjectTemplateInput';
 import { TaskDateSelector } from '@/components/molecules/TaskDateSelector';
 import { useNotification } from '@/context/NotificationContext';
 import { safeRecordUserAction } from '@/lib/diagnosticUserActions';
 import { createBatchTask } from '@/lib/api/batchTasksApi';
 import { listProfessors } from '@/lib/api/professorsApi';
+import { getPageItems, getTotalPages, PAGE_SIZE } from '@/lib/pagination';
+import { textToEmailHtml } from '@/lib/richEmail';
 import { useSelectionContext } from '@/context/SelectionContext';
 import { getTaskModeCopy } from '@/features/create-task/client/taskCopy';
 import { normalizeScheduledDates } from '@/features/create-task/client/scheduleDates';
@@ -22,6 +25,7 @@ import {
 
 const SESSION_KEY = 'selected_professor_ids';
 const PRIMARY_MATERIAL_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt', '.md'];
+const TARGET_MENTORS_PAGE_SIZE = PAGE_SIZE;
 
 const readSelectedProfessorIds = () => {
   try {
@@ -53,11 +57,13 @@ export const CreateTaskPage = () => {
   const { selectedIdentityId, selectedLlmProfileId, selectedIdentity } = useSelectionContext();
   const [selectedProfessorIds] = useState<number[]>(readSelectedProfessorIds());
   const [professors, setProfessors] = useState<ProfessorDashboardItemDTO[]>([]);
+  const [targetMentorsPage, setTargetMentorsPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [taskName, setTaskName] = useState(`批量任务 ${new Date().toLocaleDateString('zh-CN')}`);
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
+  const [bodyHtml, setBodyHtml] = useState('');
   const [taskMode, setTaskMode] = useState<OutreachGenerationMode>('llm');
   const [templateSubject, setTemplateSubject] = useState('');
   const [templateBodyText, setTemplateBodyText] = useState('');
@@ -137,6 +143,7 @@ export const CreateTaskPage = () => {
       setTaskMode('llm');
       setSubject('');
       setBody('');
+      setBodyHtml('');
       setTemplateSubject('');
       setTemplateBodyText('');
       setTemplateBodyHtml('');
@@ -151,16 +158,33 @@ export const CreateTaskPage = () => {
     setSelectedMaterialIds([]);
     setTaskMode(selectedIdentity.outreach_generation_mode ?? 'llm');
     setSubject(selectedIdentity.outreach_template_subject ?? '');
-    setBody(selectedIdentity.outreach_template_body_text ?? '');
+    const nextTemplateBodyText = selectedIdentity.outreach_template_body_text ?? '';
+    const nextTemplateBodyHtml =
+      selectedIdentity.outreach_template_body_html ?? (nextTemplateBodyText ? textToEmailHtml(nextTemplateBodyText) : '');
+    setBody(nextTemplateBodyText);
+    setBodyHtml(nextTemplateBodyHtml);
     setTemplateSubject(selectedIdentity.outreach_template_subject ?? '');
-    setTemplateBodyText(selectedIdentity.outreach_template_body_text ?? '');
-    setTemplateBodyHtml(selectedIdentity.outreach_template_body_html ?? '');
+    setTemplateBodyText(nextTemplateBodyText);
+    setTemplateBodyHtml(nextTemplateBodyHtml);
   }, [selectedIdentity]);
 
   const primaryMaterialOptions = useMemo(
     () => (selectedIdentity ? selectedIdentity.materials.filter(isPrimaryMaterialCandidate) : []),
     [selectedIdentity],
   );
+  const targetMentorsTotalPages = getTotalPages(professors.length, TARGET_MENTORS_PAGE_SIZE);
+  const visibleTargetMentors = useMemo(
+    () => getPageItems(professors, targetMentorsPage, TARGET_MENTORS_PAGE_SIZE),
+    [professors, targetMentorsPage],
+  );
+
+  useEffect(() => {
+    setTargetMentorsPage(1);
+  }, [professorsRequestKey]);
+
+  useEffect(() => {
+    setTargetMentorsPage((currentPage) => Math.min(currentPage, targetMentorsTotalPages));
+  }, [targetMentorsTotalPages]);
 
   const templateReady = Boolean(templateBodyText.trim() || templateBodyHtml.trim());
 
@@ -236,11 +260,13 @@ export const CreateTaskPage = () => {
     try {
       const llmTemplateSubject = subject.trim() || null;
       const llmTemplateBodyText = body.trim() || null;
+      const llmTemplateBodyHtml = bodyHtml.trim() || null;
       const taskTemplateSubject =
         taskMode === 'llm' ? llmTemplateSubject : templateSubject.trim() || null;
       const taskTemplateBodyText =
         taskMode === 'llm' ? llmTemplateBodyText : templateBodyText.trim() || null;
-      const taskTemplateBodyHtml = taskMode === 'template' ? templateBodyHtml.trim() || null : null;
+      const taskTemplateBodyHtml =
+        taskMode === 'llm' ? llmTemplateBodyHtml : templateBodyHtml.trim() || null;
 
       await createBatchTask({
         identity_id: identityId,
@@ -460,15 +486,14 @@ export const CreateTaskPage = () => {
                     placeholder="例如：申请与{{name}}老师交流科研方向"
                   />
 
-                  <label className="block">
-                    <div className="mb-2 text-sm font-medium text-stone-800">模板正文</div>
-                    <textarea
-                      value={body}
-                      onChange={(event) => setBody(event.target.value)}
-                      placeholder="粘贴套磁信模板。"
-                      className="min-h-40 w-full rounded-2xl border border-stone-200 px-4 py-3 text-sm text-stone-700 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-                    />
-                  </label>
+                  <EmailTemplateEditor
+                    label="模板正文"
+                    html={bodyHtml || (body ? textToEmailHtml(body) : '')}
+                    onChange={({ html, text }) => {
+                      setBodyHtml(html);
+                      setBody(text);
+                    }}
+                  />
                 </div>
               ) : (
                 <div className="space-y-5 rounded-3xl border border-primary/15 bg-[linear-gradient(180deg,rgba(154,52,18,0.04),rgba(255,255,255,0.95))] p-4">
@@ -484,24 +509,17 @@ export const CreateTaskPage = () => {
                     onChange={setTemplateSubject}
                     placeholder="例如：申请与{{name}}老师交流科研方向"
                   />
-                  <label className="block">
-                    <div className="mb-2 text-sm font-medium text-stone-800">模板正文（纯文本）</div>
-                    <textarea
-                      value={templateBodyText}
-                      onChange={(event) => setTemplateBodyText(event.target.value)}
-                      placeholder="支持 {{name}}、{{university}}、{{sender_name}} 等占位符"
-                      className="min-h-36 w-full rounded-2xl border border-stone-200 px-4 py-3 text-sm text-stone-700 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-                    />
-                  </label>
-                  <label className="block">
-                    <div className="mb-2 text-sm font-medium text-stone-800">模板正文（HTML，可选）</div>
-                    <textarea
-                      value={templateBodyHtml}
-                      onChange={(event) => setTemplateBodyHtml(event.target.value)}
-                      placeholder="如果你需要保留格式，可以直接贴 HTML"
-                      className="min-h-36 w-full rounded-2xl border border-stone-200 px-4 py-3 font-mono text-sm text-stone-700 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-                    />
-                  </label>
+                  <EmailTemplateEditor
+                    label="模板正文"
+                    html={templateBodyHtml || (templateBodyText ? textToEmailHtml(templateBodyText) : '')}
+                    onChange={({ html, text }) => {
+                      setTemplateBodyHtml(html);
+                      setTemplateBodyText(text);
+                    }}
+                  />
+                  <p className="text-xs leading-6 text-stone-500">
+                    支持 {'{{name}}'}、{'{{university}}'}、{'{{sender_name}}'} 等占位符。
+                  </p>
                 </div>
               )}
 
@@ -605,9 +623,19 @@ export const CreateTaskPage = () => {
           </section>
 
           <aside className="rounded-3xl border border-stone-200 bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-stone-900">目标导师</h2>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-stone-900">目标导师</h2>
+                <div className="mt-1 text-xs text-stone-500">共 {professors.length} 位</div>
+              </div>
+              {targetMentorsTotalPages > 1 ? (
+                <div className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1 text-xs font-medium text-stone-600">
+                  {targetMentorsPage} / {targetMentorsTotalPages} 页
+                </div>
+              ) : null}
+            </div>
             <div className="mt-4 space-y-3">
-              {professors.map((professor) => (
+              {visibleTargetMentors.map((professor) => (
                 <div key={professor.id} className="rounded-2xl border border-stone-100 bg-stone-50 px-4 py-3">
                   <div className="font-medium text-stone-900">{professor.name}</div>
                   <div className="mt-1 text-sm text-stone-500">
@@ -619,6 +647,28 @@ export const CreateTaskPage = () => {
                 </div>
               ))}
             </div>
+            {targetMentorsTotalPages > 1 ? (
+              <div className="mt-4 flex items-center justify-between gap-3 border-t border-stone-100 pt-4">
+                <button
+                  type="button"
+                  disabled={targetMentorsPage <= 1}
+                  onClick={() => setTargetMentorsPage((currentPage) => Math.max(1, currentPage - 1))}
+                  className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  上一页
+                </button>
+                <button
+                  type="button"
+                  disabled={targetMentorsPage >= targetMentorsTotalPages}
+                  onClick={() =>
+                    setTargetMentorsPage((currentPage) => Math.min(targetMentorsTotalPages, currentPage + 1))
+                  }
+                  className="ui-btn-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  下一页
+                </button>
+              </div>
+            ) : null}
           </aside>
           </div>
         )}
