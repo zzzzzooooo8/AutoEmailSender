@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   getTemplatePlaceholder,
+  areTemplatePlaceholderHtmlEquivalent,
   parseTemplatePlaceholderText,
   prepareTemplatePlaceholderHtml,
   serializeTemplatePlaceholderHtml,
@@ -39,6 +40,15 @@ describe("templatePlaceholders", () => {
       '<p><span data-template-placeholder="name">导师姓名</span>老师您好，我是<span data-template-placeholder="sender_email">发件邮箱</span></p>',
     );
     expect(serializeTemplatePlaceholderHtml(prepared)).toBe("<p>{{name}}老师您好，我是{{sender_email}}</p>");
+  });
+
+  it("treats editor placeholder chips and stored template tokens as equivalent html", () => {
+    expect(
+      areTemplatePlaceholderHtmlEquivalent(
+        "<p>{{name}}老师您好</p>",
+        '<p><span data-template-placeholder="name" class="email-placeholder-chip" data-token="{{name}}">导师姓名</span>老师您好</p>',
+      ),
+    ).toBe(true);
   });
 
   it("keeps placeholder chips inheriting font weight so surrounding bold text still shows", () => {

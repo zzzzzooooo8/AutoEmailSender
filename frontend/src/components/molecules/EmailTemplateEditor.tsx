@@ -36,6 +36,7 @@ import {
 import { TemplatePlaceholder } from "@/components/molecules/tiptap/TemplatePlaceholder";
 import {
   TEMPLATE_PLACEHOLDER_OPTIONS,
+  areTemplatePlaceholderHtmlEquivalent,
   prepareTemplatePlaceholderHtml,
   serializeTemplatePlaceholderHtml,
   type TemplatePlaceholderKey,
@@ -177,7 +178,7 @@ export const EmailTemplateEditor = ({
 
   useEffect(() => {
     const preparedHtml = prepareTemplatePlaceholderHtml(html);
-    if (editor && preparedHtml !== editor.getHTML()) {
+    if (editor && !areTemplatePlaceholderHtmlEquivalent(preparedHtml, editor.getHTML())) {
       editor.commands.setContent(preparedHtml, false);
     }
   }, [editor, html]);

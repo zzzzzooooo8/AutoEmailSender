@@ -88,3 +88,13 @@ export const serializeTemplatePlaceholderHtml = (html: string) =>
     /<span[^>]*data-template-placeholder=["']([^"']+)["'][^>]*>.*?<\/span>/g,
     (_match, key: string) => getTemplatePlaceholder(key)?.token ?? "",
   );
+
+const normalizeTemplatePlaceholderTokens = (html: string) =>
+  html.replace(createTemplateTokenPattern(), (_match, key: TemplatePlaceholderKey) => {
+    const option = getTemplatePlaceholder(key);
+    return option?.token ?? `{{${key}}}`;
+  });
+
+export const areTemplatePlaceholderHtmlEquivalent = (leftHtml: string, rightHtml: string) =>
+  normalizeTemplatePlaceholderTokens(serializeTemplatePlaceholderHtml(leftHtml)) ===
+  normalizeTemplatePlaceholderTokens(serializeTemplatePlaceholderHtml(rightHtml));
