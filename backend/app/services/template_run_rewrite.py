@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 
+from app.services.rich_text import RichTextRenderResult, normalize_email_html
+
 
 PLACEHOLDER_PATTERN = re.compile(r"\{\{[a-zA-Z0-9_]+\}\}")
 
@@ -81,6 +83,48 @@ def build_template_run_document(html: str) -> TemplateRunDocument:
     )
 
 
+def apply_template_run_replacements(
+    document: TemplateRunDocument,
+    replacements: list[dict[str, object]],
+) -> RichTextRenderResult:
+    segment_map = {segment.segment_id: segment for segment in document.segments}
+    applied_count = 0
+
+    for replacement in replacements:
+        if not isinstance(replacement, dict):
+            continue
+        segment_id = replacement.get("segment_id")
+        if not isinstance(segment_id, str):
+            continue
+        segment = segment_map.get(segment_id)
+        if segment is None:
+            continue
+
+        run_map = {run.run_id: run for run in segment.runs}
+        raw_runs = replacement.get("runs")
+        if not isinstance(raw_runs, list):
+            continue
+        for run_replacement in raw_runs:
+            if not isinstance(run_replacement, dict):
+                continue
+            run_id = run_replacement.get("run_id")
+            text = run_replacement.get("text")
+            if not isinstance(run_id, str) or not isinstance(text, str):
+                continue
+            run = run_map.get(run_id)
+            if run is None:
+                continue
+            if not _replacement_preserves_placeholders(run, text):
+                continue
+            document.nodes[run.node_index].replace_with(_restore_placeholders(text, document.placeholders))
+            applied_count += 1
+
+    if applied_count == 0:
+        raise ValueError("模型未返回可用改写内容")
+
+    return normalize_email_html(str(document.soup))
+
+
 def _iter_segment_elements(soup: BeautifulSoup) -> list[Tag]:
     segment_names = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "td", "th"}
     elements: list[Tag] = []
@@ -148,3 +192,16 @@ def _lock_placeholders(
         return token
 
     return PLACEHOLDER_PATTERN.sub(replace, text), locked
+
+
+def _replacement_preserves_placeholders(run: TemplateRun, text: str) -> bool:
+    expected_tokens = {item["token"] for item in run.locked_placeholders}
+    actual_tokens = set(re.findall(r"\[\[PH_\d+\]\]", text))
+    return actual_tokens == expected_tokens
+
+
+def _restore_placeholders(text: str, placeholders: dict[str, str]) -> str:
+    restored = text
+    for token, original in placeholders.items():
+        restored = restored.replace(token, original)
+    return restored
