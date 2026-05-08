@@ -793,6 +793,7 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         payload = json.loads(prompt)
         self.assertIn("body_segments", payload)
+        self.assertEqual(payload["body_segments"][0]["segment_text"], "老师您好，我来自 Example University。")
         self.assertEqual(payload["body_segments"][0]["runs"][1]["marks"], ["strong"])
         self.assertEqual(
             payload["response_schema"]["replacements"][0]["runs"][0],

@@ -1325,6 +1325,7 @@ def build_template_run_rewrite_prompt(
             {
                 "segment_id": segment.segment_id,
                 "role": segment.role,
+                "segment_text": "".join(run.text for run in segment.runs),
                 "runs": [
                     {
                         "run_id": run.run_id,
@@ -1363,6 +1364,7 @@ def build_template_run_rewrite_prompt(
         "instructions": [
             "只返回 JSON 对象。",
             "replacements 只能引用 body_segments 中已有的 segment_id 和 run_id。",
+            "body_segments 中的 segment_text 仅用于连续语义上下文，不能直接当作替换结果。",
             "每个 runs 项只允许包含 run_id 和 text。",
             "不要返回 marks。",
             "不要返回 locked_placeholders。",
