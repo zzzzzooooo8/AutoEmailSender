@@ -80,6 +80,24 @@ class CrawlJobEventsTests(unittest.TestCase):
             self.assertIn("created_at", event)
             self.assertIn("raw", event)
 
+    def test_build_events_includes_partially_completed_status_message(self) -> None:
+        job = CrawlJob(
+            id=5,
+            university="示例大学",
+            school="计算机学院",
+            start_url="https://example.edu/faculty",
+            status=CrawlJobStatus.PARTIALLY_COMPLETED.value,
+            progress_current=1,
+            progress_total=3,
+            created_at=datetime(2026, 4, 26, 10, 0, tzinfo=UTC),
+            updated_at=datetime(2026, 4, 26, 10, 5, tzinfo=UTC),
+        )
+
+        events = build_crawl_job_events(job, pages=[], candidates=[])
+
+        self.assertEqual(events[0]["message"], "任务部分候选已导入")
+        self.assertEqual(events[0]["raw"]["status"], "partially_completed")
+
     def test_trace_without_message_uses_nested_name(self) -> None:
         message = summarize_agent_trace_event(
             {

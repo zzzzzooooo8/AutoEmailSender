@@ -11,6 +11,7 @@ STATUS_MESSAGES = {
     "running": "任务正在运行",
     "paused": "任务已暂停",
     "needs_review": "任务进入待审核",
+    "partially_completed": "任务部分候选已导入",
     "completed": "任务已完成",
     "failed": "任务失败",
     "canceled": "任务已取消",

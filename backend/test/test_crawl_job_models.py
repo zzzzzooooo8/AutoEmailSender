@@ -19,6 +19,7 @@ class CrawlJobModelTests(unittest.TestCase):
         self.assertEqual(CrawlJobStatus.QUEUED.value, "queued")
         self.assertEqual(CrawlJobStatus.RUNNING.value, "running")
         self.assertEqual(CrawlJobStatus.NEEDS_REVIEW.value, "needs_review")
+        self.assertEqual(CrawlJobStatus.PARTIALLY_COMPLETED.value, "partially_completed")
         self.assertEqual(CrawlJobStatus.COMPLETED.value, "completed")
         self.assertEqual(CrawlJobStatus.FAILED.value, "failed")
         self.assertEqual(CrawlJobStatus.CANCELED.value, "canceled")
