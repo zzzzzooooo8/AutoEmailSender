@@ -1,15 +1,166 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
-import { describe, expect, it, vi } from "vitest";
-import type { BatchTaskCardDTO, BatchTaskItemDTO, CrawlJobSummaryDTO } from "@/types";
+import { MemoryRouter } from "react-router-dom";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type {
+  BatchTaskCardDTO,
+  BatchTaskItemDTO,
+  CrawlJobEventDTO,
+  CrawlJobSummaryDTO,
+  WorkspaceThreadDTO,
+} from "@/types";
 import {
   buildBatchPendingItemAction,
   getBatchTaskWaitingSendCount,
 } from "@/features/batch-tasks/client/batchTaskDisplay";
+import { getCrawlEventFailureReason } from "@/features/crawl-review/client/crawlJobEvents";
 import {
   CrawlJobCard,
+  TasksPage,
   TaskListViewSwitch,
 } from "./TasksPage";
+
+const apiMocks = vi.hoisted(() => ({
+  listBatchTasks: vi.fn(),
+  listBatchTaskItems: vi.fn(),
+  pauseBatchTask: vi.fn(),
+  resumeBatchTask: vi.fn(),
+  stopBatchTask: vi.fn(),
+  deleteBatchTask: vi.fn(),
+  restoreBatchTask: vi.fn(),
+  listCrawlJobs: vi.fn(),
+  getCrawlJob: vi.fn(),
+  getCrawlJobEvents: vi.fn(),
+  listCrawlCandidates: vi.fn(),
+  listCrawlPages: vi.fn(),
+  pauseCrawlJob: vi.fn(),
+  resumeCrawlJob: vi.fn(),
+  cancelCrawlJob: vi.fn(),
+  retryCrawlJob: vi.fn(),
+  resumeCrawlJobReview: vi.fn(),
+  approveCrawlCandidates: vi.fn(),
+  enrichCrawlCandidates: vi.fn(),
+  deleteCrawlJob: vi.fn(),
+  restoreCrawlJob: vi.fn(),
+  listMatchAnalysisJobs: vi.fn(),
+  listMatchAnalysisJobItems: vi.fn(),
+  cancelMatchAnalysisJob: vi.fn(),
+  retryFailedMatchAnalysisJob: vi.fn(),
+  deleteMatchAnalysisJob: vi.fn(),
+  restoreMatchAnalysisJob: vi.fn(),
+  getWorkspaceThread: vi.fn(),
+  approveDraft: vi.fn(),
+  approveAndSend: vi.fn(),
+}));
+
+const notificationMocks = vi.hoisted(() => ({
+  notifyError: vi.fn(),
+  notifySuccess: vi.fn(),
+}));
+
+vi.mock("@/context/SelectionContext", () => ({
+  useSelectionContext: () => ({
+    selectedIdentityId: 1,
+    selectedLlmProfileId: 2,
+  }),
+}));
+
+vi.mock("@/context/NotificationContext", () => ({
+  useNotification: () => notificationMocks,
+}));
+
+vi.mock("@/lib/useConfirmDialog", () => ({
+  useConfirmDialog: () => ({
+    confirm: vi.fn().mockResolvedValue(true),
+    dialog: null,
+  }),
+}));
+
+vi.mock("@/lib/api/batchTasksApi", () => ({
+  listBatchTasks: apiMocks.listBatchTasks,
+  listBatchTaskItems: apiMocks.listBatchTaskItems,
+  pauseBatchTask: apiMocks.pauseBatchTask,
+  resumeBatchTask: apiMocks.resumeBatchTask,
+  stopBatchTask: apiMocks.stopBatchTask,
+  deleteBatchTask: apiMocks.deleteBatchTask,
+  restoreBatchTask: apiMocks.restoreBatchTask,
+}));
+
+vi.mock("@/lib/api/crawlJobsApi", () => ({
+  listCrawlJobs: apiMocks.listCrawlJobs,
+  getCrawlJob: apiMocks.getCrawlJob,
+  getCrawlJobEvents: apiMocks.getCrawlJobEvents,
+  listCrawlCandidates: apiMocks.listCrawlCandidates,
+  listCrawlPages: apiMocks.listCrawlPages,
+  pauseCrawlJob: apiMocks.pauseCrawlJob,
+  resumeCrawlJob: apiMocks.resumeCrawlJob,
+  cancelCrawlJob: apiMocks.cancelCrawlJob,
+  retryCrawlJob: apiMocks.retryCrawlJob,
+  resumeCrawlJobReview: apiMocks.resumeCrawlJobReview,
+  approveCrawlCandidates: apiMocks.approveCrawlCandidates,
+  enrichCrawlCandidates: apiMocks.enrichCrawlCandidates,
+  deleteCrawlJob: apiMocks.deleteCrawlJob,
+  restoreCrawlJob: apiMocks.restoreCrawlJob,
+}));
+
+vi.mock("@/lib/api/matchAnalysisJobsApi", () => ({
+  listMatchAnalysisJobs: apiMocks.listMatchAnalysisJobs,
+  listMatchAnalysisJobItems: apiMocks.listMatchAnalysisJobItems,
+  cancelMatchAnalysisJob: apiMocks.cancelMatchAnalysisJob,
+  retryFailedMatchAnalysisJob: apiMocks.retryFailedMatchAnalysisJob,
+  deleteMatchAnalysisJob: apiMocks.deleteMatchAnalysisJob,
+  restoreMatchAnalysisJob: apiMocks.restoreMatchAnalysisJob,
+}));
+
+vi.mock("@/lib/api/workspacesApi", () => ({
+  getWorkspaceThread: apiMocks.getWorkspaceThread,
+}));
+
+vi.mock("@/lib/api/emailTasksApi", () => ({
+  approveDraft: apiMocks.approveDraft,
+  approveAndSend: apiMocks.approveAndSend,
+}));
+
+vi.mock("@/components/molecules/SubjectTemplateInput", () => ({
+  SubjectTemplateInput: ({
+    label,
+    value,
+    onChange,
+  }: {
+    label: string;
+    value: string;
+    onChange: (value: string) => void;
+  }) => (
+    <input
+      aria-label={label}
+      value={value}
+      onChange={(event) => onChange(event.currentTarget.value)}
+    />
+  ),
+}));
+
+vi.mock("@/components/molecules/EmailTemplateEditor", () => ({
+  EmailTemplateEditor: ({
+    label,
+    html,
+    onChange,
+  }: {
+    label: string;
+    html: string;
+    onChange: (value: { html: string; text: string }) => void;
+  }) => (
+    <textarea
+      aria-label={label}
+      value={html}
+      onChange={(event) =>
+        onChange({
+          html: event.currentTarget.value,
+          text: event.currentTarget.value.replace(/<[^>]+>/g, ""),
+        })
+      }
+    />
+  ),
+}));
 
 const buildCrawlJob = (
   overrides: Partial<CrawlJobSummaryDTO> = {},
@@ -77,10 +228,16 @@ describe("CrawlJobCard", () => {
     expect(latestEvent).toHaveAttribute("title", job.latest_event_message);
   });
 
-  it("shows delete action only in the current list", () => {
+  it.each([
+    "needs_review",
+    "partially_completed",
+    "completed",
+    "failed",
+    "canceled",
+  ] as const)("shows delete action for %s in the current list", (status) => {
     render(
       <CrawlJobCard
-        job={buildCrawlJob()}
+        job={buildCrawlJob({ status })}
         listView="current"
         pausingCrawlJobId={null}
         resumingCrawlJobId={null}
@@ -101,6 +258,33 @@ describe("CrawlJobCard", () => {
     expect(screen.getByRole("button", { name: "删除" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "恢复" })).not.toBeInTheDocument();
   });
+
+  it.each(["queued", "running", "paused"] as const)(
+    "hides delete action for %s in the current list",
+    (status) => {
+      render(
+        <CrawlJobCard
+          job={buildCrawlJob({ status })}
+          listView="current"
+          pausingCrawlJobId={null}
+          resumingCrawlJobId={null}
+          retryingCrawlJobId={null}
+          resumingCrawlJobReviewId={null}
+          onOpenDetails={vi.fn()}
+          onPause={vi.fn()}
+          onResume={vi.fn()}
+          onCancel={vi.fn()}
+          onRetry={vi.fn()}
+          onResumeReview={vi.fn()}
+          onDelete={vi.fn()}
+          onRestore={vi.fn()}
+          formatUpdatedAt={() => "05/01 14:49:02"}
+        />,
+      );
+
+      expect(screen.queryByRole("button", { name: "删除" })).not.toBeInTheDocument();
+    },
+  );
 
   it("shows restore action only in the trash list", () => {
     render(
@@ -181,6 +365,162 @@ const buildBatchItem = (
   ...overrides,
 });
 
+const buildWorkspaceThread = (
+  overrides: Partial<WorkspaceThreadDTO> = {},
+): WorkspaceThreadDTO => ({
+  professor: {
+    id: 21,
+    name: "模板直通导师",
+    email: "mentor@example.edu",
+    title: "Professor",
+    university: "Example University",
+    school: "School of Computing",
+    research_direction: "Human-centered AI",
+    recent_papers: ["Recent AI paper"],
+  },
+  identity: {
+    id: 1,
+    name: "默认身份",
+    profile_name: "申请人",
+    sender_name: "小明",
+    email_address: "student@example.com",
+  },
+  llm_profile: {
+    id: 2,
+    name: "默认模型",
+    provider: "openai",
+    model_name: "gpt-test",
+  },
+  material_options: [
+    {
+      id: 7,
+      display_name: "简历.pdf",
+      original_filename: "简历.pdf",
+      mime_type: "application/pdf",
+      size_bytes: 2048,
+      material_type: "resume",
+      is_primary: true,
+      created_at: "2026-05-08T00:00:00",
+    },
+  ],
+  current_task: {
+    id: 101,
+    source: "batch",
+    batch_task_id: 1,
+    parent_task_id: null,
+    status: "review_required",
+    cancellation_reason: null,
+    can_continue_manually: false,
+    can_write_follow_up: false,
+    outreach_generation_mode: "llm",
+    outreach_template_subject: "模板主题",
+    outreach_template_body_text: "模板正文",
+    outreach_template_body_html: "<p>模板正文</p>",
+    match_score: 92,
+    match_reason: "方向匹配",
+    fit_points: ["方向接近"],
+    risk_points: [],
+    match_keywords: ["AI"],
+    generated_subject: "申请与老师交流",
+    generated_content_text: "老师您好，我想交流。",
+    generated_content_html: "<p>老师您好，我想交流。</p>",
+    approved_subject: null,
+    approved_body_text: null,
+    approved_body_html: null,
+    primary_material_id: 7,
+    primary_material: null,
+    selected_material_ids: [7],
+    approved_at: null,
+    scheduled_at: null,
+    last_send_attempt_at: null,
+    sent_at: null,
+    last_rfc_message_id: null,
+    retry_count: 0,
+    last_error: null,
+    is_replied: false,
+    estimated_prompt_tokens: null,
+    estimated_completion_tokens_upper_bound: null,
+    estimated_total_tokens_upper_bound: null,
+    last_draft_prompt_tokens: null,
+    last_draft_completion_tokens: null,
+    last_draft_total_tokens: null,
+  },
+  messages: [],
+  ...overrides,
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  apiMocks.listBatchTasks.mockResolvedValue([]);
+  apiMocks.listBatchTaskItems.mockResolvedValue([]);
+  apiMocks.listCrawlJobs.mockResolvedValue([]);
+  apiMocks.getCrawlJob.mockResolvedValue(buildCrawlJob());
+  apiMocks.getCrawlJobEvents.mockResolvedValue([]);
+  apiMocks.listCrawlCandidates.mockResolvedValue([]);
+  apiMocks.listCrawlPages.mockResolvedValue([]);
+  apiMocks.listMatchAnalysisJobs.mockResolvedValue([]);
+  apiMocks.listMatchAnalysisJobItems.mockResolvedValue([]);
+  apiMocks.getWorkspaceThread.mockResolvedValue(buildWorkspaceThread());
+  apiMocks.approveDraft.mockResolvedValue(buildWorkspaceThread({
+    current_task: {
+      ...buildWorkspaceThread().current_task,
+      status: "approved",
+      approved_subject: "申请与老师交流",
+      approved_body_text: "老师您好，我想交流。",
+      approved_body_html: "<p>老师您好，我想交流。</p>",
+      approved_at: "2026-05-08T01:00:00",
+    },
+  }));
+  apiMocks.approveAndSend.mockResolvedValue(buildWorkspaceThread({
+    current_task: {
+      ...buildWorkspaceThread().current_task,
+      status: "sent",
+      sent_at: "2026-05-08T01:00:00",
+    },
+  }));
+});
+
+describe("TasksPage batch draft review", () => {
+  it("opens the generated draft inside the existing batch detail panel", async () => {
+    const task = buildBatchTask({
+      name: "AI 改写批量任务",
+      schedule_type: "scheduled",
+      review_required_count: 1,
+      approved_count: 0,
+    });
+    const item = buildBatchItem({
+      status: "review_required",
+      match_score: 92,
+    });
+    apiMocks.listBatchTasks.mockResolvedValue([task]);
+    apiMocks.listBatchTaskItems.mockResolvedValue([item]);
+    apiMocks.getWorkspaceThread.mockResolvedValue(buildWorkspaceThread());
+
+    render(
+      <MemoryRouter>
+        <TasksPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("AI 改写批量任务")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "查看详情" }));
+    expect(await screen.findByText("还未发送给")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "审核草稿" }));
+
+    await waitFor(() => {
+      expect(apiMocks.getWorkspaceThread).toHaveBeenCalledWith(21, 1, 2);
+    });
+    expect(await screen.findByText("批量审核草稿")).toBeInTheDocument();
+    expect(screen.getByLabelText("邮件主题")).toHaveValue("申请与老师交流");
+    expect(screen.getByLabelText("邮件正文")).toHaveValue(
+      "<p>老师您好，我想交流。</p>",
+    );
+    expect(screen.getByRole("button", { name: "审核通过" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "立即发送" })).not.toBeInTheDocument();
+  });
+});
+
 describe("TaskListViewSwitch", () => {
   it("aligns the current/trash switch to the right edge", () => {
     render(
@@ -197,6 +537,37 @@ describe("TaskListViewSwitch", () => {
     const activeButton = screen.getByRole("button", { name: "当前任务" });
     expect(activeButton).toHaveClass("bg-primary");
     expect(activeButton).not.toHaveClass("bg-stone-900");
+  });
+});
+
+describe("crawl job event failure reasons", () => {
+  it("reads nested enrichment failure reasons from agent trace raw payloads", () => {
+    const event: CrawlJobEventDTO = {
+      id: "event-1",
+      job_id: 2,
+      event_type: "enrichment",
+      message: "候选导师详情补全失败：方玉明",
+      created_at: "2026-05-08T15:50:18Z",
+      raw: {
+        id: "",
+        event_type: "enrichment",
+        message: "候选导师详情补全失败：方玉明",
+        created_at: "2026-05-08T15:50:18Z",
+        raw: {
+          event_type: "enrichment",
+          message: "候选导师详情补全失败：方玉明",
+          raw: {
+            candidate_id: 2,
+            status: "failed",
+            error_message: "URL 不在入口页面同域范围内，已拒绝浏览器调查",
+          },
+        },
+      },
+    };
+
+    expect(getCrawlEventFailureReason(event)).toBe(
+      "URL 不在入口页面同域范围内，已拒绝浏览器调查",
+    );
   });
 });
 

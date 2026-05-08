@@ -17,6 +17,7 @@ from app.schemas.email_task import (
 from app.schemas.workspace import WorkspaceThreadRead
 from app.services import llm_runtime
 from app.services.task_runtime import (
+    approve_draft_task,
     approve_and_schedule_task,
     approve_and_send_task,
     calculate_task_match_once,
@@ -148,6 +149,18 @@ async def change_outreach_config(
             outreach_template_body_text=payload.outreach_template_body_text,
             outreach_template_body_html=payload.outreach_template_body_html,
         ),
+    )
+
+
+@router.post("/{task_id}/approve", response_model=WorkspaceThreadRead)
+async def approve_draft(
+    task_id: int,
+    payload: EmailTaskApprovalRequest,
+    session: AsyncSession = Depends(get_async_session),
+) -> WorkspaceThreadRead:
+    return await _run_workspace_action(
+        session,
+        lambda: approve_draft_task(get_session_factory(), task_id, payload),
     )
 
 

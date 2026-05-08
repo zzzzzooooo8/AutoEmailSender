@@ -849,6 +849,29 @@ async def approve_and_send_task(
     return professor_id, identity_id, llm_profile_id
 
 
+async def approve_draft_task(
+    session_factory: async_sessionmaker[AsyncSession],
+    task_id: int,
+    payload: EmailTaskApprovalRequest,
+) -> tuple[int, int, int]:
+    async with session_factory() as session:
+        task = await _load_email_task(session, task_id)
+        if not task:
+            raise ValueError(f"EmailTask {task_id} 不存在")
+        _ensure_task_allows_legacy_manual_actions(task)
+        await _snapshot_approval(session, task, payload)
+        task.status = EmailTaskStatus.APPROVED.value
+        task.scheduled_at = None
+        await _record_email_task_log(
+            session,
+            task,
+            "email_task.approved",
+            metadata={"selected_material_ids": task.selected_material_ids},
+        )
+        await session.commit()
+        return task.professor_id, task.identity_id, task.llm_profile_id
+
+
 async def approve_and_schedule_task(
     session_factory: async_sessionmaker[AsyncSession],
     task_id: int,

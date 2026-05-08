@@ -414,7 +414,12 @@ def is_allowed_crawl_url(start_url: str, candidate_url: str) -> bool:
         return False
     start_host = (start.hostname or "").lower()
     candidate_host = (candidate.hostname or "").lower()
-    return _registrable_domain(start_host) == _registrable_domain(candidate_host)
+    start_domain = _registrable_domain(start_host)
+    candidate_domain = _registrable_domain(candidate_host)
+    return start_domain == candidate_domain or _is_same_chinese_university_domain(
+        start_domain,
+        candidate_domain,
+    )
 
 
 def is_safe_public_crawl_url(url: str) -> bool:
@@ -503,6 +508,21 @@ def _registrable_domain(hostname: str) -> str:
     if suffix in MULTI_LABEL_PUBLIC_SUFFIXES and len(labels) >= 3:
         return ".".join(labels[-3:])
     return ".".join(labels[-2:])
+
+
+def _is_same_chinese_university_domain(left: str, right: str) -> bool:
+    left_stem = _chinese_university_domain_stem(left)
+    right_stem = _chinese_university_domain_stem(right)
+    return left_stem is not None and left_stem == right_stem
+
+
+def _chinese_university_domain_stem(domain: str) -> str | None:
+    if domain.endswith(".edu.cn"):
+        labels = domain.split(".")
+        return labels[-3] if len(labels) >= 3 else None
+    if domain.endswith(".cn") and domain.count(".") == 1:
+        return domain.split(".", 1)[0]
+    return None
 
 
 class _PinnedCrawlNetworkBackend(httpcore.AsyncNetworkBackend):

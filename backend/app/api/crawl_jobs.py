@@ -608,6 +608,8 @@ CRAWL_JOB_DELETABLE_STATUSES = {
     CrawlJobStatus.COMPLETED.value,
     CrawlJobStatus.FAILED.value,
     CrawlJobStatus.CANCELED.value,
+    CrawlJobStatus.NEEDS_REVIEW.value,
+    CrawlJobStatus.PARTIALLY_COMPLETED.value,
 }
 
 

@@ -18,10 +18,14 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { EmailTemplateEditor } from "@/components/molecules/EmailTemplateEditor";
+import { SubjectTemplateInput } from "@/components/molecules/SubjectTemplateInput";
 import { useNotification } from "@/context/NotificationContext";
 import { useSelectionContext } from "@/context/SelectionContext";
 import { useConfirmDialog } from "@/lib/useConfirmDialog";
 import { safeRecordUserAction } from "@/lib/diagnosticUserActions";
+import { approveAndSend, approveDraft } from "@/lib/api/emailTasksApi";
+import { getWorkspaceThread } from "@/lib/api/workspacesApi";
 import {
   deleteBatchTask,
   listBatchTasks,
@@ -61,13 +65,19 @@ import {
   pruneSelectedCandidateIds,
 } from "@/features/crawl-review/client/reviewCandidates";
 import {
+  getCandidateEnrichmentFailureMessage,
+  getCrawlEventFailureReason,
+} from "@/features/crawl-review/client/crawlJobEvents";
+import {
   buildBatchPendingItemAction,
   getBatchTaskWaitingSendCount,
 } from "@/features/batch-tasks/client/batchTaskDisplay";
 import { formatApiDateTime } from "@/lib/dateTime";
 import { getPageItems, getTotalPages } from "@/lib/pagination";
+import { deriveTextFromEmailHtml, textToEmailHtml } from "@/lib/richEmail";
 import {
   BATCH_TASK_STATUS_LABELS,
+  MATERIAL_TYPE_LABELS,
   MATCH_ANALYSIS_JOB_STATUS_LABELS,
   PROFESSOR_STATUS_LABELS,
   type BatchTaskCardDTO,
@@ -83,6 +93,7 @@ import {
   type MatchAnalysisJobStatus,
   type TaskListView,
   type WorkspaceTaskStatus,
+  type WorkspaceThreadDTO,
 } from "@/types";
 
 type TasksTab = "batch" | "crawl" | "match";
@@ -162,59 +173,6 @@ const SCHEDULE_DATE_PATTERN = /^\d{4}-(\d{2})-(\d{2})$/;
 const TASKS_PAGE_SIZE = 8;
 const MONITOR_SECTION_PAGE_SIZE = 5;
 
-function getCandidateEnrichmentFailureMessage(
-  candidate: CrawlCandidateDTO,
-  events: CrawlJobEventDTO[],
-): string | null {
-  const failedEvent = [...events]
-    .reverse()
-    .find((event) => {
-      if (event.event_type !== "enrichment") {
-        return false;
-      }
-      const raw = event.raw;
-      if (!raw || typeof raw !== "object") {
-        return false;
-      }
-      const rawCandidateId = (raw as Record<string, unknown>).candidate_id;
-      const rawStatus = (raw as Record<string, unknown>).status;
-      const rawErrorMessage = (raw as Record<string, unknown>).error_message;
-      return (
-        rawCandidateId === candidate.id &&
-        rawStatus === "failed" &&
-        typeof rawErrorMessage === "string" &&
-        rawErrorMessage.trim().length > 0
-      );
-    });
-
-  if (!failedEvent || !failedEvent.raw) {
-    return null;
-  }
-
-  const errorMessage = (failedEvent.raw as Record<string, unknown>).error_message;
-  return typeof errorMessage === "string" ? errorMessage : null;
-}
-
-function getCrawlEventFailureReason(event: CrawlJobEventDTO): string | null {
-  if (event.event_type !== "enrichment") {
-    return null;
-  }
-  const raw = event.raw;
-  if (!raw || typeof raw !== "object") {
-    return null;
-  }
-  const rawStatus = (raw as Record<string, unknown>).status;
-  const rawErrorMessage = (raw as Record<string, unknown>).error_message;
-  if (
-    rawStatus !== "failed" ||
-    typeof rawErrorMessage !== "string" ||
-    rawErrorMessage.trim().length === 0
-  ) {
-    return null;
-  }
-  return rawErrorMessage;
-}
-
 const formatScheduleDate = (value: string) => {
   const match = SCHEDULE_DATE_PATTERN.exec(value);
   if (!match) {
@@ -275,6 +233,8 @@ type TaskListViewSwitchProps = {
 };
 
 const canDeleteCrawlJob = (job: CrawlJobSummaryDTO) =>
+  job.status === "needs_review" ||
+  job.status === "partially_completed" ||
   job.status === "completed" ||
   job.status === "failed" ||
   job.status === "canceled";
@@ -618,6 +578,56 @@ const formatDuration = (seconds: number) => {
   return `${remainingSeconds}秒`;
 };
 
+type RichEmailValue = { html: string; text: string };
+
+const getLatestDraftMessage = (thread: WorkspaceThreadDTO) => {
+  for (let index = thread.messages.length - 1; index >= 0; index -= 1) {
+    if (thread.messages[index].direction === "draft") {
+      return thread.messages[index];
+    }
+  }
+  return null;
+};
+
+const deriveBatchReviewText = (content: string | null | undefined, html: string | null | undefined) => {
+  const trimmedContent = content?.trim();
+  if (trimmedContent) {
+    return trimmedContent;
+  }
+  const trimmedHtml = html?.trim();
+  return trimmedHtml ? deriveTextFromEmailHtml(trimmedHtml) : "";
+};
+
+const getBatchReviewDraft = (thread: WorkspaceThreadDTO) => {
+  const latestDraft = getLatestDraftMessage(thread);
+  const task = thread.current_task;
+  const subject =
+    task.approved_subject ??
+    task.generated_subject ??
+    latestDraft?.subject ??
+    "";
+  const html =
+    task.approved_body_html ??
+    task.generated_content_html ??
+    latestDraft?.content_html ??
+    task.outreach_template_body_html ??
+    "";
+  const text = deriveBatchReviewText(
+    task.approved_body_text ??
+      task.generated_content_text ??
+      latestDraft?.content ??
+      task.outreach_template_body_text,
+    html,
+  );
+
+  return {
+    subject,
+    html: html || textToEmailHtml(text),
+    text,
+    selectedMaterialIds: task.selected_material_ids ?? [],
+  };
+};
+
 export const TasksPage = () => {
   const { selectedIdentityId, selectedLlmProfileId } = useSelectionContext();
   const { notifyError, notifySuccess } = useNotification();
@@ -640,6 +650,16 @@ export const TasksPage = () => {
     BatchTaskItemDTO[]
   >([]);
   const [batchTaskDetailsLoading, setBatchTaskDetailsLoading] = useState(false);
+  const [batchReviewItemId, setBatchReviewItemId] = useState<number | null>(null);
+  const [batchReviewThread, setBatchReviewThread] =
+    useState<WorkspaceThreadDTO | null>(null);
+  const [batchReviewLoading, setBatchReviewLoading] = useState(false);
+  const [batchReviewActing, setBatchReviewActing] = useState(false);
+  const [batchReviewSubject, setBatchReviewSubject] = useState("");
+  const [batchReviewContentText, setBatchReviewContentText] = useState("");
+  const [batchReviewContentHtml, setBatchReviewContentHtml] = useState("");
+  const [batchReviewSelectedMaterialIds, setBatchReviewSelectedMaterialIds] =
+    useState<number[]>([]);
   const [loading, setLoading] = useState(false);
   const [matchAnalysisJobs, setMatchAnalysisJobs] = useState<
     MatchAnalysisJobDTO[]
@@ -708,6 +728,7 @@ export const TasksPage = () => {
   const activeTasksRequestKeyRef = useRef<string | null>(null);
   const latestTasksRequestIdRef = useRef(0);
   const latestBatchTaskDetailsRequestIdRef = useRef(0);
+  const latestBatchReviewRequestIdRef = useRef(0);
   const latestMatchJobsRequestIdRef = useRef(0);
   const latestMatchJobDetailsRequestIdRef = useRef(0);
   const latestCrawlJobsRequestIdRef = useRef(0);
@@ -794,6 +815,16 @@ export const TasksPage = () => {
     () =>
       selectedBatchTaskItems.filter((item) => item.status === "send_failed"),
     [selectedBatchTaskItems],
+  );
+  const reviewRequiredBatchTaskItems = useMemo(
+    () => selectedBatchTaskItems.filter((item) => item.status === "review_required"),
+    [selectedBatchTaskItems],
+  );
+  const activeBatchReviewItem = useMemo(
+    () =>
+      selectedBatchTaskItems.find((item) => item.id === batchReviewItemId) ??
+      null,
+    [batchReviewItemId, selectedBatchTaskItems],
   );
   const selectedBatchWaitingSendCount = selectedBatchTask
     ? getBatchTaskWaitingSendCount(selectedBatchTask)
@@ -1745,8 +1776,152 @@ const selectedCrawlJobCanReview =
     lastCrawlJobDetailsLoadErrorRef.current = null;
   };
 
+  const resetBatchDraftReview = () => {
+    latestBatchReviewRequestIdRef.current += 1;
+    setBatchReviewItemId(null);
+    setBatchReviewThread(null);
+    setBatchReviewLoading(false);
+    setBatchReviewActing(false);
+    setBatchReviewSubject("");
+    setBatchReviewContentText("");
+    setBatchReviewContentHtml("");
+    setBatchReviewSelectedMaterialIds([]);
+  };
+
+  const syncBatchDraftReview = (thread: WorkspaceThreadDTO) => {
+    const draft = getBatchReviewDraft(thread);
+    setBatchReviewThread(thread);
+    setBatchReviewSubject(draft.subject);
+    setBatchReviewContentText(draft.text);
+    setBatchReviewContentHtml(draft.html);
+    setBatchReviewSelectedMaterialIds(draft.selectedMaterialIds);
+  };
+
+  const openBatchDraftReview = async (item: BatchTaskItemDTO) => {
+    if (!selectedBatchTask) {
+      return;
+    }
+
+    const requestId = latestBatchReviewRequestIdRef.current + 1;
+    latestBatchReviewRequestIdRef.current = requestId;
+    setBatchReviewItemId(item.id);
+    setBatchReviewThread(null);
+    setBatchReviewLoading(true);
+    try {
+      const thread = await getWorkspaceThread(
+        item.professor_id,
+        selectedBatchTask.identity_id,
+        selectedBatchTask.llm_profile_id,
+      );
+      if (latestBatchReviewRequestIdRef.current !== requestId) {
+        return;
+      }
+      syncBatchDraftReview(thread);
+    } catch (actionError) {
+      if (latestBatchReviewRequestIdRef.current !== requestId) {
+        return;
+      }
+      const message =
+        actionError instanceof Error ? actionError.message : "加载草稿失败";
+      notifyError("加载草稿失败", message);
+      setBatchReviewItemId(null);
+      setBatchReviewThread(null);
+    } finally {
+      if (latestBatchReviewRequestIdRef.current === requestId) {
+        setBatchReviewLoading(false);
+      }
+    }
+  };
+
+  const handleBatchReviewContentChange = (value: RichEmailValue) => {
+    setBatchReviewContentHtml(value.html);
+    setBatchReviewContentText(value.text);
+  };
+
+  const buildBatchReviewPayload = () => ({
+    subject: batchReviewSubject.trim() || null,
+    body_text:
+      batchReviewContentText.trim() ||
+      deriveBatchReviewText("", batchReviewContentHtml),
+    body_html: batchReviewContentHtml || null,
+    selected_material_ids: batchReviewSelectedMaterialIds,
+  });
+
+  const handleApproveBatchDraft = async () => {
+    const taskId = batchReviewThread?.current_task.id;
+    if (!taskId || !selectedBatchTask || !activeBatchReviewItem) {
+      return;
+    }
+    const nextItem =
+      reviewRequiredBatchTaskItems.find((item) => item.id !== activeBatchReviewItem.id) ??
+      null;
+    setBatchReviewActing(true);
+    try {
+      await approveDraft(taskId, buildBatchReviewPayload());
+      notifySuccess("草稿已审核通过");
+      setSelectedBatchTaskItems((current) =>
+        current.map((item) =>
+          item.id === activeBatchReviewItem.id
+            ? { ...item, status: "approved" }
+            : item,
+        ),
+      );
+      await Promise.all([loadBatchTaskDetails(selectedBatchTask.id), loadTasks()]);
+      if (nextItem) {
+        await openBatchDraftReview(nextItem);
+      } else {
+        resetBatchDraftReview();
+      }
+    } catch (actionError) {
+      const message =
+        actionError instanceof Error ? actionError.message : "审核草稿失败";
+      notifyError("审核草稿失败", message);
+    } finally {
+      setBatchReviewActing(false);
+    }
+  };
+
+  const handleSendBatchDraftNow = async () => {
+    const taskId = batchReviewThread?.current_task.id;
+    if (!taskId || !selectedBatchTask || !activeBatchReviewItem) {
+      return;
+    }
+    const confirmed = await confirm({
+      title: "确认立即发送这封真实邮件？",
+      description: `将真实发给 ${
+        batchReviewThread?.professor.email ?? "当前导师邮箱"
+      }，并附带 ${batchReviewSelectedMaterialIds.length} 份附件。`,
+      confirmLabel: "确认发送",
+      cancelLabel: "再检查一下",
+      tone: "danger",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    setBatchReviewActing(true);
+    try {
+      await approveAndSend(taskId, buildBatchReviewPayload());
+      notifySuccess("邮件已提交发送");
+      setSelectedBatchTaskItems((current) =>
+        current.map((item) =>
+          item.id === activeBatchReviewItem.id ? { ...item, status: "sent" } : item,
+        ),
+      );
+      await Promise.all([loadBatchTaskDetails(selectedBatchTask.id), loadTasks()]);
+      resetBatchDraftReview();
+    } catch (actionError) {
+      const message =
+        actionError instanceof Error ? actionError.message : "发送邮件失败";
+      notifyError("发送邮件失败", message);
+    } finally {
+      setBatchReviewActing(false);
+    }
+  };
+
   const closeBatchTaskDetails = () => {
     latestBatchTaskDetailsRequestIdRef.current += 1;
+    resetBatchDraftReview();
     setSelectedBatchTask(null);
     setSelectedBatchTaskItems([]);
     setBatchTaskDetailsLoading(false);
@@ -1871,6 +2046,19 @@ const selectedCrawlJobCanReview =
       notifyError("恢复任务失败", message);
     }
   };
+
+  const batchDraftReviewOpen = batchReviewItemId !== null;
+  const batchReviewEditorHtml =
+    batchReviewContentHtml || textToEmailHtml(batchReviewContentText);
+  const batchReviewCanSubmit =
+    Boolean(batchReviewThread?.current_task.id) &&
+    Boolean(
+      batchReviewSubject.trim() ||
+        batchReviewContentText.trim() ||
+        deriveBatchReviewText("", batchReviewContentHtml).trim(),
+    );
+  const canSendBatchReviewImmediately =
+    selectedBatchTask?.schedule_type === "immediate";
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-8">
@@ -2342,34 +2530,239 @@ const selectedCrawlJobCanReview =
           <section
             role="dialog"
             aria-label="批量任务详情"
-            className="flex h-full w-full flex-col overflow-hidden bg-white shadow-xl sm:max-w-4xl sm:rounded-3xl"
+            className={
+              batchDraftReviewOpen
+                ? "flex h-full w-full flex-col overflow-hidden bg-white shadow-xl sm:max-w-7xl sm:rounded-3xl"
+                : "flex h-full w-full flex-col overflow-hidden bg-white shadow-xl sm:max-w-4xl sm:rounded-3xl"
+            }
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4 border-b border-stone-200 bg-[#fcfbf8] px-6 py-5">
               <div>
                 <div className="flex items-center gap-2 text-xs font-medium text-stone-500">
                   <Mail className="h-4 w-4 text-primary" />
-                  批量邮件任务
+                  {batchDraftReviewOpen ? "批量草稿审核" : "批量邮件任务"}
                 </div>
                 <h2 className="mt-2 text-xl font-semibold text-stone-900">
-                  {selectedBatchTask.name}
+                  {batchDraftReviewOpen ? "批量审核草稿" : selectedBatchTask.name}
                 </h2>
                 <p className="mt-2 text-sm text-stone-500">
-                  {buildScheduleLabel(selectedBatchTask)}
+                  {batchDraftReviewOpen
+                    ? `${selectedBatchTask.name} · ${activeBatchReviewItem?.professor_name ?? "正在加载"}`
+                    : buildScheduleLabel(selectedBatchTask)}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={closeBatchTaskDetails}
-                className="ui-btn-secondary shrink-0"
-                aria-label="关闭"
-              >
-                <X className="h-4 w-4" />
-                关闭
-              </button>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                {batchDraftReviewOpen ? (
+                  <button
+                    type="button"
+                    onClick={resetBatchDraftReview}
+                    className="ui-btn-secondary"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    返回详情
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={closeBatchTaskDetails}
+                  className="ui-btn-secondary"
+                  aria-label="关闭"
+                >
+                  <X className="h-4 w-4" />
+                  关闭
+                </button>
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-5">
+              {batchDraftReviewOpen ? (
+                <div className="grid min-h-full gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
+                  <aside className="rounded-3xl border border-stone-200 bg-stone-50/70 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-semibold text-stone-900">
+                          待审核队列
+                        </h3>
+                        <p className="mt-1 text-xs text-stone-500">
+                          {reviewRequiredBatchTaskItems.length} 封草稿等待处理
+                        </p>
+                      </div>
+                      {batchReviewLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-stone-400" />
+                      ) : null}
+                    </div>
+                    <div className="mt-4 space-y-2">
+                      {reviewRequiredBatchTaskItems.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => void openBatchDraftReview(item)}
+                          className={
+                            item.id === batchReviewItemId
+                              ? "w-full rounded-2xl border border-primary/25 bg-white px-4 py-3 text-left shadow-sm"
+                              : "w-full rounded-2xl border border-stone-200 bg-white/70 px-4 py-3 text-left transition hover:border-primary/20 hover:bg-white"
+                          }
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-semibold text-stone-900">
+                                {item.professor_name}
+                              </div>
+                              <div className="mt-1 truncate text-xs text-stone-500">
+                                {[item.professor_title, item.professor_school]
+                                  .filter(Boolean)
+                                  .join(" / ") || "暂无补充信息"}
+                              </div>
+                            </div>
+                            {item.match_score !== null ? (
+                              <span className="shrink-0 rounded-full bg-primary/10 px-2 py-1 text-xs text-primary">
+                                {item.match_score}
+                              </span>
+                            ) : null}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </aside>
+
+                  <section className="min-w-0 rounded-3xl border border-stone-200 bg-white p-5 shadow-sm">
+                    {batchReviewLoading && !batchReviewThread ? (
+                      <div className="flex min-h-[520px] items-center justify-center gap-2 text-sm text-stone-500">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        正在加载草稿...
+                      </div>
+                    ) : batchReviewThread ? (
+                      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_280px]">
+                        <div className="min-w-0">
+                          <div className="mb-5 rounded-2xl border border-primary/10 bg-primary/5 px-4 py-3">
+                            <div className="text-sm font-semibold text-stone-900">
+                              {batchReviewThread.professor.name}
+                            </div>
+                            <div className="mt-1 text-xs leading-5 text-stone-600">
+                              {[
+                                batchReviewThread.professor.title,
+                                batchReviewThread.professor.university,
+                                batchReviewThread.professor.school,
+                                batchReviewThread.professor.email,
+                              ]
+                                .filter(Boolean)
+                                .join(" / ") || "导师信息待补充"}
+                            </div>
+                          </div>
+                          <div className="space-y-4">
+                            <SubjectTemplateInput
+                              label="邮件主题"
+                              value={batchReviewSubject}
+                              onChange={setBatchReviewSubject}
+                              placeholder="给老师的邮件主题"
+                            />
+                            <EmailTemplateEditor
+                              label="邮件正文"
+                              html={batchReviewEditorHtml}
+                              onChange={handleBatchReviewContentChange}
+                            />
+                          </div>
+                        </div>
+
+                        <aside className="space-y-4">
+                          <div className="rounded-2xl border border-stone-100 bg-stone-50/70 px-4 py-3">
+                            <div className="text-xs font-medium text-stone-500">
+                              匹配摘要
+                            </div>
+                            <div className="mt-2 text-sm font-semibold text-stone-900">
+                              {batchReviewThread.current_task.match_score !== null
+                                ? `匹配分 ${batchReviewThread.current_task.match_score}`
+                                : "暂无匹配分"}
+                            </div>
+                            {batchReviewThread.current_task.match_reason ? (
+                              <p className="mt-2 text-xs leading-5 text-stone-600">
+                                {batchReviewThread.current_task.match_reason}
+                              </p>
+                            ) : null}
+                          </div>
+
+                          <div className="rounded-2xl border border-stone-100 bg-stone-50/70 px-4 py-3">
+                            <div className="text-xs font-medium text-stone-500">
+                              随信附件
+                            </div>
+                            <div className="mt-3 space-y-2">
+                              {batchReviewThread.material_options.length > 0 ? (
+                                batchReviewThread.material_options.map((material) => {
+                                  const checked = batchReviewSelectedMaterialIds.includes(material.id);
+                                  return (
+                                    <label
+                                      key={material.id}
+                                      className="flex items-start gap-2 rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={() =>
+                                          setBatchReviewSelectedMaterialIds((current) =>
+                                            checked
+                                              ? current.filter((id) => id !== material.id)
+                                              : [...current, material.id],
+                                          )
+                                        }
+                                      />
+                                      <span className="min-w-0">
+                                        <span className="block truncate font-medium">
+                                          {material.display_name}
+                                        </span>
+                                        <span className="mt-0.5 block text-xs text-stone-500">
+                                          {MATERIAL_TYPE_LABELS[material.material_type]}
+                                        </span>
+                                      </span>
+                                    </label>
+                                  );
+                                })
+                              ) : (
+                                <p className="text-sm text-stone-500">
+                                  暂无可发送材料。
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="rounded-2xl border border-stone-100 bg-white px-4 py-3">
+                            <div className="text-xs leading-5 text-stone-500">
+                              审核通过后会进入批量发送队列；定时批量任务会继续遵守日期、时间窗口和每日数量限制。
+                            </div>
+                            <div className="mt-4 flex flex-col gap-2">
+                              <button
+                                type="button"
+                                onClick={() => void handleApproveBatchDraft()}
+                                disabled={batchReviewActing || !batchReviewCanSubmit}
+                                className="ui-btn-primary justify-center disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                <CheckCircle2 className="h-4 w-4" />
+                                审核通过
+                              </button>
+                              {canSendBatchReviewImmediately ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleSendBatchDraftNow()}
+                                  disabled={batchReviewActing || !batchReviewCanSubmit}
+                                  className="ui-btn-secondary justify-center disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  <Mail className="h-4 w-4" />
+                                  立即发送
+                                </button>
+                              ) : null}
+                            </div>
+                          </div>
+                        </aside>
+                      </div>
+                    ) : (
+                      <div className="flex min-h-[520px] items-center justify-center text-sm text-stone-500">
+                        请选择一封待审核草稿。
+                      </div>
+                    )}
+                  </section>
+                </div>
+              ) : (
+              <>
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-2xl border border-stone-100 bg-white px-4 py-3">
                   <div className="text-xs font-medium text-stone-500">
@@ -2553,6 +2946,14 @@ const selectedCrawlJobCanReview =
                               <span className="font-medium text-stone-600">
                                 {action.text}
                               </span>
+                            ) : action?.kind === "link" && item.status === "review_required" ? (
+                              <button
+                                type="button"
+                                onClick={() => void openBatchDraftReview(item)}
+                                className="font-medium text-primary"
+                              >
+                                {action.text}
+                              </button>
                             ) : action?.kind === "link" ? (
                               <Link
                                 to={`/workspace/${item.professor_id}`}
@@ -2703,6 +3104,8 @@ const selectedCrawlJobCanReview =
                   </div>
                 </dl>
               </section>
+              </>
+              )}
             </div>
           </section>
         </div>

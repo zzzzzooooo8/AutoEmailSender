@@ -967,6 +967,52 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertNotIn("{{name}}", kwargs["body_html"])
         self.assertEqual(response.json()["current_task"]["approved_subject"], "申请与{{name}}老师交流")
 
+    def test_approve_draft_snapshots_content_without_immediate_send(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "待审核导师",
+                "email": "review@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Agents",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+        ensure_response = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(ensure_response.status_code, 200, msg=ensure_response.text)
+        task_id = ensure_response.json()["current_task"]["id"]
+
+        with patch(
+            "app.services.task_runtime.mail_runtime.send_email",
+            AsyncMock(),
+        ) as mocked_send:
+            response = self.client.post(
+                f"/api/email-tasks/{task_id}/approve",
+                json={
+                    "subject": "审核后的主题",
+                    "body_text": "审核后的正文",
+                    "body_html": "<p>审核后的正文</p>",
+                    "selected_material_ids": [],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        self.assertEqual(response.json()["current_task"]["status"], "approved")
+        self.assertEqual(response.json()["current_task"]["approved_subject"], "审核后的主题")
+        mocked_send.assert_not_awaited()
+
     def test_identity_llm_mode_allows_empty_template_defaults(self) -> None:
         response = self.client.post(
             "/api/identities",

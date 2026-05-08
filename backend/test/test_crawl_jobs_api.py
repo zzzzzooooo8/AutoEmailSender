@@ -144,7 +144,7 @@ class CrawlJobsApiTests(unittest.TestCase):
         self.assertEqual(payload[1]["school"], "学院 1")
 
     def test_crawl_job_delete_restore_and_trash_view(self) -> None:
-        created = self.client.post(
+        blocked = self.client.post(
             "/api/crawl-jobs",
             json={
                 "university": "示例大学",
@@ -153,21 +153,49 @@ class CrawlJobsApiTests(unittest.TestCase):
                 "llm_profile_id": None,
             },
         )
-        self.assertEqual(created.status_code, 201, msg=created.text)
-        job_id = created.json()["id"]
+        self.assertEqual(blocked.status_code, 201, msg=blocked.text)
+        blocked_job_id = blocked.json()["id"]
 
-        blocked = self.client.post(f"/api/crawl-jobs/{job_id}/delete")
+        blocked = self.client.post(f"/api/crawl-jobs/{blocked_job_id}/delete")
         self.assertEqual(blocked.status_code, 400)
         self.assertIn("请先中止/取消任务后再删除", blocked.json()["detail"])
 
-        canceled = self.client.post(f"/api/crawl-jobs/{job_id}/cancel")
+        for status in [
+            "needs_review",
+            "partially_completed",
+            "completed",
+            "failed",
+            "canceled",
+        ]:
+            created = self.client.post(
+                "/api/crawl-jobs",
+                json={
+                    "university": f"示例大学-{status}",
+                    "school": "计算机学院",
+                    "start_url": "https://example.edu/faculty",
+                    "llm_profile_id": None,
+                },
+            )
+            self.assertEqual(created.status_code, 201, msg=created.text)
+            job_id = created.json()["id"]
+            if status == "canceled":
+                canceled = self.client.post(f"/api/crawl-jobs/{job_id}/cancel")
+                self.assertEqual(canceled.status_code, 200, msg=canceled.text)
+            else:
+                self._set_job_status(job_id, status)
+
+            deleted = self.client.post(f"/api/crawl-jobs/{job_id}/delete")
+            self.assertEqual(deleted.status_code, 200, msg=deleted.text)
+            self.assertIsNotNone(deleted.json()["deleted_at"])
+
+            repeated_delete = self.client.post(f"/api/crawl-jobs/{job_id}/delete")
+            self.assertEqual(repeated_delete.status_code, 200, msg=repeated_delete.text)
+
+        canceled = self.client.post(f"/api/crawl-jobs/{blocked_job_id}/cancel")
         self.assertEqual(canceled.status_code, 200, msg=canceled.text)
-        deleted = self.client.post(f"/api/crawl-jobs/{job_id}/delete")
+        deleted = self.client.post(f"/api/crawl-jobs/{blocked_job_id}/delete")
         self.assertEqual(deleted.status_code, 200, msg=deleted.text)
         self.assertIsNotNone(deleted.json()["deleted_at"])
-
-        repeated_delete = self.client.post(f"/api/crawl-jobs/{job_id}/delete")
-        self.assertEqual(repeated_delete.status_code, 200, msg=repeated_delete.text)
 
         current = self.client.get("/api/crawl-jobs")
         self.assertEqual(current.status_code, 200)
@@ -175,13 +203,13 @@ class CrawlJobsApiTests(unittest.TestCase):
 
         trash = self.client.get("/api/crawl-jobs", params={"view": "trash"})
         self.assertEqual(trash.status_code, 200)
-        self.assertEqual([item["id"] for item in trash.json()], [job_id])
+        self.assertEqual(len(trash.json()), 6)
 
-        restored = self.client.post(f"/api/crawl-jobs/{job_id}/restore")
+        restored = self.client.post(f"/api/crawl-jobs/{blocked_job_id}/restore")
         self.assertEqual(restored.status_code, 200, msg=restored.text)
         self.assertIsNone(restored.json()["deleted_at"])
 
-        repeated_restore = self.client.post(f"/api/crawl-jobs/{job_id}/restore")
+        repeated_restore = self.client.post(f"/api/crawl-jobs/{blocked_job_id}/restore")
         self.assertEqual(repeated_restore.status_code, 200, msg=repeated_restore.text)
 
     def test_create_crawl_job_rejects_unsafe_start_urls_item(self) -> None:

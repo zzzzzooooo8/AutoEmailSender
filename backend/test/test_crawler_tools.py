@@ -267,6 +267,20 @@ class CrawlerToolTests(unittest.TestCase):
                 )
             )
 
+    def test_is_allowed_crawl_url_allows_same_chinese_university_cn_domain(self) -> None:
+        with patch(
+            "app.services.crawler_tools.socket.getaddrinfo",
+            return_value=[
+                (0, 0, 0, "", ("93.184.216.34", 80)),
+            ],
+        ):
+            self.assertTrue(
+                is_allowed_crawl_url(
+                    "https://cai.jxufe.edu.cn/lists/26.html",
+                    "http://sim.jxufe.cn/static/JDMKL/ymfang.html",
+                )
+            )
+
     def test_is_safe_public_crawl_url_rejects_unsafe_ip_literals_and_localhost(self) -> None:
         for url in (
             "http://127.0.0.1/faculty",
