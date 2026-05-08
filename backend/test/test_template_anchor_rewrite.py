@@ -84,3 +84,35 @@ class TemplateAnchorRewriteTests(unittest.TestCase):
                 anchored,
                 [{"segment_id": "seg_1", "text": "[[A2]] 普通 [[A1]]"}],
             )
+
+    def test_apply_anchored_replacements_avoids_comma_boundary_artifact(self) -> None:
+        document = build_template_run_document(
+            "<p><span>以下是我的个人介绍和未来规划</span><span>，</span><span>附件中是我的简历。</span></p>",
+        )
+        anchored = build_anchored_template_document(document)
+
+        rendered = apply_anchored_template_replacements(
+            document,
+            anchored,
+            [{"segment_id": "seg_1", "text": "以下是我的个人情况与未来规划，附件中是我的简历。"}],
+        )
+
+        self.assertIn("未来规划，附件中", rendered.text)
+        self.assertNotIn("未来规划。 ，", rendered.text)
+        self.assertNotIn("未来规划，，", rendered.text)
+
+    def test_apply_anchored_replacements_avoids_split_project_duplicate(self) -> None:
+        document = build_template_run_document(
+            "<p><span>④多模态谣言检测模型的对抗攻击与数据增强研究</span>"
+            "<span>（</span><span>科研</span><span>项目）：基于文本风格改写方法。</span></p>",
+        )
+        anchored = build_anchored_template_document(document)
+
+        rendered = apply_anchored_template_replacements(
+            document,
+            anchored,
+            [{"segment_id": "seg_1", "text": "④多模态谣言检测模型的对抗攻击与数据增强研究（科研项目）：基于文本风格改写方法。"}],
+        )
+
+        self.assertIn("（科研项目）：", rendered.text)
+        self.assertNotIn("科研科研项目", rendered.text)
