@@ -148,7 +148,7 @@ describe("CreateTaskPage copy", () => {
       expect(mockedConfirm).toHaveBeenCalledWith(
         expect.objectContaining({
           title: "确认创建真实发送任务？",
-          description: expect.stringMatching(/生成草稿并人工审核/),
+          description: expect.stringMatching(/AI 改写完成后仍需逐封审核通过/),
         }),
       );
     });

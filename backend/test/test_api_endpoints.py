@@ -15,10 +15,11 @@ from unittest.mock import AsyncMock, patch
 
 from openpyxl import Workbook, load_workbook
 from fastapi.testclient import TestClient
+from test.migrated_database import create_migrated_sqlite_database
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "b9d1e3f4a6c7"
+HEAD_REVISION = "c6d7e8f9a012"
 
 
 class ApiEndpointTests(unittest.TestCase):
@@ -27,7 +28,7 @@ class ApiEndpointTests(unittest.TestCase):
         self.db_path = Path(self.temp_dir.name) / "api_test.db"
         os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{self.db_path.as_posix()}"
         os.environ["ENABLE_BACKGROUND_WORKERS"] = "0"
-        self._run_alembic_upgrade()
+        create_migrated_sqlite_database(self.db_path)
 
         from app.core.config import get_settings
         from app.core.database import dispose_engine, get_engine, get_session_factory
@@ -4304,23 +4305,6 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(generated["current_task"]["status"], "review_required")
         self.assertEqual(generated["current_task"]["generated_subject"], "申请与工作区切换导师老师交流")
         self.assertIn("工作区切换导师老师您好", generated["current_task"]["generated_content_text"])
-
-    def _run_alembic_upgrade(self) -> None:
-        env = os.environ.copy()
-        result = subprocess.run(
-            [sys.executable, "-m", "alembic", "upgrade", "head"],
-            cwd=BACKEND_DIR,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            self.fail(
-                "Alembic migration failed.\n"
-                f"stdout:\n{result.stdout}\n"
-                f"stderr:\n{result.stderr}",
-            )
 
     def _create_identity(self, *, with_imap: bool) -> int:
         response = self.client.post(

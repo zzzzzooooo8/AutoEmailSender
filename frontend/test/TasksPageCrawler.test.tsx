@@ -614,7 +614,13 @@ describe("TasksPage crawler jobs tab", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "教师抓取" }));
     expect(await screen.findByText("部分已导入")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "删除" })).not.toBeInTheDocument();
+    const crawlJobCard = screen
+      .getByText("示例大学 / 计算机学院")
+      .closest("article");
+    expect(crawlJobCard).not.toBeNull();
+    expect(
+      within(crawlJobCard as HTMLElement).getByRole("button", { name: "删除" }),
+    ).toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole("button", { name: "查看详情" }));
 

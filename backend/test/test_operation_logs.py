@@ -3,8 +3,6 @@ from __future__ import annotations
 import asyncio
 import os
 import sqlite3
-import subprocess
-import sys
 import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
@@ -12,9 +10,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
-
-
-BACKEND_DIR = Path(__file__).resolve().parents[1]
+from test.migrated_database import create_migrated_sqlite_database
 
 
 class OperationLogTests(unittest.TestCase):
@@ -23,7 +19,7 @@ class OperationLogTests(unittest.TestCase):
         self.db_path = Path(self.temp_dir.name) / "operation_logs_test.db"
         os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{self.db_path.as_posix()}"
         os.environ["ENABLE_BACKGROUND_WORKERS"] = "0"
-        self._run_alembic_upgrade()
+        create_migrated_sqlite_database(self.db_path)
 
         from app.core.config import get_settings
         from app.core.database import dispose_engine, get_engine, get_session_factory
@@ -296,23 +292,6 @@ class OperationLogTests(unittest.TestCase):
                 )
 
         self.assertEqual(asyncio.run(scenario()), ["new.event", "old.event"])
-
-    def _run_alembic_upgrade(self) -> None:
-        result = subprocess.run(
-            [sys.executable, "-m", "alembic", "upgrade", "head"],
-            cwd=BACKEND_DIR,
-            env=os.environ.copy(),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            self.fail(
-                "Alembic migration failed.\n"
-                f"stdout:\n{result.stdout}\n"
-                f"stderr:\n{result.stderr}",
-            )
-
 
 if __name__ == "__main__":
     unittest.main()

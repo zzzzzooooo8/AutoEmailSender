@@ -8,4 +8,14 @@ describe("vite dev server config", () => {
 
     expect(source).toContain('host: "127.0.0.1"');
   });
+
+  it("splits node-only and jsdom tests into separate Vitest projects", () => {
+    const source = readFileSync(resolve("vite.config.ts"), "utf8");
+
+    expect(source).toContain("projects:");
+    expect(source).toContain('name: "node"');
+    expect(source).toContain('environment: "node"');
+    expect(source).toContain('name: "jsdom"');
+    expect(source).toContain('environment: "jsdom"');
+  });
 });

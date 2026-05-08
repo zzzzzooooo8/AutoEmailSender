@@ -10,10 +10,11 @@ import unittest
 from pathlib import Path
 
 from app.services.outreach_templates import import_outreach_template_file
+from test.migrated_database import create_migrated_sqlite_database
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "b9d1e3f4a6c7"
+HEAD_REVISION = "c6d7e8f9a012"
 LEGACY_RUNTIME_REVISION = "7a1d5e42c9bd"
 
 
@@ -21,11 +22,7 @@ class DatabaseSchemaTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "schema_test.db"
-        self.env = os.environ.copy()
-        self.env["DATABASE_URL"] = f"sqlite+aiosqlite:///{self.db_path.as_posix()}"
-
-        self._run_alembic(self.env, "upgrade", "04d66ff4c25b")
-        self._run_alembic(self.env, "upgrade", "head")
+        create_migrated_sqlite_database(self.db_path)
 
         self.connection = sqlite3.connect(self.db_path)
         self.connection.execute("PRAGMA foreign_keys = ON")
@@ -299,9 +296,19 @@ class DatabaseSchemaTests(unittest.TestCase):
         self.assertEqual(imported.body_text, "Hello {{name}}")
 
     def test_old_revision_can_upgrade_to_head(self) -> None:
-        version = self.connection.execute(
+        legacy_db_path = Path(self.temp_dir.name) / "old_revision_upgrade.db"
+        env = os.environ.copy()
+        env["DATABASE_URL"] = f"sqlite+aiosqlite:///{legacy_db_path.as_posix()}"
+
+        self._run_alembic(env, "upgrade", "04d66ff4c25b")
+        self._run_alembic(env, "upgrade", "head")
+
+        connection = sqlite3.connect(legacy_db_path)
+        version = connection.execute(
             "SELECT version_num FROM alembic_version",
         ).fetchone()[0]
+        connection.close()
+
         self.assertEqual(version, HEAD_REVISION)
 
     def test_runtime_code_has_no_mail_delivery_mode_residue(self) -> None:

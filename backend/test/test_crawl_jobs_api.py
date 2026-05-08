@@ -2,17 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import os
-import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
-
-
-BACKEND_DIR = Path(__file__).resolve().parents[1]
+from test.migrated_database import create_migrated_sqlite_database
 
 
 class CrawlJobsApiTests(unittest.TestCase):
@@ -21,7 +17,7 @@ class CrawlJobsApiTests(unittest.TestCase):
         self.db_path = Path(self.temp_dir.name) / "crawl_jobs_api_test.db"
         os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{self.db_path.as_posix()}"
         os.environ["ENABLE_BACKGROUND_WORKERS"] = "0"
-        self._run_alembic_upgrade()
+        create_migrated_sqlite_database(self.db_path)
         self.getaddrinfo_patcher = patch(
             "app.services.crawler_tools.socket.getaddrinfo",
             return_value=[
@@ -1121,24 +1117,6 @@ class CrawlJobsApiTests(unittest.TestCase):
                 return job.current_run_id
 
         return asyncio.run(_get_current_run_id())
-
-    def _run_alembic_upgrade(self) -> None:
-        env = os.environ.copy()
-        result = subprocess.run(
-            [sys.executable, "-m", "alembic", "upgrade", "head"],
-            cwd=BACKEND_DIR,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            self.fail(
-                "Alembic migration failed.\n"
-                f"stdout:\n{result.stdout}\n"
-                f"stderr:\n{result.stderr}",
-            )
-
 
 if __name__ == "__main__":
     unittest.main()
