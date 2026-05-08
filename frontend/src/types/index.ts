@@ -303,6 +303,7 @@ export type CrawlJobStatusDTO =
   | 'running'
   | 'paused'
   | 'needs_review'
+  | 'partially_completed'
   | 'completed'
   | 'failed'
   | 'canceled';

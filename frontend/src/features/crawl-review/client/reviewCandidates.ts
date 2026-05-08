@@ -4,7 +4,7 @@ export const getReviewableCandidateIds = (
   candidates: CrawlCandidateDTO[],
 ): number[] =>
   candidates
-    .filter((candidate) => candidate.review_status !== 'rejected')
+    .filter((candidate) => candidate.review_status === 'pending')
     .map((candidate) => candidate.id);
 
 export const getReviewableCandidateIdsWithoutEmail = (
@@ -13,7 +13,7 @@ export const getReviewableCandidateIdsWithoutEmail = (
   candidates
     .filter(
       (candidate) =>
-        candidate.review_status !== 'rejected' && !candidate.email?.trim(),
+        candidate.review_status === 'pending' && !candidate.email?.trim(),
     )
     .map((candidate) => candidate.id);
 
