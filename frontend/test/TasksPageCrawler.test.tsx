@@ -558,6 +558,91 @@ describe("TasksPage crawler jobs tab", () => {
     });
   });
 
+  it("allows continuing review and enrichment from a partially imported crawl job", async () => {
+    const partiallyCompletedJob = {
+      ...runningJob,
+      status: "partially_completed",
+    } as const;
+    vi.mocked(listCrawlJobs).mockResolvedValue([partiallyCompletedJob]);
+    vi.mocked(getCrawlJob).mockResolvedValue(partiallyCompletedJob);
+    vi.mocked(listCrawlCandidates).mockResolvedValue([
+      {
+        id: 21,
+        job_id: 7,
+        professor_id: null,
+        name: "张教授",
+        email: null,
+        title: null,
+        university: "示例大学",
+        school: "计算机学院",
+        department: null,
+        research_direction: null,
+        recent_papers: [],
+        profile_url: null,
+        source_url: "https://example.edu/faculty",
+        confidence: 0.86,
+        field_confidence: null,
+        evidence: null,
+        review_status: "pending",
+        created_at: "2026-04-26T10:02:00Z",
+        updated_at: "2026-04-26T10:02:00Z",
+      },
+      {
+        id: 22,
+        job_id: 7,
+        professor_id: null,
+        name: "李教授",
+        email: "li@example.edu",
+        title: null,
+        university: "示例大学",
+        school: "计算机学院",
+        department: null,
+        research_direction: null,
+        recent_papers: [],
+        profile_url: null,
+        source_url: "https://example.edu/faculty",
+        confidence: 0.86,
+        field_confidence: null,
+        evidence: null,
+        review_status: "pending",
+        created_at: "2026-04-26T10:02:00Z",
+        updated_at: "2026-04-26T10:02:00Z",
+      },
+    ]);
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "教师抓取" }));
+    expect(await screen.findByText("部分已导入")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "删除" })).not.toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: "查看详情" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "抓取任务详情" });
+    expect(within(dialog).getByText(/可导入\s+2\s+位/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "全选无邮箱" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "补全缺失信息" })).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "全选无邮箱" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "补全缺失信息" }));
+
+    await waitFor(() => {
+      expect(enrichCrawlCandidates).toHaveBeenCalledWith(7, [21]);
+    });
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "清空选择" }));
+    fireEvent.click(
+      within(dialog).getByRole("checkbox", { name: "选择候选导师 李教授" }),
+    );
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "审核通过并导入" }),
+    );
+
+    await waitFor(() => {
+      expect(approveCrawlCandidates).toHaveBeenCalledWith(7, [22]);
+    });
+  });
+
   it("selects only reviewable candidates without email for enrichment", async () => {
     const reviewJob = {
       ...runningJob,

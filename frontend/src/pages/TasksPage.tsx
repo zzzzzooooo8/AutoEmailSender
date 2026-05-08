@@ -89,6 +89,7 @@ const CRAWL_JOB_STATUS_LABELS: Record<CrawlJobStatusDTO, string> = {
   running: "运行中",
   paused: "已暂停",
   needs_review: "待审核",
+  partially_completed: "部分已导入",
   completed: "已完成",
   failed: "失败",
   canceled: "已取消",
@@ -99,6 +100,7 @@ const CRAWL_JOB_STATUS_TONES: Record<CrawlJobStatusDTO, string> = {
   running: "border-primary/20 bg-primary/10 text-primary",
   paused: "border-orange-200 bg-orange-50 text-orange-700",
   needs_review: "border-amber-200 bg-amber-50 text-amber-700",
+  partially_completed: "border-blue-200 bg-blue-50 text-blue-700",
   completed: "border-emerald-200 bg-emerald-50 text-emerald-700",
   failed: "border-red-200 bg-red-50 text-red-700",
   canceled: "border-stone-200 bg-stone-100 text-stone-600",
@@ -825,10 +827,11 @@ export const TasksPage = () => {
     [crawlCandidatePage, crawlJobCandidates],
   );
   const selectedCrawlJobId = selectedCrawlJob?.id ?? null;
-  const selectedCrawlJobCanReview =
-    selectedCrawlJob?.status === "needs_review" ||
-    selectedCrawlJob?.status === "canceled" ||
-    selectedCrawlJob?.status === "failed";
+const selectedCrawlJobCanReview =
+  selectedCrawlJob?.status === "needs_review" ||
+  selectedCrawlJob?.status === "partially_completed" ||
+  selectedCrawlJob?.status === "canceled" ||
+  selectedCrawlJob?.status === "failed";
   const reviewableCrawlCandidateIds = useMemo(
     () => getReviewableCandidateIds(crawlJobCandidates),
     [crawlJobCandidates],
@@ -1648,12 +1651,16 @@ export const TasksPage = () => {
       return;
     }
 
+    const approveDescription =
+      selectedCrawlJob?.status === "canceled"
+        ? "通过后，这些候选导师会写入导师库，当前抓取任务会保留已取消状态。"
+        : selectedCrawlJob?.status === "partially_completed"
+          ? "通过后会导入所选候选，任务中剩余待审核候选仍可继续处理。"
+          : "通过后，这些候选导师会写入导师库；如仍有待审核候选，任务会标记为部分已导入。";
+
     const confirmed = await confirm({
       title: `确认通过并导入这 ${selectedReviewableCrawlCandidateIds.length} 位候选导师吗？`,
-      description:
-        selectedCrawlJob?.status === "canceled"
-          ? "通过后，这些候选导师会写入导师库，当前抓取任务会保留已取消状态。"
-          : "通过后，这些候选导师会写入导师库，当前抓取任务会标记为已完成。",
+      description: approveDescription,
       confirmLabel: "确认导入",
       cancelLabel: "先保留",
       tone: "danger",
