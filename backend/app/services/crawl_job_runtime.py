@@ -36,7 +36,6 @@ from app.services.crawler_tools import (
     build_profile_candidate_prompt,
     crawl_page_with_crawl4ai,
     ensure_crawl_job_can_continue,
-    extract_candidate_profile_enrichment,
     save_candidates,
 )
 
@@ -569,27 +568,25 @@ async def _enrich_selected_candidates_concurrent(
             ).scalars()
         )
 
-    pending_candidates = [candidate for candidate in candidates if _needs_profile_enrichment(candidate)]
-    already_complete_count = len(candidates) - len(pending_candidates)
-    if not pending_candidates:
+    if not candidates:
         return SelectedCandidateEnrichmentSummary(
-            len(candidates),
             0,
-            already_complete_count,
+            0,
+            0,
             0,
         )
 
     enriched, unchanged, failed = await _enrich_candidate_collection_concurrent(
         session_factory,
         ctx,
-        pending_candidates,
+        candidates,
         llm_profile=llm_profile,
         trace_callback=trace_callback,
     )
     return SelectedCandidateEnrichmentSummary(
         selected_count=len(candidates),
         enriched_count=enriched,
-        unchanged_count=unchanged + already_complete_count,
+        unchanged_count=unchanged,
         failed_count=failed,
     )
 
@@ -761,6 +758,15 @@ async def _enrich_candidate_work_item(
         },
     )
 
+    if not item.profile_url.strip():
+        return CandidateEnrichmentResult(
+            candidate_id=item.candidate_id,
+            candidate_name=item.candidate_name,
+            profile_url=item.profile_url,
+            status="failed",
+            error_message="候选导师缺少详情页 URL，无法补全",
+        )
+
     hostname = urlparse(item.profile_url).hostname or item.profile_url
     limiter = host_limiters.setdefault(hostname, asyncio.Semaphore(host_concurrency))
     host_limited = limiter.locked()
@@ -789,18 +795,12 @@ async def _enrich_candidate_work_item(
         name=item.candidate_name,
         profile_url=item.profile_url,
     )
-    try:
-        enrichment = await enrich_candidate_profile_with_llm(
-            ctx,
-            llm_profile,
-            candidate,
-            snapshot.text,
-        )
-    except Exception:
-        enrichment = _extract_fallback_enrichment(snapshot.text)
-    if not _has_any_enrichment(enrichment):
-        fallback = extract_candidate_profile_enrichment(snapshot.text)
-        enrichment = CandidateEnrichmentPayload.model_validate(fallback)
+    enrichment = await enrich_candidate_profile_with_llm(
+        ctx,
+        llm_profile,
+        candidate,
+        snapshot.text,
+    )
 
     changes = enrichment.model_dump()
     changed_fields = [field for field, value in changes.items() if value]
@@ -1161,16 +1161,6 @@ def _format_enrichment_fields(fields: list[str]) -> str:
     return "、".join(labels.get(field, field) for field in fields)
 
 
-def _has_any_enrichment(payload: CandidateEnrichmentPayload) -> bool:
-    return bool(
-        (payload.email and payload.email.strip())
-        or
-        (payload.department and payload.department.strip())
-        or (payload.research_direction and payload.research_direction.strip())
-        or any(item.strip() for item in payload.recent_papers if isinstance(item, str)),
-    )
-
-
 async def enrich_candidate_profile_with_llm(
     ctx: CrawlToolContext,
     llm_profile: LLMProfile,
@@ -1235,10 +1225,6 @@ async def extract_profile_candidate_with_llm(
     return candidate
 
 
-def _extract_fallback_enrichment(page_text: str) -> CandidateEnrichmentPayload:
-    return CandidateEnrichmentPayload.model_validate(
-        extract_candidate_profile_enrichment(page_text),
-    )
 
 
 def _extract_model_message_content(response: object) -> str:

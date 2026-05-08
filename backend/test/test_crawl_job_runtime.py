@@ -1073,7 +1073,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             page_text: str,
         ) -> CandidateEnrichmentPayload:
             _ = ctx, llm_profile, candidate, page_text
-            return CandidateEnrichmentPayload()
+            return CandidateEnrichmentPayload(email="wang5@example.edu")
 
         with patch(
             "app.services.crawl_job_runtime.crawl_page_with_crawl4ai",
@@ -1478,7 +1478,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("候选导师详情补全失败：张三", trace_messages)
         self.assertIn("候选导师详情补全完成：成功 0 位，未变化 0 位，失败 1 位", trace_messages)
 
-    async def test_enrich_saved_candidates_falls_back_to_rules_when_llm_returns_empty(self) -> None:
+    async def test_enrich_saved_candidates_does_not_fall_back_to_text_rules_when_llm_returns_empty(self) -> None:
         job_id = await self._create_default_profile_and_job(
             start_url="https://cai.jxufe.edu.cn/lists/26.html",
         )
@@ -1541,16 +1541,16 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 llm_profile=llm_profile,
             )
 
-        self.assertEqual(enriched_count, 1)
+        self.assertEqual(enriched_count, 0)
         async with self.session_factory() as session:
             candidate = await session.scalar(
                 select(CrawlCandidate).where(CrawlCandidate.job_id == job_id)
             )
             self.assertIsNotNone(candidate)
             assert candidate is not None
-            self.assertEqual(candidate.department, "人工智能学院")
-            self.assertEqual(candidate.research_direction, "具身智能")
-            self.assertEqual(candidate.recent_papers, ["Paper X", "Paper Y"])
+            self.assertIsNone(candidate.department)
+            self.assertIsNone(candidate.research_direction)
+            self.assertEqual(candidate.recent_papers, [])
 
     async def test_enrich_selected_crawl_candidates_only_updates_selected_ids(self) -> None:
         job_id = await self._create_default_profile_and_job()
@@ -1621,7 +1621,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(selected.email, "selected@example.edu")
             self.assertIsNone(unselected.email)
 
-    async def test_enrich_selected_crawl_candidates_counts_complete_candidates_as_unchanged(self) -> None:
+    async def test_enrich_selected_crawl_candidates_enriches_complete_candidates_when_user_selected(self) -> None:
         job_id = await self._create_default_profile_and_job()
         await self._seed_candidates(job_id, count=1, host="example.edu")
         llm_profile = await self._get_default_llm_profile()
@@ -1638,17 +1638,61 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             selected_id = candidate.id
             await session.commit()
 
-        result = await enrich_selected_crawl_candidates(
-            self.session_factory,
-            job_id=job_id,
-            candidate_ids=[selected_id],
-            llm_profile=llm_profile,
-        )
+        crawled_urls: list[str] = []
+        enriched_candidate_ids: list[int] = []
+
+        async def fake_crawl_page_with_crawl4ai(
+            ctx: CrawlToolContext,
+            url: str,
+            *,
+            intent: str = "generic",
+        ) -> PageSnapshot:
+            _ = ctx, intent
+            crawled_urls.append(url)
+            return PageSnapshot(
+                url=url,
+                title="Teacher",
+                text="邮箱：teacher@example.edu\n院系：计算机学院\n研究方向：机器学习",
+                html="<html></html>",
+                links=[],
+                fetch_method="http",
+                status="succeeded",
+            )
+
+        async def fake_enrich_with_llm(
+            ctx: CrawlToolContext,
+            llm_profile: LLMProfile,
+            candidate: CrawlCandidate,
+            page_text: str,
+        ) -> CandidateEnrichmentPayload:
+            _ = ctx, llm_profile, candidate, page_text
+            enriched_candidate_ids.append(candidate.id)
+            return CandidateEnrichmentPayload(research_direction="强化学习")
+
+        with patch(
+            "app.services.crawl_job_runtime.crawl_page_with_crawl4ai",
+            new=fake_crawl_page_with_crawl4ai,
+        ), patch(
+            "app.services.crawl_job_runtime.enrich_candidate_profile_with_llm",
+            new=fake_enrich_with_llm,
+        ):
+            result = await enrich_selected_crawl_candidates(
+                self.session_factory,
+                job_id=job_id,
+                candidate_ids=[selected_id],
+                llm_profile=llm_profile,
+            )
 
         self.assertEqual(result.selected_count, 1)
         self.assertEqual(result.enriched_count, 0)
         self.assertEqual(result.unchanged_count, 1)
         self.assertEqual(result.failed_count, 0)
+        self.assertEqual(crawled_urls, ["https://example.edu/teacher/0"])
+        self.assertEqual(enriched_candidate_ids, [selected_id])
+        async with self.session_factory() as session:
+            candidate = await session.get(CrawlCandidate, selected_id)
+            assert candidate is not None
+            self.assertEqual(candidate.research_direction, "机器学习")
 
     async def test_enrichment_worker_pause_exception_does_not_hang(self) -> None:
         job_id = await self._create_default_profile_and_job()

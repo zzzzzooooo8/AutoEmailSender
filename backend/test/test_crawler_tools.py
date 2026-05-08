@@ -26,7 +26,6 @@ from app.services.crawler_tools import (
     normalize_obfuscated_email_tokens,
     crawl_page_with_crawl4ai,
     crawl_page_with_http,
-    extract_candidate_profile_enrichment,
     is_allowed_crawl_url,
     is_safe_public_crawl_url,
     normalize_candidate_payload,
@@ -529,16 +528,6 @@ class CrawlerToolTests(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertEqual(extract_first_email_from_text(value), expected)
 
-    def test_extract_candidate_profile_enrichment_from_text(self) -> None:
-        updates = extract_candidate_profile_enrichment(
-            "邮箱：zhang(AT)example(DOT)edu\n院系：计算机科学系\n研究方向：大语言模型、智能体\n代表论文：Paper A；Paper B"
-        )
-
-        self.assertEqual(updates["email"], "zhang@example.edu")
-        self.assertEqual(updates["department"], "计算机科学系")
-        self.assertEqual(updates["research_direction"], "大语言模型、智能体")
-        self.assertEqual(updates["recent_papers"], ["Paper A", "Paper B"])
-
 
 class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
     async def test_crawl_page_reuses_cached_snapshot_for_duplicate_url(self) -> None:
@@ -591,7 +580,7 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot.links, [])
         self.assertIn("已在本轮抓取中判定为无关页面", snapshot.error_message or "")
 
-    async def test_crawl_page_with_crawl4ai_denies_irrelevant_succeeded_page_after_fetch(self) -> None:
+    async def test_crawl_page_with_crawl4ai_returns_succeeded_page_for_agent_classification(self) -> None:
         ctx = CrawlToolContext(
             job_id=1,
             start_url="https://cs.example.edu/faculty/index.htm",
@@ -615,10 +604,10 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
         ):
             snapshot = await crawl_page_with_crawl4ai(ctx, "https://cs.example.edu/news/a.htm")
 
-        self.assertEqual(snapshot.status, "failed")
-        self.assertEqual(snapshot.links, [])
-        self.assertTrue(ctx.is_denied_url("https://cs.example.edu/news/a.htm"))
-        self.assertIn("不是导师列表页或导师详情页", snapshot.error_message or "")
+        self.assertEqual(snapshot.status, "succeeded")
+        self.assertEqual(snapshot.links, ["https://cs.example.edu/news/b.htm"])
+        self.assertFalse(ctx.is_denied_url("https://cs.example.edu/news/a.htm"))
+        self.assertIsNone(snapshot.error_message)
 
     async def test_crawl_page_with_crawl4ai_keeps_faculty_directory_and_profile_pages_allowed(self) -> None:
         ctx = CrawlToolContext(
@@ -659,7 +648,7 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(ctx.is_denied_url("https://cs.example.edu/faculty/index.htm"))
         self.assertFalse(ctx.is_denied_url("https://cs.example.edu/faculty/zhang.htm"))
 
-    async def test_irrelevant_redirect_marks_requested_and_final_url_denied(self) -> None:
+    async def test_redirected_page_is_returned_for_agent_classification(self) -> None:
         ctx = CrawlToolContext(
             job_id=1,
             start_url="https://cs.example.edu/faculty/index.htm",
@@ -683,9 +672,9 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
         ):
             snapshot = await crawl_page_with_crawl4ai(ctx, "https://cs.example.edu/go-news")
 
-        self.assertEqual(snapshot.status, "failed")
-        self.assertTrue(ctx.is_denied_url("https://cs.example.edu/go-news"))
-        self.assertTrue(ctx.is_denied_url("https://cs.example.edu/news/a.htm"))
+        self.assertEqual(snapshot.status, "succeeded")
+        self.assertFalse(ctx.is_denied_url("https://cs.example.edu/go-news"))
+        self.assertFalse(ctx.is_denied_url("https://cs.example.edu/news/a.htm"))
 
     async def test_crawl_page_with_crawl4ai_retries_browser_for_template_placeholders(self) -> None:
         ctx = CrawlToolContext(
@@ -715,9 +704,6 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch(
-            "app.services.crawler_tools._crawl_known_profile_api",
-            new=AsyncMock(return_value=None),
-        ), patch(
             "app.services.crawler_tools.crawl_page_with_http",
             new=AsyncMock(return_value=http_snapshot),
         ), patch(
@@ -757,9 +743,6 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch(
-            "app.services.crawler_tools._crawl_known_profile_api",
-            new=AsyncMock(return_value=None),
-        ), patch(
             "app.services.crawler_tools.crawl_page_with_http",
             new=AsyncMock(return_value=http_snapshot),
         ), patch(
@@ -771,7 +754,7 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(actual, browser_snapshot)
         browser.assert_awaited_once()
 
-    async def test_crawl_page_with_crawl4ai_fetches_sim_hash_staff_profile_api(self) -> None:
+    async def test_crawl_page_with_crawl4ai_does_not_use_site_specific_profile_api(self) -> None:
         ctx = CrawlToolContext(
             job_id=1,
             start_url="http://sim.jxufe.edu.cn/#/staff/detail/5",
@@ -841,17 +824,11 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
         ) as browser:
             actual = await crawl_page_with_crawl4ai(ctx, ctx.start_url, intent="profile")
 
-        self.assertEqual(
-            requested_urls,
-            ["http://sim.jxufe.edu.cn/prod-api/website/staff/search/5"],
-        )
-        self.assertEqual(actual.url, ctx.start_url)
-        self.assertEqual(actual.title, "万常选")
-        self.assertIn("万常选", actual.text)
-        self.assertIn("数据挖掘与知识工程", actual.text)
-        self.assertIn("wanchangxuan@263.net", actual.text)
-        http_fetch.assert_not_awaited()
-        browser.assert_not_awaited()
+        self.assertEqual(requested_urls, [])
+        self.assertEqual(actual.fetch_method, "browser")
+        self.assertEqual(actual.text, "FineCMS error")
+        http_fetch.assert_awaited_once()
+        browser.assert_awaited_once()
 
     async def test_crawl4ai_browser_fetch_offloads_to_thread_on_windows_selector_loop(self) -> None:
         ctx = CrawlToolContext(
@@ -1934,7 +1911,7 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot.links, [])
         self.assertIn("已在本轮抓取中判定为无关页面", snapshot.error_message or "")
 
-    async def test_browser_investigate_denies_irrelevant_succeeded_page_after_fetch(self) -> None:
+    async def test_browser_investigate_returns_succeeded_page_for_agent_classification(self) -> None:
         ctx = CrawlToolContext(
             job_id=1,
             start_url="https://cs.example.edu/faculty/index.htm",
@@ -1962,10 +1939,10 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
                 "查找导师邮箱",
             )
 
-        self.assertEqual(snapshot.status, "failed")
-        self.assertEqual(snapshot.links, [])
-        self.assertTrue(ctx.is_denied_url("https://cs.example.edu/news/a.htm"))
-        self.assertIn("不是导师列表页或导师详情页", snapshot.error_message or "")
+        self.assertEqual(snapshot.status, "succeeded")
+        self.assertEqual(snapshot.links, ["https://cs.example.edu/news/b.htm"])
+        self.assertFalse(ctx.is_denied_url("https://cs.example.edu/news/a.htm"))
+        self.assertIsNone(snapshot.error_message)
 
     async def test_crawl4ai_browser_fetch_disables_chromium_https_upgrades(self) -> None:
         crawler_kwargs: list[dict[str, object]] = []

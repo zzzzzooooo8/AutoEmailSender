@@ -4,7 +4,6 @@ import asyncio
 from collections import OrderedDict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from html import escape
 from html import unescape
 import hashlib
 import ipaddress
@@ -55,49 +54,6 @@ CRAWL4AI_BROWSER_WAIT_SELECTOR = "css:body"
 CRAWL4AI_BROWSER_EXTRA_ARGS = ("--disable-features=HttpsUpgrades",)
 UNSAFE_CRAWL_URL_MESSAGE = "URL 不允许指向本机、内网或不可解析地址"
 MULTI_LABEL_PUBLIC_SUFFIXES = ("ac.cn", "com.cn", "edu.cn", "gov.cn", "net.cn", "org.cn")
-SIM_JXUFE_STAFF_HOST = "sim.jxufe.edu.cn"
-SIM_JXUFE_STAFF_DETAIL_FRAGMENT_PATTERN = re.compile(r"^/?staff/detail/(?P<staff_id>\d+)/?$")
-_FACULTY_LIST_PAGE_MARKERS = (
-    "教师名录",
-    "师资队伍",
-    "师资概况",
-    "teacher directory",
-    "faculty",
-)
-_FACULTY_PROFILE_PAGE_MARKERS = (
-    "个人主页",
-    "导师主页",
-    "教师主页",
-    "professor",
-    "profile",
-    "research direction",
-    "研究方向",
-    "邮箱",
-    "职称",
-)
-_IRRELEVANT_PAGE_MARKERS = (
-    "新闻",
-    "通知公告",
-    "招生",
-    "校友",
-    "党建",
-    "搜索",
-    "新闻动态",
-    "学院新闻",
-    "新闻网",
-)
-_BLOCKED_PAGE_MARKERS = (
-    "登录",
-    "统一身份认证",
-    "统一认证",
-    "cas",
-    "download",
-    "附件下载",
-    "文件下载",
-    "maintenance",
-    "error",
-    "blocked",
-)
 SAVE_SAME_BATCH_FAILURE_LIMIT = 2
 SAVE_TOTAL_FAILURE_LIMIT = 4
 SAME_BATCH_SAVE_FAILURE_REASON = (
@@ -107,7 +63,6 @@ TOTAL_SAVE_FAILURE_REASON = (
     "候选保存失败累计达到 4 次，已停止以避免继续消耗 token"
 )
 CrawlPageIntent = Literal["generic", "directory", "profile"]
-CrawlPageKind = Literal["list", "profile", "irrelevant", "blocked", "unknown"]
 _DEFAULT_BROWSER_WAIT_FOR = object()
 
 
@@ -832,18 +787,6 @@ def _first_valid_email(value: str | None) -> str | None:
     return extract_first_email_from_text(cleaned)
 
 
-def extract_candidate_profile_enrichment(text: str) -> dict[str, Any]:
-    return {
-        "email": extract_first_email_from_text(text),
-        "department": _extract_prefixed_line(text, ("院系：", "部门：", "所在系：")),
-        "research_direction": _extract_prefixed_line(
-            text,
-            ("研究方向：", "研究领域：", "主要研究方向："),
-        ),
-        "recent_papers": _extract_paper_list(text),
-    }
-
-
 async def crawl_page_with_http(ctx: CrawlToolContext, url: str) -> PageSnapshot:
     absolute_url = urljoin(ctx.start_url, url)
     snapshot = _pre_request_rejected_snapshot(ctx, absolute_url, "http")
@@ -970,11 +913,6 @@ async def crawl_page_with_crawl4ai(
         await _ensure_crawl_job_can_continue_for_context(ctx)
         return cached
 
-    api_snapshot = await _crawl_known_profile_api(ctx, absolute_url, intent=intent)
-    if api_snapshot is not None:
-        await _ensure_crawl_job_can_continue_for_context(ctx)
-        return api_snapshot
-
     if ctx.is_http_blocked(absolute_url):
         snapshot = await browser_investigate(ctx, absolute_url, goal="", intent=intent)
         await _ensure_crawl_job_can_continue_for_context(ctx)
@@ -1032,142 +970,8 @@ def _apply_runtime_url_denylist_after_fetch(
     requested_url: str,
     snapshot: PageSnapshot,
 ) -> PageSnapshot:
-    page_kind = _classify_crawl_page_snapshot(snapshot)
-    if page_kind in {"list", "profile", "unknown"}:
-        return snapshot
-
-    reason = (
-        "页面不是导师列表页或导师详情页"
-        if page_kind == "irrelevant"
-        else "页面为登录、认证、下载或确定性不可用页面"
-    )
-    ctx.mark_denied_url(requested_url, reason)
-    if snapshot.url:
-        ctx.mark_denied_url(snapshot.url, reason)
-    return snapshot.model_copy(
-        update={
-            "status": "failed",
-            "links": [],
-            "error_message": f"{reason}，已加入本轮排除列表",
-        }
-    )
-
-
-def _classify_crawl_page_snapshot(snapshot: PageSnapshot) -> CrawlPageKind:
-    text = "\n".join(
-        part
-        for part in (snapshot.title or "", snapshot.url or "", snapshot.text or "")
-        if part
-    )
-    normalized = text.lower()
-
-    if snapshot.status == "failed":
-        message = (snapshot.error_message or "").lower()
-        if any(marker in normalized or marker in message for marker in _BLOCKED_PAGE_MARKERS):
-            return "blocked"
-        return "unknown"
-
-    if any(marker in normalized for marker in _BLOCKED_PAGE_MARKERS):
-        return "blocked"
-    if any(marker in normalized for marker in _FACULTY_LIST_PAGE_MARKERS):
-        return "list"
-    if _EMAIL_PATTERN.search(text) and any(
-        marker in normalized for marker in _FACULTY_PROFILE_PAGE_MARKERS
-    ):
-        return "profile"
-    if any(marker in normalized for marker in _FACULTY_PROFILE_PAGE_MARKERS):
-        return "profile"
-    if any(marker in normalized for marker in _IRRELEVANT_PAGE_MARKERS):
-        return "irrelevant"
-    return "irrelevant"
-
-
-async def _crawl_known_profile_api(
-    ctx: CrawlToolContext,
-    absolute_url: str,
-    *,
-    intent: CrawlPageIntent,
-) -> PageSnapshot | None:
-    if intent != "profile":
-        return None
-    return await _crawl_sim_jxufe_staff_profile_api(ctx, absolute_url)
-
-
-async def _crawl_sim_jxufe_staff_profile_api(
-    ctx: CrawlToolContext,
-    profile_url: str,
-) -> PageSnapshot | None:
-    api_url = _sim_jxufe_staff_profile_api_url(profile_url)
-    if api_url is None:
-        return None
-
-    try:
-        safe_url = _resolve_safe_public_crawl_url(api_url)
-        transport = _build_safe_crawl_transport(
-            hostname=safe_url.hostname,
-            resolved_ip=safe_url.resolved_ips[0],
-        )
-        async with httpx.AsyncClient(
-            follow_redirects=False,
-            timeout=20.0,
-            transport=transport,
-            trust_env=False,
-        ) as client:
-            response = await client.get(
-                api_url,
-                headers={"User-Agent": "AutoEmailSenderCrawler/0.1"},
-            )
-        response.raise_for_status()
-        payload = response.json()
-    except Exception:
-        return None
-
-    data = payload.get("data") if isinstance(payload, dict) else None
-    if not isinstance(data, dict) or payload.get("code") != 200:
-        return None
-
-    snapshot = _sim_jxufe_staff_api_data_to_snapshot(profile_url, data)
-    await record_page_snapshot(ctx, snapshot)
-    ctx.remember_page_snapshot(snapshot)
+    _ = ctx, requested_url
     return snapshot
-
-
-def _sim_jxufe_staff_profile_api_url(profile_url: str) -> str | None:
-    parsed = urlparse(profile_url)
-    if (parsed.hostname or "").lower() != SIM_JXUFE_STAFF_HOST:
-        return None
-
-    match = SIM_JXUFE_STAFF_DETAIL_FRAGMENT_PATTERN.match(parsed.fragment)
-    if match is None:
-        return None
-
-    return urljoin(
-        parsed._replace(fragment="", path="/").geturl(),
-        f"/prod-api/website/staff/search/{match.group('staff_id')}",
-    )
-
-
-def _sim_jxufe_staff_api_data_to_snapshot(profile_url: str, data: dict[str, object]) -> PageSnapshot:
-    name = _clean_optional(data.get("name")) or "教师详情"
-    birthday = _clean_optional(data.get("birthday"))
-    research_direction = _clean_optional(data.get("researchDirection"))
-    content = _clean_optional(data.get("content")) or ""
-
-    fields = [f"<h1>{escape(name)}</h1>"]
-    if birthday:
-        fields.append(f"<p>出生年月：{escape(birthday)}</p>")
-    if research_direction:
-        fields.append(f"<p>研究方向：{escape(research_direction)}</p>")
-    fields.append(content)
-
-    html = (
-        "<!doctype html><html><head>"
-        f"<title>{escape(name)}</title>"
-        "</head><body>"
-        + "\n".join(fields)
-        + "</body></html>"
-    )
-    return html_to_snapshot(profile_url, html, "http")
 
 
 async def browser_investigate(
@@ -1718,27 +1522,6 @@ def _clamp_confidence(value: object) -> float:
     if number is None:
         return 0.0
     return min(1.0, max(0.0, number))
-
-
-def _extract_prefixed_line(text: str, prefixes: tuple[str, ...]) -> str | None:
-    lines = [line.strip() for line in text.splitlines()]
-    for line in lines:
-        for prefix in prefixes:
-            if line.startswith(prefix):
-                value = line.removeprefix(prefix).strip()
-                return value or None
-    return None
-
-
-def _extract_paper_list(text: str) -> list[str]:
-    line = _extract_prefixed_line(text, ("代表论文：", "近期论文：", "论文："))
-    if not line:
-        return []
-    return [
-        item.strip()
-        for item in re.split(r"[；;|]+", line)
-        if item.strip()
-    ]
 
 
 async def _load_existing_candidate_emails(session: AsyncSession, job_id: int) -> set[str]:
