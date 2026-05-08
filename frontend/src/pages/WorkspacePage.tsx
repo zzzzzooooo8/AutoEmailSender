@@ -48,6 +48,22 @@ const WORKSPACE_STATUS_LABELS: Record<WorkspaceTaskStatusLabelKey, string> = {
 
 const WORKSPACE_THREAD_REFRESH_INTERVAL_MS = 60_000;
 
+const formatTokenValue = (value: number | null | undefined) =>
+  value == null ? '未返回' : value.toLocaleString('zh-CN');
+
+const formatElapsedSeconds = (elapsedMs: number) =>
+  `${(Math.max(elapsedMs, 0) / 1000).toFixed(1)} 秒`;
+
+const buildDraftGenerationSuccessDescription = (
+  task: WorkspaceTaskSummaryDTO | null | undefined,
+  elapsedMs: number,
+) =>
+  `输入 ${formatTokenValue(task?.last_draft_prompt_tokens)} / 输出 ${formatTokenValue(
+    task?.last_draft_completion_tokens,
+  )} / 总计 ${formatTokenValue(task?.last_draft_total_tokens)} token，耗时 ${formatElapsedSeconds(
+    elapsedMs,
+  )}`;
+
 const getReceivedMessages = (messages: WorkspaceMessageDTO[]) =>
   messages.filter((message) => message.direction === 'received');
 
@@ -763,13 +779,20 @@ export const WorkspacePage = () => {
       return;
     }
 
+    const startedAt = Date.now();
     void runAction(
       () => generateDraft(currentTaskId),
       '生成草稿失败',
       '生成草稿失败',
-      () => setComposerExpanded(true),
+      (data) => {
+        setComposerExpanded(true);
+        notifySuccess(
+          'AI 草稿已生成',
+          buildDraftGenerationSuccessDescription(data.current_task, Date.now() - startedAt),
+        );
+      },
     );
-  }, [currentTaskId, runAction]);
+  }, [currentTaskId, notifySuccess, runAction]);
 
   const handleChangeMode = useCallback(
     (nextMode: OutreachGenerationMode) => {

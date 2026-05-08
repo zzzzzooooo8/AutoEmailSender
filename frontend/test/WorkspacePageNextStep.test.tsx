@@ -158,6 +158,9 @@ const buildThread = ({
   professorResearchDirection = "多智能体系统",
   professorRecentPapers = [],
   messages = [],
+  lastDraftPromptTokens = null,
+  lastDraftCompletionTokens = null,
+  lastDraftTotalTokens = null,
 }: {
   status?: WorkspaceTaskStatus;
   primaryMaterialId?: number | null;
@@ -171,6 +174,9 @@ const buildThread = ({
   professorResearchDirection?: string | null;
   professorRecentPapers?: string[];
   messages?: WorkspaceMessageDTO[];
+  lastDraftPromptTokens?: number | null;
+  lastDraftCompletionTokens?: number | null;
+  lastDraftTotalTokens?: number | null;
 } = {}): WorkspaceThreadDTO => ({
   professor: {
     id: 101,
@@ -234,9 +240,9 @@ const buildThread = ({
     estimated_prompt_tokens: null,
     estimated_completion_tokens_upper_bound: null,
     estimated_total_tokens_upper_bound: null,
-    last_draft_prompt_tokens: null,
-    last_draft_completion_tokens: null,
-    last_draft_total_tokens: null,
+    last_draft_prompt_tokens: lastDraftPromptTokens,
+    last_draft_completion_tokens: lastDraftCompletionTokens,
+    last_draft_total_tokens: lastDraftTotalTokens,
   },
   messages,
 });
@@ -570,6 +576,33 @@ describe("WorkspacePage next-step", () => {
       expect(screen.getByText("draft-subject:生成后的主题")).toBeInTheDocument();
       expect(screen.getByText("draft-content:生成后的正文")).toBeInTheDocument();
       expect(screen.getByText("draft-html:<p>生成后的正文</p>")).toBeInTheDocument();
+    });
+  });
+
+  it("notifies token usage and elapsed time after generating a draft", async () => {
+    mockedGetWorkspaceThread.mockResolvedValue(buildThread());
+    mockedGenerateDraft.mockResolvedValue(
+      buildThread({
+        status: "review_required",
+        generatedSubject: "生成后的主题",
+        generatedContentText: "生成后的正文",
+        generatedContentHtml: "<p>生成后的正文</p>",
+        lastDraftPromptTokens: 6114,
+        lastDraftCompletionTokens: 1363,
+        lastDraftTotalTokens: 7477,
+      }),
+    );
+
+    renderPage();
+
+    await screen.findByText("draft-subject:测试主题");
+    fireEvent.click(screen.getByRole("button", { name: "mock-generate-draft" }));
+
+    await waitFor(() => {
+      expect(mockedNotificationApi.notifySuccess).toHaveBeenCalledWith(
+        "AI 草稿已生成",
+        expect.stringMatching(/^输入 6,114 \/ 输出 1,363 \/ 总计 7,477 token，耗时 \d+\.\d 秒$/),
+      );
     });
   });
 
