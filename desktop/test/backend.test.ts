@@ -1,3 +1,5 @@
+import { EventEmitter } from "node:events";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import {
   buildBackendEnv,
@@ -5,6 +7,7 @@ import {
   getFrontendIndexPath,
   notifyBackendExit,
   normalizePort,
+  stopBackend,
 } from "../src/backend.js";
 
 describe("desktop backend helpers", () => {
@@ -122,5 +125,28 @@ describe("desktop backend helpers", () => {
     );
 
     expect(exits).toEqual([]);
+  });
+
+  it("terminates the backend process tree during stop", async () => {
+    const child = Object.assign(new EventEmitter(), {
+      pid: 1234,
+      exitCode: null as number | null,
+      kill: () => {
+        throw new Error("direct child kill should not be used when a pid is available");
+      },
+    }) as unknown as ChildProcessWithoutNullStreams;
+    const terminatedPids: number[] = [];
+
+    await stopBackend(
+      child,
+      { intentionalStop: false },
+      async (pid) => {
+        terminatedPids.push(pid);
+        Object.assign(child, { exitCode: 0 });
+        child.emit("exit", 0, null);
+      },
+    );
+
+    expect(terminatedPids).toEqual([1234]);
   });
 });

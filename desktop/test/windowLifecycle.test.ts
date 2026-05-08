@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { restoreExistingWindow, shouldHideWindowOnClose } from "../src/windowLifecycle.js";
+import {
+  restoreExistingWindow,
+  shouldHideWindowOnClose,
+  startWindowCreationOnce,
+} from "../src/windowLifecycle.js";
 
 describe("desktop window lifecycle", () => {
   it("hides the window instead of quitting on normal close", () => {
@@ -36,5 +40,30 @@ describe("desktop window lifecycle", () => {
     restoreExistingWindow(window);
 
     expect(calls).toEqual(["show", "focus"]);
+  });
+
+  it("reuses an in-flight window creation", async () => {
+    const state = { pendingCreation: null };
+    let createCalls = 0;
+    let finishCreation: (() => void) | undefined;
+
+    const first = startWindowCreationOnce(state, () => {
+      createCalls += 1;
+      return new Promise<void>((resolve) => {
+        finishCreation = resolve;
+      });
+    });
+    const second = startWindowCreationOnce(state, () => {
+      createCalls += 1;
+      return Promise.resolve();
+    });
+
+    expect(second).toBe(first);
+    expect(createCalls).toBe(1);
+
+    finishCreation?.();
+    await first;
+
+    expect(state.pendingCreation).toBeNull();
   });
 });

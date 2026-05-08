@@ -1,7 +1,12 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import {
+  execFile,
+  spawn,
+  type ChildProcessWithoutNullStreams,
+} from "node:child_process";
 import { existsSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
+import { promisify } from "node:util";
 import type {
   BackendController,
   BackendEnvInput,
@@ -9,6 +14,10 @@ import type {
   BackendExitHandler,
   BackendPathInput,
 } from "./types.js";
+
+const execFileAsync = promisify(execFile);
+
+type BackendProcessTreeTerminator = (pid: number) => Promise<void>;
 
 export function normalizePort(value: string): number {
   const port = Number(value);
@@ -186,17 +195,17 @@ async function canListen(port: number): Promise<boolean> {
   });
 }
 
-async function stopBackend(
+export async function stopBackend(
   child: ChildProcessWithoutNullStreams,
   lifecycle: BackendLifecycle,
+  terminateProcessTree: BackendProcessTreeTerminator = terminateBackendProcessTree,
 ): Promise<void> {
   lifecycle.intentionalStop = true;
   if (child.exitCode !== null) {
     return;
   }
 
-  child.kill();
-  await new Promise<void>((resolve) => {
+  const waitForExit = new Promise<void>((resolve) => {
     const timeout = setTimeout(() => {
       if (child.exitCode === null) {
         child.kill("SIGKILL");
@@ -208,4 +217,27 @@ async function stopBackend(
       resolve();
     });
   });
+
+  if (child.pid === undefined) {
+    child.kill();
+  } else {
+    try {
+      await terminateProcessTree(child.pid);
+    } catch {
+      child.kill();
+    }
+  }
+
+  await waitForExit;
+}
+
+async function terminateBackendProcessTree(pid: number): Promise<void> {
+  if (process.platform === "win32") {
+    await execFileAsync("taskkill", ["/pid", String(pid), "/t", "/f"], {
+      windowsHide: true,
+    });
+    return;
+  }
+
+  process.kill(pid);
 }

@@ -4,7 +4,11 @@ import { pathToFileURL } from "node:url";
 import { getFrontendIndexPath, startBackend } from "./backend.js";
 import { registerFileSelectionIpc } from "./fileSelection.js";
 import { checkForUpdatesOnStartup, registerUpdateIpc } from "./updates.js";
-import { restoreExistingWindow, shouldHideWindowOnClose } from "./windowLifecycle.js";
+import {
+  restoreExistingWindow,
+  shouldHideWindowOnClose,
+  startWindowCreationOnce,
+} from "./windowLifecycle.js";
 import { getWindowIconPath } from "./windowIcon.js";
 import type { BackendController, BackendExit, BackendStatus } from "./types.js";
 
@@ -14,6 +18,7 @@ let backend: BackendController | null = null;
 let restartingBackend = false;
 let isQuitting = false;
 let currentBackendStatus: BackendStatus = { state: "starting" };
+const windowCreationState = { pendingCreation: null as Promise<void> | null };
 
 const repoRoot = path.resolve(app.getAppPath(), "..");
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -24,7 +29,7 @@ if (!hasSingleInstanceLock) {
 
 function showMainWindow(): void {
   if (mainWindow === null) {
-    void createWindow();
+    void startWindowCreationOnce(windowCreationState, createWindow);
     return;
   }
 
@@ -180,7 +185,7 @@ if (hasSingleInstanceLock) {
   app.on("second-instance", showMainWindow);
 
   app.whenReady().then(() => {
-    createWindow().catch((error: unknown) => {
+    startWindowCreationOnce(windowCreationState, createWindow).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
       dialog.showErrorBox("启动失败", message);
       app.quit();
