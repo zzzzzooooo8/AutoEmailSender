@@ -2549,18 +2549,18 @@ const selectedCrawlJobCanReview =
                                 计划发送 {formatDisplayTime(item.scheduled_at)}
                               </span>
                             ) : null}
-                            {action.kind === "message" ? (
+                            {action?.kind === "message" ? (
                               <span className="font-medium text-stone-600">
                                 {action.text}
                               </span>
-                            ) : (
+                            ) : action?.kind === "link" ? (
                               <Link
                                 to={`/workspace/${item.professor_id}`}
                                 className="font-medium text-primary"
                               >
                                 {action.text}
                               </Link>
-                            )}
+                            ) : null}
                             {item.match_score !== null ? (
                               <span>匹配分 {item.match_score}</span>
                             ) : null}

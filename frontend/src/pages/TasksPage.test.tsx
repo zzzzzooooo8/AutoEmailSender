@@ -216,8 +216,10 @@ describe("batch task send queue copy", () => {
       buildBatchTask({ schedule_type: "scheduled" }),
     );
 
-    expect(action.kind).toBe("message");
-    expect(action.text).toBe("等待批量定时窗口自动发送");
+    expect(action).toEqual({
+      kind: "message",
+      text: "等待批量定时窗口自动发送",
+    });
   });
 
   it("keeps AI rewritten drafts as manual review work", () => {
@@ -226,7 +228,18 @@ describe("batch task send queue copy", () => {
       buildBatchTask({ schedule_type: "scheduled" }),
     );
 
-    expect(action.kind).toBe("link");
-    expect(action.text).toBe("审核草稿");
+    expect(action).toEqual({
+      kind: "link",
+      text: "审核草稿",
+    });
+  });
+
+  it("does not show an action while AI drafts are pending generation", () => {
+    const action = buildBatchPendingItemAction(
+      buildBatchItem({ status: "matched" }),
+      buildBatchTask({ schedule_type: "scheduled" }),
+    );
+
+    expect(action).toBeNull();
   });
 });

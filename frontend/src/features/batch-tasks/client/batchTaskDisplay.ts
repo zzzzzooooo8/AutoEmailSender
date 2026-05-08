@@ -10,7 +10,10 @@ export const getBatchTaskWaitingSendCount = (task: BatchTaskCardDTO) =>
 export const buildBatchPendingItemAction = (
   item: BatchTaskItemDTO,
   task: BatchTaskCardDTO,
-): BatchPendingItemAction => {
+): BatchPendingItemAction | null => {
+  if (item.status === "matched") {
+    return null;
+  }
   if (item.status === "review_required") {
     return { kind: "link", text: "审核草稿" };
   }
