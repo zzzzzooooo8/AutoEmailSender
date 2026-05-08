@@ -179,6 +179,8 @@ def _validate_anchor_tokens(segment: AnchoredTemplateSegment, text: str) -> None
     for anchor_id in expected:
         if anchor_id not in actual:
             raise ValueError(f"锚点缺失: {segment.segment_id}/{anchor_id}")
+        if actual.count(anchor_id) > 1:
+            raise ValueError(f"锚点重复: {segment.segment_id}/{anchor_id}")
     for anchor_id in actual:
         if anchor_id not in expected:
             raise ValueError(f"未知锚点: {segment.segment_id}/{anchor_id}")

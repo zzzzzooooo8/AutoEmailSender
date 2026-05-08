@@ -85,6 +85,17 @@ class TemplateAnchorRewriteTests(unittest.TestCase):
                 [{"segment_id": "seg_1", "text": "[[A2]] 普通 [[A1]]"}],
             )
 
+    def test_apply_anchored_replacements_rejects_duplicated_anchor(self) -> None:
+        document = build_template_run_document("<p>我是<strong>王俊杰</strong>。</p>")
+        anchored = build_anchored_template_document(document)
+
+        with self.assertRaisesRegex(ValueError, "锚点重复: seg_1/A1"):
+            apply_anchored_template_replacements(
+                document,
+                anchored,
+                [{"segment_id": "seg_1", "text": "我是[[A1]][[A1]]。"}],
+            )
+
     def test_apply_anchored_replacements_avoids_comma_boundary_artifact(self) -> None:
         document = build_template_run_document(
             "<p><span>以下是我的个人介绍和未来规划</span><span>，</span><span>附件中是我的简历。</span></p>",
