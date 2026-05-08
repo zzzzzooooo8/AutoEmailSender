@@ -320,13 +320,32 @@ class CrawlJobsApiTests(unittest.TestCase):
         self.assertEqual(patch_response.status_code, 200, msg=patch_response.text)
         self.assertEqual(patch_response.json()["name"], "低分导师更新")
 
+        no_email_patch_response = self.client.patch(
+            f"/api/crawl-jobs/candidates/{candidates[2]['id']}",
+            json={
+                "name": "无邮箱导师更新",
+                "email": "no-email@example.edu",
+                "title": "Professor",
+                "university": "示例大学",
+                "school": "计算机学院",
+                "department": "CS",
+                "research_direction": "系统",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": "https://example.edu/faculty",
+                "review_status": "pending",
+            },
+        )
+        self.assertEqual(no_email_patch_response.status_code, 200, msg=no_email_patch_response.text)
+        self.assertEqual(no_email_patch_response.json()["name"], "无邮箱导师更新")
+
         approve_response = self.client.post(
             f"/api/crawl-jobs/{job['id']}/approve",
             json={"candidate_ids": [item["id"] for item in candidates]},
         )
         self.assertEqual(approve_response.status_code, 200, msg=approve_response.text)
-        self.assertEqual(approve_response.json()["inserted_count"], 2)
-        self.assertEqual(approve_response.json()["skipped_count"], 1)
+        self.assertEqual(approve_response.json()["inserted_count"], 3)
+        self.assertEqual(approve_response.json()["skipped_count"], 0)
         self.assertIn("审核完成", approve_response.json()["message"])
 
         completed_response = self.client.get(f"/api/crawl-jobs/{job['id']}")
@@ -380,7 +399,7 @@ class CrawlJobsApiTests(unittest.TestCase):
         self.assertEqual(resumed_detail_response.json()["candidate_count"], 3)
 
     def test_pause_rejects_terminal_or_review_jobs(self) -> None:
-        for job_status in ("needs_review", "completed", "failed", "canceled"):
+        for job_status in ("needs_review", "partially_completed", "completed", "failed", "canceled"):
             with self.subTest(status=job_status):
                 create_response = self.client.post(
                     "/api/crawl-jobs",
@@ -594,6 +613,30 @@ class CrawlJobsApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["detail"], "抓取任务尚未进入审核状态")
 
+    def test_approve_rejects_completed_job_even_with_saved_candidates(self) -> None:
+        create_response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "llm_profile_id": None,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        job_id = create_response.json()["id"]
+        self._seed_page_and_candidates(job_id)
+        self._set_job_status(job_id, "completed")
+        candidates = self.client.get(f"/api/crawl-jobs/{job_id}/candidates").json()
+
+        response = self.client.post(
+            f"/api/crawl-jobs/{job_id}/approve",
+            json={"candidate_ids": [candidates[0]["id"]]},
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"], "抓取任务尚未进入审核状态")
+
     def test_enrich_selected_candidates_requires_review_state(self) -> None:
         create_response = self.client.post(
             "/api/crawl-jobs",
@@ -634,6 +677,70 @@ class CrawlJobsApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["detail"], "候选信息正在补全中，请稍后再试")
+
+    def test_enrich_selected_candidates_rejects_completed_job(self) -> None:
+        create_response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "llm_profile_id": None,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        job_id = create_response.json()["id"]
+        self._seed_page_and_candidates(job_id)
+        self._set_job_status(job_id, "completed")
+
+        response = self.client.post(
+            f"/api/crawl-jobs/{job_id}/enrich",
+            json={"candidate_ids": [1]},
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"], "抓取任务尚未进入审核状态")
+
+    def test_enrich_selected_candidates_allows_partially_completed_job(self) -> None:
+        create_response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "llm_profile_id": None,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        job_id = create_response.json()["id"]
+        self._seed_page_and_candidates(job_id)
+        self._seed_default_llm_profile()
+        self._set_job_status(job_id, "partially_completed")
+        candidates = self.client.get(f"/api/crawl-jobs/{job_id}/candidates").json()
+        selected_id = candidates[0]["id"]
+
+        class Summary:
+            selected_count = 1
+            enriched_count = 1
+            unchanged_count = 0
+            failed_count = 0
+
+        async def fake_enrich_selected(*args, **kwargs):
+            self.assertEqual(kwargs["job_id"], job_id)
+            self.assertEqual(kwargs["candidate_ids"], [selected_id])
+            return Summary()
+
+        with patch("app.api.crawl_jobs.enrich_selected_crawl_candidates", new=fake_enrich_selected):
+            response = self.client.post(
+                f"/api/crawl-jobs/{job_id}/enrich",
+                json={"candidate_ids": [selected_id]},
+            )
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        self.assertEqual(response.json()["selected_count"], 1)
+        self.assertEqual(response.json()["enriched_count"], 1)
+        self.assertIn("补全完成", response.json()["message"])
+        self.assertEqual(self.client.get(f"/api/crawl-jobs/{job_id}").json()["status"], "partially_completed")
 
     def test_resume_review_allows_canceled_job_with_candidates(self) -> None:
         create_response = self.client.post(
@@ -733,6 +840,64 @@ class CrawlJobsApiTests(unittest.TestCase):
         self.assertEqual(response.json()["selected_count"], 1)
         self.assertEqual(response.json()["enriched_count"], 1)
         self.assertIn("补全完成", response.json()["message"])
+
+    def test_approve_partially_completed_job_can_finish_remaining_candidates(self) -> None:
+        create_response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "llm_profile_id": None,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        job_id = create_response.json()["id"]
+        self._seed_page_and_candidates(job_id)
+        self._set_job_status(job_id, "needs_review")
+        initial_candidates = self.client.get(f"/api/crawl-jobs/{job_id}/candidates").json()
+
+        first_response = self.client.post(
+            f"/api/crawl-jobs/{job_id}/approve",
+            json={"candidate_ids": [initial_candidates[0]["id"]]},
+        )
+        self.assertEqual(first_response.status_code, 200, msg=first_response.text)
+        self.assertEqual(self.client.get(f"/api/crawl-jobs/{job_id}").json()["status"], "partially_completed")
+
+        refreshed_candidates = self.client.get(f"/api/crawl-jobs/{job_id}/candidates").json()
+        no_email_candidate = next(candidate for candidate in refreshed_candidates if candidate["email"] is None)
+        patch_response = self.client.patch(
+            f"/api/crawl-jobs/candidates/{no_email_candidate['id']}",
+            json={
+                "name": no_email_candidate["name"],
+                "email": "filled@example.edu",
+                "title": no_email_candidate["title"],
+                "university": no_email_candidate["university"],
+                "school": no_email_candidate["school"],
+                "department": no_email_candidate["department"],
+                "research_direction": no_email_candidate["research_direction"],
+                "recent_papers": no_email_candidate["recent_papers"],
+                "profile_url": no_email_candidate["profile_url"],
+                "source_url": no_email_candidate["source_url"],
+                "review_status": "pending",
+            },
+        )
+        self.assertEqual(patch_response.status_code, 200, msg=patch_response.text)
+
+        remaining_candidates = self.client.get(f"/api/crawl-jobs/{job_id}/candidates").json()
+        remaining_ids = [
+            candidate["id"]
+            for candidate in remaining_candidates
+            if candidate["review_status"] == "pending"
+        ]
+
+        second_response = self.client.post(
+            f"/api/crawl-jobs/{job_id}/approve",
+            json={"candidate_ids": remaining_ids},
+        )
+
+        self.assertEqual(second_response.status_code, 200, msg=second_response.text)
+        self.assertEqual(self.client.get(f"/api/crawl-jobs/{job_id}").json()["status"], "completed")
 
     def test_approve_rejects_candidates_from_other_job(self) -> None:
         first_response = self.client.post(
