@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { IdentityDTO, LLMProfileDTO, ProfessorDashboardItemDTO } from "@/types";
+import { buildBatchCreateConfirmDescription } from "@/features/create-task/client/batchCreateConfirmDescription";
 import { CreateTaskPage } from "./CreateTaskPage";
 
 const navigateMock = vi.fn();
@@ -179,6 +180,12 @@ describe("CreateTaskPage", () => {
         outreach_template_body_text: "{{name}}老师您好",
         outreach_template_body_html: "<p><strong>{{name}}</strong>老师您好</p>",
       }),
+    );
+  });
+
+  it("explains that scheduled AI rewritten drafts still need manual review", () => {
+    expect(buildBatchCreateConfirmDescription("llm", "scheduled")).toContain(
+      "AI 改写完成后仍需逐封审核通过",
     );
   });
 

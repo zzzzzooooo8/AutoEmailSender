@@ -43,6 +43,7 @@ class BatchTaskCardRead(BaseModel):
     generating_draft_count: int
     draft_failed_count: int
     review_required_count: int
+    approved_count: int
     scheduled_count: int
     sent_count: int
     failed_count: int

@@ -561,6 +561,7 @@ export interface BatchTaskCardDTO {
   generating_draft_count: number;
   draft_failed_count: number;
   review_required_count: number;
+  approved_count: number;
   scheduled_count: number;
   sent_count: number;
   failed_count: number;

@@ -495,6 +495,7 @@ def _serialize_batch_task(task: BatchTask) -> BatchTaskCardRead:
         generating_draft_count=status_counter.get(EmailTaskStatus.GENERATING_DRAFT.value, 0),
         draft_failed_count=status_counter.get(EmailTaskStatus.DRAFT_FAILED.value, 0),
         review_required_count=status_counter.get(EmailTaskStatus.REVIEW_REQUIRED.value, 0),
+        approved_count=status_counter.get(EmailTaskStatus.APPROVED.value, 0),
         scheduled_count=status_counter.get(EmailTaskStatus.SCHEDULED.value, 0),
         sent_count=status_counter.get(EmailTaskStatus.SENT.value, 0),
         failed_count=status_counter.get(EmailTaskStatus.SEND_FAILED.value, 0),

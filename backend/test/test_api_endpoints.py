@@ -3657,6 +3657,9 @@ class ApiEndpointTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 201, msg=response.text)
+        self.assertEqual(response.json()["approved_count"], 1)
+        self.assertEqual(response.json()["review_required_count"], 0)
+        self.assertEqual(response.json()["scheduled_count"], 0)
         task_id = response.json()["id"]
         items = self.client.get(f"/api/batch-tasks/{task_id}/items")
         self.assertEqual(items.status_code, 200, msg=items.text)

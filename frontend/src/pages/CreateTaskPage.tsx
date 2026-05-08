@@ -14,6 +14,7 @@ import { getPageItems, getTotalPages, PAGE_SIZE } from '@/lib/pagination';
 import { textToEmailHtml } from '@/lib/richEmail';
 import { useSelectionContext } from '@/context/SelectionContext';
 import { getTaskModeCopy } from '@/features/create-task/client/taskCopy';
+import { buildBatchCreateConfirmDescription } from '@/features/create-task/client/batchCreateConfirmDescription';
 import { normalizeScheduledDates } from '@/features/create-task/client/scheduleDates';
 import { useConfirmDialog } from '@/lib/useConfirmDialog';
 import {
@@ -226,14 +227,7 @@ export const CreateTaskPage = () => {
       return;
     }
 
-    const confirmDescription =
-      taskMode === 'template'
-        ? scheduleType === 'scheduled'
-          ? '将直接套用模板生成可发送内容，创建后会按定时发送策略发送。'
-          : '将直接套用模板生成可发送内容，创建后会按立即发送策略发送。'
-        : scheduleType === 'scheduled'
-          ? '将创建批量任务，后台生成草稿并人工审核后，再按定时发送策略发送。'
-          : '将创建批量任务，后台生成草稿并人工审核后，再手动确认发送。';
+    const confirmDescription = buildBatchCreateConfirmDescription(taskMode, scheduleType);
 
     const confirmed = await confirm({
       title: scheduleType === 'scheduled' ? '确认创建定时批量发送任务？' : '确认创建真实发送任务？',
@@ -404,7 +398,11 @@ export const CreateTaskPage = () => {
                   本页设置只影响本次任务。
                 </div>
                 <div className="mt-3 rounded-2xl border border-primary/15 bg-primary/5 px-4 py-3 text-sm leading-6 text-stone-700">
-                  创建后进入工作区生成草稿并确认发送。
+                  {taskMode === 'template'
+                    ? scheduleType === 'scheduled'
+                      ? '模板内容会直接进入待发送队列，并按批量定时窗口自动发送。'
+                      : '模板内容会直接进入发送流程。'
+                    : 'AI 改写完成后仍需逐封审核通过，再进入发送流程。'}
                 </div>
               </div>
 

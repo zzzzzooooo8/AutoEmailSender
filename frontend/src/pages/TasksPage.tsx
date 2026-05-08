@@ -60,6 +60,10 @@ import {
   getReviewableCandidateIds,
   pruneSelectedCandidateIds,
 } from "@/features/crawl-review/client/reviewCandidates";
+import {
+  buildBatchPendingItemAction,
+  getBatchTaskWaitingSendCount,
+} from "@/features/batch-tasks/client/batchTaskDisplay";
 import { formatApiDateTime } from "@/lib/dateTime";
 import { getPageItems, getTotalPages } from "@/lib/pagination";
 import {
@@ -790,6 +794,13 @@ export const TasksPage = () => {
     () =>
       selectedBatchTaskItems.filter((item) => item.status === "send_failed"),
     [selectedBatchTaskItems],
+  );
+  const selectedBatchWaitingSendCount = selectedBatchTask
+    ? getBatchTaskWaitingSendCount(selectedBatchTask)
+    : 0;
+  const selectedBatchNeedsManualCount = Math.max(
+    pendingBatchTaskItems.length - selectedBatchWaitingSendCount,
+    0,
   );
   const visibleBatchTasks = useMemo(
     () => getPageItems(tasks, batchPage, TASKS_PAGE_SIZE),
@@ -2009,6 +2020,7 @@ const selectedCrawlJobCanReview =
                   : Math.round(
                       (task.completed_count / task.target_count) * 100,
                     );
+              const waitingSendCount = getBatchTaskWaitingSendCount(task);
 
               return (
                 <article
@@ -2065,6 +2077,9 @@ const selectedCrawlJobCanReview =
                       ) : null}
                       <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-700">
                         待审核 {task.review_required_count}
+                      </span>
+                      <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs text-primary">
+                        待发送 {waitingSendCount}
                       </span>
                       <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs text-emerald-700">
                         已发送 {task.sent_count + task.replied_count}
@@ -2395,7 +2410,7 @@ const selectedCrawlJobCanReview =
                   ) : null}
                 </div>
 
-                <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
                     <div className="text-xs font-medium text-emerald-700">
                       已发送/已回复
@@ -2404,12 +2419,20 @@ const selectedCrawlJobCanReview =
                       {sentBatchTaskItems.length}
                     </div>
                   </div>
+                  <div className="rounded-2xl border border-primary/15 bg-primary/5 px-4 py-3">
+                    <div className="text-xs font-medium text-primary">
+                      等待发送
+                    </div>
+                    <div className="mt-2 text-xl font-semibold text-stone-900">
+                      {selectedBatchWaitingSendCount}
+                    </div>
+                  </div>
                   <div className="rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3">
                     <div className="text-xs font-medium text-amber-700">
-                      还未发送
+                      待审核/未处理
                     </div>
                     <div className="mt-2 text-xl font-semibold text-amber-900">
-                      {pendingBatchTaskItems.length}
+                      {selectedBatchNeedsManualCount}
                     </div>
                   </div>
                   <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3">
@@ -2480,52 +2503,71 @@ const selectedCrawlJobCanReview =
                 <h3 className="text-sm font-semibold text-stone-900">
                   还未发送给
                 </h3>
+                {selectedBatchTask.schedule_type === "scheduled" && selectedBatchWaitingSendCount > 0 ? (
+                  <p className="mt-2 rounded-2xl border border-primary/15 bg-primary/5 px-4 py-3 text-sm leading-6 text-stone-700">
+                    已通过的模板邮件会按批量任务的日期、时间窗口和每日数量自动发送，不需要逐封手动设定发送时间。
+                  </p>
+                ) : null}
+                {selectedBatchTask.review_required_count > 0 ? (
+                  <p className="mt-2 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
+                    AI 改写草稿生成后仍需逐封审核通过，审核后才会进入发送或定时发送流程。
+                  </p>
+                ) : null}
                 <div className="mt-3 space-y-2">
                   {pendingBatchTaskItems.length > 0 ? (
-                    pendingBatchTaskItems.map((item) => (
-                      <div
-                        key={item.id}
-                        className="rounded-2xl border border-stone-100 px-4 py-3"
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-medium text-stone-900">
-                              {item.professor_name}
-                            </p>
-                            <p className="mt-1 text-xs text-stone-500">
-                              {[
-                                item.professor_title,
-                                item.professor_school,
-                                item.professor_email,
-                              ]
-                                .filter(Boolean)
-                                .join(" / ") || "暂无补充信息"}
-                            </p>
-                          </div>
-                          <span
-                            className={`rounded-full px-2.5 py-1 text-xs ${BATCH_ITEM_STATUS_TONES[item.status]}`}
-                          >
-                            {PROFESSOR_STATUS_LABELS[item.status]}
-                          </span>
-                        </div>
-                        <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-stone-500">
-                          {item.scheduled_at ? (
-                            <span>
-                              计划发送 {formatDisplayTime(item.scheduled_at)}
+                    pendingBatchTaskItems.map((item) => {
+                      const action = buildBatchPendingItemAction(item, selectedBatchTask);
+                      return (
+                        <div
+                          key={item.id}
+                          className="rounded-2xl border border-stone-100 px-4 py-3"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-medium text-stone-900">
+                                {item.professor_name}
+                              </p>
+                              <p className="mt-1 text-xs text-stone-500">
+                                {[
+                                  item.professor_title,
+                                  item.professor_school,
+                                  item.professor_email,
+                                ]
+                                  .filter(Boolean)
+                                  .join(" / ") || "暂无补充信息"}
+                              </p>
+                            </div>
+                            <span
+                              className={`rounded-full px-2.5 py-1 text-xs ${BATCH_ITEM_STATUS_TONES[item.status]}`}
+                            >
+                              {PROFESSOR_STATUS_LABELS[item.status]}
                             </span>
-                          ) : null}
-                          {item.match_score !== null ? (
-                            <span>匹配分 {item.match_score}</span>
-                          ) : null}
-                          <Link
-                            to={`/workspace/${item.professor_id}`}
-                            className="font-medium text-primary"
-                          >
-                            去处理
-                          </Link>
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-stone-500">
+                            {item.scheduled_at ? (
+                              <span>
+                                计划发送 {formatDisplayTime(item.scheduled_at)}
+                              </span>
+                            ) : null}
+                            {action.kind === "message" ? (
+                              <span className="font-medium text-stone-600">
+                                {action.text}
+                              </span>
+                            ) : (
+                              <Link
+                                to={`/workspace/${item.professor_id}`}
+                                className="font-medium text-primary"
+                              >
+                                {action.text}
+                              </Link>
+                            )}
+                            {item.match_score !== null ? (
+                              <span>匹配分 {item.match_score}</span>
+                            ) : null}
+                          </div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   ) : (
                     <p className="rounded-2xl border border-dashed border-stone-200 px-4 py-3 text-sm text-stone-500">
                       暂无未发送导师。
