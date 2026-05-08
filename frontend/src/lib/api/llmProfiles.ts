@@ -37,3 +37,15 @@ export const testLLMProfile = (profileId: number) =>
   apiFetch<LLMProfileTestResultDTO>(`/api/llm-profiles/${profileId}/test`, {
     method: 'POST',
   });
+
+export const fetchLLMProfileModelsPreview = (payload: LLMProfilePayload) =>
+  apiFetch<LLMProfileModelsResultDTO>('/api/llm-profiles/preview/models', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+export const testLLMProfilePreview = (payload: LLMProfilePayload) =>
+  apiFetch<LLMProfileTestResultDTO>('/api/llm-profiles/preview/test', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });

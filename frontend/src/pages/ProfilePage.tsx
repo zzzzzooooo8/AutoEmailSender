@@ -52,9 +52,9 @@ import {
 import {
   createLLMProfile,
   deleteLLMProfile,
-  fetchLLMProfileModels,
+  fetchLLMProfileModelsPreview,
   setDefaultLLMProfile,
-  testLLMProfile,
+  testLLMProfilePreview,
   updateLLMProfile,
 } from "@/lib/api/llmProfiles";
 import { getTestComposeStatus } from "@/lib/api/testComposeApi";
@@ -2061,7 +2061,7 @@ export const ProfilePage = () => {
     setTestingLLMConnection(true);
     setLlmProbeResult(null);
     try {
-      const result = await testLLMProfile(editingLLM.id);
+      const result = await testLLMProfilePreview(toLLMPayload(llmForm));
       setLlmProbeResult(result);
     } catch (testError) {
       setLlmProbeResult({
@@ -2093,7 +2093,7 @@ export const ProfilePage = () => {
     setFetchingLLMModels(true);
     setLlmModelsResult(null);
     try {
-      const result = await fetchLLMProfileModels(editingLLM.id);
+      const result = await fetchLLMProfileModelsPreview(toLLMPayload(llmForm));
       setLlmModelsResult(result);
     } catch (testError) {
       setLlmModelsResult({

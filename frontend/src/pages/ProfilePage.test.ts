@@ -50,4 +50,10 @@ describe("ProfilePage setup sections", () => {
       "saveIdentity({ validateTemplate: true }).then((saved) =>",
     );
   });
+
+  it("uses the draft llm payload for preview actions", () => {
+    expect(profilePageSource).toContain("fetchLLMProfileModelsPreview");
+    expect(profilePageSource).toContain("testLLMProfilePreview");
+    expect(profilePageSource).toContain("toLLMPayload(llmForm)");
+  });
 });

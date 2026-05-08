@@ -115,6 +115,50 @@ async def set_default_llm_profile(
     return profile
 
 
+@router.post("/preview/models", response_model=LLMProfileModelsResult)
+async def preview_llm_profile_models(
+    payload: LLMProfileCreate,
+) -> LLMProfileModelsResult:
+    profile = LLMProfile(**payload.model_dump())
+    result = await fetch_llm_profile_models(profile)
+    return LLMProfileModelsResult(
+        ok=result.ok,
+        message=result.message,
+        resolved_base_url=result.resolved_base_url,
+        request_url=result.request_url,
+        attempted_urls=result.attempted_urls,
+        endpoint_kind=result.endpoint_kind,
+        status_code=result.status_code,
+        duration_ms=result.duration_ms,
+        consumes_tokens=result.consumes_tokens,
+        models=result.models,
+        selected_model_available=result.selected_model_available,
+    )
+
+
+@router.post("/preview/test", response_model=LLMProfileTestResult)
+async def preview_llm_profile_test(
+    payload: LLMProfileCreate,
+) -> LLMProfileTestResult:
+    profile = LLMProfile(**payload.model_dump())
+    result = await probe_llm_profile(profile)
+    return LLMProfileTestResult(
+        ok=result.ok,
+        message=result.message,
+        resolved_base_url=result.resolved_base_url,
+        request_url=result.request_url,
+        attempted_urls=result.attempted_urls,
+        endpoint_kind=result.endpoint_kind,
+        status_code=result.status_code,
+        duration_ms=result.duration_ms,
+        consumes_tokens=result.consumes_tokens,
+        prompt_tokens=result.prompt_tokens,
+        completion_tokens=result.completion_tokens,
+        total_tokens=result.total_tokens,
+        response_preview=result.response_preview,
+    )
+
+
 @router.get("/{profile_id}/models", response_model=LLMProfileModelsResult)
 async def fetch_models_for_llm_profile(
     profile_id: int,

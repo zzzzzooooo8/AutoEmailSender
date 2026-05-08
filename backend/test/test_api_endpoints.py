@@ -165,6 +165,46 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(body["models"], ["gpt-5.4", "gpt-5.4-mini"])
         self.assertTrue(body["selected_model_available"])
 
+    def test_llm_model_preview_endpoints_use_unsaved_payload(self) -> None:
+        payload = self._build_llm_payload(api_base_url="https://draft.example.com/v1")
+
+        with (
+            patch(
+                "app.api.llm_profiles.fetch_llm_profile_models",
+                AsyncMock(
+                    return_value=self._build_model_catalog_result(
+                        ok=True,
+                        message="已获取 2 个模型",
+                        resolved_base_url="https://draft.example.com/v1",
+                        models=["gpt-4o", "gpt-4o-mini"],
+                        selected_model_available=True,
+                    ),
+                ),
+            ) as fetch_mock,
+            patch(
+                "app.api.llm_profiles.probe_llm_profile",
+                AsyncMock(
+                    return_value=self._build_probe_result(
+                        ok=True,
+                        message="模型连通性测试成功",
+                        resolved_base_url="https://draft.example.com/v1",
+                        response_preview="READY",
+                    ),
+                ),
+            ) as probe_mock,
+        ):
+            models_response = self.client.post("/api/llm-profiles/preview/models", json=payload)
+            test_response = self.client.post("/api/llm-profiles/preview/test", json=payload)
+
+        self.assertEqual(models_response.status_code, 200, msg=models_response.text)
+        self.assertEqual(test_response.status_code, 200, msg=test_response.text)
+        fetch_mock.assert_awaited_once()
+        probe_mock.assert_awaited_once()
+        self.assertEqual(fetch_mock.await_args.args[0].api_base_url, payload["api_base_url"])
+        self.assertEqual(fetch_mock.await_args.args[0].api_key, payload["api_key"])
+        self.assertEqual(probe_mock.await_args.args[0].api_base_url, payload["api_base_url"])
+        self.assertEqual(probe_mock.await_args.args[0].model_name, payload["model_name"])
+
     def test_identity_template_import_endpoint_supports_unsaved_identity_flow(self) -> None:
         response = self.client.post(
             "/api/identities/template-import",
@@ -4275,6 +4315,24 @@ class ApiEndpointTests(unittest.TestCase):
             "send_interval_min": None,
             "send_interval_max": None,
             "same_domain_cooldown_minutes": None,
+            "is_default": True,
+        }
+
+    @staticmethod
+    def _build_llm_payload(
+        *,
+        api_base_url: str | None,
+    ) -> dict[str, object]:
+        return {
+            "name": "测试模型",
+            "provider": "openai",
+            "api_base_url": api_base_url,
+            "api_key": "sk-test-key",
+            "model_name": "gpt-4o-mini",
+            "matcher_prompt_template": None,
+            "writer_prompt_template": None,
+            "temperature": 0.2,
+            "max_tokens": 2048,
             "is_default": True,
         }
 
