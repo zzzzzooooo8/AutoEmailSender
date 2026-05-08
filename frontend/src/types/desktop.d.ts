@@ -29,11 +29,38 @@ export type DesktopUpdateStatus =
   | { state: "installing"; version: string; nextVersion: string }
   | { state: "error"; version: string; message: string };
 
+export type DesktopBackendStartupPhase =
+  | "starting"
+  | "migrating_database"
+  | "cleaning_logs"
+  | "starting_workers"
+  | "ready"
+  | "error";
+
 export type DesktopBackendStatus =
-  | { state: "starting" }
+  | {
+      state: "starting";
+      phase: Exclude<DesktopBackendStartupPhase, "ready" | "error">;
+      message: string;
+      elapsedSeconds: number;
+      slowStartup: boolean;
+      verySlowStartup: boolean;
+    }
   | { state: "restarting"; code: number | null; signal: string | null }
-  | { state: "ready"; baseUrl: string }
-  | { state: "error"; message: string };
+  | {
+      state: "ready";
+      baseUrl: string;
+      phase: "ready";
+      message: string;
+      elapsedSeconds: number;
+    }
+  | {
+      state: "error";
+      message: string;
+      phase: "error";
+      elapsedSeconds: number;
+      detail?: string;
+    };
 
 declare global {
   interface Window {
