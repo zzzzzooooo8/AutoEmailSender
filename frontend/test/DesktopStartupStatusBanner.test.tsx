@@ -1,5 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { DesktopStartupStatusBanner } from "@/components/organisms/DesktopStartupStatusBanner";
 import { DesktopBackendProvider } from "@/context/DesktopBackendContext";
 import type { DesktopBackendStatus } from "@/types/desktop";
