@@ -14,10 +14,19 @@ describe('scheduleDates', () => {
   });
 
   it('generates weekdays from a date range', () => {
-    expect(applyDateRule('weekdays', '2026-05-01', '2026-05-05')).toEqual([
-      '2026-05-01',
-      '2026-05-04',
-      '2026-05-05',
+    expect(applyDateRule('weekdays', '2026-05-06', '2026-05-08')).toEqual([
+      '2026-05-06',
+      '2026-05-07',
+      '2026-05-08',
+    ]);
+  });
+
+  it('uses adjusted Chinese workdays for the weekdays rule', () => {
+    expect(applyDateRule('weekdays', '2026-05-01', '2026-05-10')).toEqual([
+      '2026-05-06',
+      '2026-05-07',
+      '2026-05-08',
+      '2026-05-09',
     ]);
   });
 

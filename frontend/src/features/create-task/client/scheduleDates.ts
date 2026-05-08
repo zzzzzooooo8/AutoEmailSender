@@ -1,4 +1,7 @@
+import { getDayDetail, isWorkday } from 'chinese-days';
+
 export type DateRule = 'all' | 'weekdays' | 'mon-wed-fri' | 'weekends';
+export type WorkdayStatus = 'workday' | 'rest' | 'adjusted-workday';
 
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -17,17 +20,27 @@ export const normalizeScheduledDates = (dates: string[]) =>
   Array.from(new Set(dates.filter(isValidIsoDate))).sort();
 
 const matchesRule = (date: Date, rule: DateRule) => {
+  const isoDate = toIsoDate(date);
   const day = date.getUTCDay();
   if (rule === 'all') {
     return true;
   }
   if (rule === 'weekdays') {
-    return day >= 1 && day <= 5;
+    return isWorkday(isoDate);
   }
   if (rule === 'mon-wed-fri') {
     return day === 1 || day === 3 || day === 5;
   }
   return day === 0 || day === 6;
+};
+
+export const getWorkdayStatus = (date: string): WorkdayStatus => {
+  const detail = getDayDetail(date);
+  const day = toDate(date).getUTCDay();
+  if (detail.work && (day === 0 || day === 6)) {
+    return 'adjusted-workday';
+  }
+  return detail.work ? 'workday' : 'rest';
 };
 
 export const applyDateRule = (rule: DateRule, startDate: string, endDate: string) => {

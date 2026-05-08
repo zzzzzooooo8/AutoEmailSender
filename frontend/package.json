@@ -25,6 +25,7 @@
     "@tiptap/pm": "^2.11.5",
     "@tiptap/react": "^2.11.5",
     "@tiptap/starter-kit": "^2.11.5",
+    "chinese-days": "^1.5.7",
     "clsx": "^2.1.1",
     "dompurify": "^3.4.0",
     "lucide-react": "^1.7.0",
