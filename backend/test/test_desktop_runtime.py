@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -63,6 +64,82 @@ class DesktopRuntimeTests(unittest.TestCase):
         self.assertEqual(response.json(), {"status": "ok"})
         self.assertEqual(ready_response.status_code, 503)
         runtime_start.assert_not_called()
+
+    def test_startup_status_reports_database_migration_phase(self) -> None:
+        os.environ["ENABLE_BACKGROUND_WORKERS"] = "1"
+
+        from app.core.config import get_settings
+        import main as main_module
+
+        get_settings.cache_clear()
+        schema_started = False
+
+        async def slow_schema() -> None:
+            nonlocal schema_started
+            schema_started = True
+            await asyncio.Event().wait()
+
+        with (
+            patch.object(main_module, "ensure_database_schema", slow_schema),
+            patch.object(main_module.RuntimeManager, "start", new_callable=AsyncMock),
+        ):
+            with TestClient(main_module.create_app()) as client:
+                response = client.get("/startup-status")
+
+        self.assertTrue(schema_started)
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        data = response.json()
+        self.assertEqual(data["state"], "starting")
+        self.assertEqual(data["phase"], "migrating_database")
+        self.assertEqual(data["message"], "正在检查和升级本地数据")
+        self.assertIsNone(data["error"])
+        self.assertIsInstance(data["elapsed_seconds"], int)
+
+    def test_startup_status_reports_ready_after_runtime_initialization(self) -> None:
+        os.environ["ENABLE_BACKGROUND_WORKERS"] = "0"
+
+        from app.core.config import get_settings
+        from main import create_app
+
+        get_settings.cache_clear()
+        with TestClient(create_app()) as client:
+            response = client.get("/startup-status")
+            for _ in range(50):
+                if response.json()["state"] == "ready":
+                    break
+                time.sleep(0.1)
+                response = client.get("/startup-status")
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        data = response.json()
+        self.assertEqual(data["state"], "ready")
+        self.assertEqual(data["phase"], "ready")
+        self.assertEqual(data["message"], "系统已准备就绪")
+        self.assertIsNone(data["error"])
+
+    def test_startup_status_reports_error_without_http_500(self) -> None:
+        os.environ["ENABLE_BACKGROUND_WORKERS"] = "1"
+
+        from app.core.config import get_settings
+        import main as main_module
+
+        get_settings.cache_clear()
+
+        async def failing_schema() -> None:
+            raise RuntimeError("database is locked")
+
+        with patch.object(main_module, "ensure_database_schema", failing_schema):
+            with TestClient(main_module.create_app()) as client:
+                response = client.get("/startup-status")
+                ready_response = client.get("/ready")
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        data = response.json()
+        self.assertEqual(data["state"], "error")
+        self.assertEqual(data["phase"], "error")
+        self.assertEqual(data["message"], "系统准备失败")
+        self.assertEqual(data["error"], "database is locked")
+        self.assertEqual(ready_response.status_code, 500)
 
     def test_desktop_data_dir_controls_default_storage_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
