@@ -114,6 +114,38 @@ class TemplateRunRewriteTests(unittest.TestCase):
         self.assertIn("<strong>{{research_direction}}</strong>", result.html)
         self.assertNotIn("{{research_direction}} 和 {{research_direction}}", result.html)
 
+    def test_empty_replacements_reports_diagnostic_reason(self) -> None:
+        document = build_template_run_document("<p>老师您好。</p>")
+
+        with self.assertRaises(ValueError) as context:
+            apply_template_run_replacements(document, [])
+
+        self.assertIn("模型未返回可用改写内容", str(context.exception))
+        self.assertIn("replacements 为空", str(context.exception))
+
+    def test_unmatched_replacements_report_invalid_ids(self) -> None:
+        document = build_template_run_document("<p>老师您好。</p>")
+
+        with self.assertRaises(ValueError) as context:
+            apply_template_run_replacements(
+                document,
+                [
+                    {
+                        "segment_id": "seg_404",
+                        "runs": [{"run_id": "run_1", "text": "您好。"}],
+                    },
+                    {
+                        "segment_id": "seg_1",
+                        "runs": [{"run_id": "run_404", "text": "您好。"}],
+                    },
+                ],
+            )
+
+        message = str(context.exception)
+        self.assertIn("模型未返回可用改写内容", message)
+        self.assertIn("无效 segment_id: seg_404", message)
+        self.assertIn("无效 run_id: seg_1/run_404", message)
+
 
 if __name__ == "__main__":
     unittest.main()

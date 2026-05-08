@@ -90,40 +90,91 @@ def apply_template_run_replacements(
 ) -> RichTextRenderResult:
     segment_map = {segment.segment_id: segment for segment in document.segments}
     applied_count = 0
+    diagnostics: Counter[str] = Counter()
+    invalid_segment_ids: list[str] = []
+    invalid_run_refs: list[str] = []
+
+    if not replacements:
+        diagnostics["empty_replacements"] += 1
 
     for replacement in replacements:
         if not isinstance(replacement, dict):
+            diagnostics["invalid_replacement"] += 1
             continue
         segment_id = replacement.get("segment_id")
         if not isinstance(segment_id, str):
+            diagnostics["invalid_segment_id"] += 1
             continue
         segment = segment_map.get(segment_id)
         if segment is None:
+            diagnostics["unknown_segment_id"] += 1
+            _append_sample(invalid_segment_ids, segment_id)
             continue
 
         run_map = {run.run_id: run for run in segment.runs}
         raw_runs = replacement.get("runs")
         if not isinstance(raw_runs, list):
+            diagnostics["invalid_runs"] += 1
             continue
         for run_replacement in raw_runs:
             if not isinstance(run_replacement, dict):
+                diagnostics["invalid_run_replacement"] += 1
                 continue
             run_id = run_replacement.get("run_id")
             text = run_replacement.get("text")
             if not isinstance(run_id, str) or not isinstance(text, str):
+                diagnostics["invalid_run_payload"] += 1
                 continue
             run = run_map.get(run_id)
             if run is None:
+                diagnostics["unknown_run_id"] += 1
+                _append_sample(invalid_run_refs, f"{segment_id}/{run_id}")
                 continue
             if not _replacement_preserves_placeholders(run, text):
+                diagnostics["placeholder_violation"] += 1
                 continue
             document.nodes[run.node_index].replace_with(_restore_placeholders(text, document.placeholders))
             applied_count += 1
 
     if applied_count == 0:
-        raise ValueError("模型未返回可用改写内容")
+        raise ValueError(_format_no_replacement_error(diagnostics, invalid_segment_ids, invalid_run_refs))
 
     return normalize_email_html(str(document.soup))
+
+
+def _append_sample(samples: list[str], value: str, *, limit: int = 3) -> None:
+    if value in samples or len(samples) >= limit:
+        return
+    samples.append(value)
+
+
+def _format_no_replacement_error(
+    diagnostics: Counter[str],
+    invalid_segment_ids: list[str],
+    invalid_run_refs: list[str],
+) -> str:
+    details: list[str] = []
+    if diagnostics["empty_replacements"]:
+        details.append("replacements 为空")
+    if invalid_segment_ids:
+        details.append(f"无效 segment_id: {', '.join(invalid_segment_ids)}")
+    if invalid_run_refs:
+        details.append(f"无效 run_id: {', '.join(invalid_run_refs)}")
+    if diagnostics["placeholder_violation"]:
+        details.append(f"占位符校验失败: {diagnostics['placeholder_violation']}")
+    if diagnostics["invalid_replacement"]:
+        details.append(f"无效 replacement 项: {diagnostics['invalid_replacement']}")
+    if diagnostics["invalid_segment_id"]:
+        details.append(f"缺失或非法 segment_id: {diagnostics['invalid_segment_id']}")
+    if diagnostics["invalid_runs"]:
+        details.append(f"缺失或非法 runs: {diagnostics['invalid_runs']}")
+    if diagnostics["invalid_run_replacement"]:
+        details.append(f"无效 run 项: {diagnostics['invalid_run_replacement']}")
+    if diagnostics["invalid_run_payload"]:
+        details.append(f"缺失或非法 run_id/text: {diagnostics['invalid_run_payload']}")
+    if not details:
+        return "模型未返回可用改写内容"
+    return f"模型未返回可用改写内容（{'; '.join(details)}）"
 
 
 def _iter_segment_elements(soup: BeautifulSoup) -> list[Tag]:

@@ -1825,6 +1825,66 @@ class ApiEndpointTests(unittest.TestCase):
             any(message["direction"] == "draft" for message in refreshed.json()["messages"]),
         )
 
+    def test_generate_draft_returns_bad_gateway_when_llm_fails(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        material_id = self._upload_material(
+            identity_id,
+            filename="resume.txt",
+            content=b"My background covers information extraction and agents.",
+            material_type="resume",
+        )
+        set_primary_response = self.client.post(f"/api/materials/{material_id}/set-primary")
+        self.assertEqual(set_primary_response.status_code, 200, msg=set_primary_response.text)
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "失败提示导师",
+                "email": "draft-failure@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Information Extraction",
+                "recent_papers": ["Agent paper"],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        workspace = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(workspace.status_code, 200, msg=workspace.text)
+        task_id = workspace.json()["current_task"]["id"]
+
+        from app.services import llm_runtime
+
+        with patch(
+            "app.services.task_runtime.llm_runtime.generate_draft_content",
+            AsyncMock(side_effect=llm_runtime.LLMRuntimeError("模型未返回可用改写内容")),
+        ):
+            response = self.client.post(f"/api/email-tasks/{task_id}/generate-draft")
+
+        self.assertEqual(response.status_code, 502, msg=response.text)
+        self.assertEqual(response.json()["detail"], "模型未返回可用改写内容")
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            row = connection.execute(
+                "SELECT status, last_error, generated_subject FROM email_tasks WHERE id = ?",
+                (task_id,),
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertEqual(row[0], "discovered")
+        self.assertEqual(row[1], "模型未返回可用改写内容")
+        self.assertIsNone(row[2])
+
     def test_calculate_match_keeps_low_score_task_in_matched_state(self) -> None:
         identity_id = self._create_identity(with_imap=False)
         llm_id = self._create_llm()

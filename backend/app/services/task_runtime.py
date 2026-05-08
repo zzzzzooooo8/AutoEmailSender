@@ -408,7 +408,9 @@ async def generate_task_draft(
                 task.draft_generation_previous_status = None
             task.updated_at = datetime.now(UTC)
             await session.commit()
-            return task.professor_id, task.identity_id, task.llm_profile_id
+            if automatic_batch:
+                return task.professor_id, task.identity_id, task.llm_profile_id
+            raise
         except ValueError as exc:
             task.last_error = str(exc)
             if automatic_batch:

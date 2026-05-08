@@ -794,6 +794,12 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         payload = json.loads(prompt)
         self.assertIn("body_segments", payload)
         self.assertEqual(payload["body_segments"][0]["runs"][1]["marks"], ["strong"])
+        self.assertEqual(
+            payload["response_schema"]["replacements"][0]["runs"][0],
+            {"run_id": "run_1", "text": "改写后的 run 文本"},
+        )
+        self.assertIn("不要返回 marks。", payload["instructions"])
+        self.assertNotIn("只改写 replacements 中已有 run 的 text", payload["instructions"])
         self.assertNotIn("<strong>Example University</strong>", prompt)
         self.assertNotIn("套磁信模板正文 HTML", prompt)
 

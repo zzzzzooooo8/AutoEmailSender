@@ -15,6 +15,7 @@ from app.schemas.email_task import (
     TokenUsageRead,
 )
 from app.schemas.workspace import WorkspaceThreadRead
+from app.services import llm_runtime
 from app.services.task_runtime import (
     approve_and_schedule_task,
     approve_and_send_task,
@@ -213,6 +214,8 @@ async def _run_workspace_action(
 ) -> WorkspaceThreadRead:
     try:
         professor_id, identity_id, llm_profile_id = await action()
+    except llm_runtime.LLMRuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except ValueError as exc:
         detail = str(exc)
         status_code = 404 if "不存在" in detail else 400

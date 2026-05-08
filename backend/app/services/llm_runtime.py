@@ -214,6 +214,7 @@ SYSTEM_TEMPLATE_RUN_REWRITE_PROMPT = dedent(
     - subject: 邮件主题
     - replacements: segment 替换数组
     - suggested_material_ids: 整数数组，只能从可选材料 ID 中选择
+    replacements 中每个 run 只能包含 run_id 和 text，不要返回 marks、locked_placeholders 或原始 body_segments 对象。
     """
 ).strip()
 
@@ -1336,6 +1337,21 @@ def build_template_run_rewrite_prompt(
             }
             for segment in template_document.segments
         ],
+        "response_schema": {
+            "subject": "邮件主题",
+            "replacements": [
+                {
+                    "segment_id": "seg_1",
+                    "runs": [
+                        {
+                            "run_id": "run_1",
+                            "text": "改写后的 run 文本",
+                        },
+                    ],
+                },
+            ],
+            "suggested_material_ids": [material.id for material in available_materials[:1]],
+        },
         "available_materials": [
             {
                 "id": material.id,
@@ -1346,10 +1362,16 @@ def build_template_run_rewrite_prompt(
         ],
         "instructions": [
             "只返回 JSON 对象。",
-            "只改写 replacements 中已有 run 的 text。",
+            "replacements 只能引用 body_segments 中已有的 segment_id 和 run_id。",
+            "每个 runs 项只允许包含 run_id 和 text。",
+            "不要返回 marks。",
+            "不要返回 locked_placeholders。",
+            "不要复制完整 body_segments。",
+            "至少返回一个实际需要改写的非占位符 run。",
             "segment_id 和 run_id 必须来自 body_segments。",
             "不要返回 HTML 或完整正文。",
             "locked_placeholders 中的 token 必须保留在同一个 run 内。",
+            "不需要改写的 run 不要放入 replacements。",
             "suggested_material_ids 只能选择 available_materials 中存在的 id。",
         ],
     }
