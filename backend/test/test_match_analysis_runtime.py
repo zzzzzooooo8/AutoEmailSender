@@ -188,9 +188,40 @@ class MatchAnalysisRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(MatchAnalysisAlreadyRunningError, "该任务正在分析中"):
             self._run_async(calculate_task_match_once(self.session_factory, self.email_task_id))
 
+    def test_calculate_match_rejects_when_primary_material_has_no_extracted_text(self) -> None:
+        self._run_async(self._clear_primary_material_text())
+
+        with (
+            patch(
+                "app.services.materials.extract_text_from_document",
+                return_value=None,
+            ),
+            patch(
+                "app.services.task_runtime.llm_runtime.generate_match_evaluation",
+                new=AsyncMock(),
+            ) as mocked_generate,
+            self.assertRaisesRegex(ValueError, "默认材料无法提取文本"),
+        ):
+            self._run_async(calculate_task_match_once(self.session_factory, self.email_task_id))
+
+        mocked_generate.assert_not_awaited()
+        runs = self._run_async(self._list_runs())
+        self.assertEqual(runs, [])
+
     async def _list_runs(self) -> list[MatchAnalysisRun]:
         async with self.session_factory() as session:
             return list(await session.scalars(select(MatchAnalysisRun)))
+
+    async def _clear_primary_material_text(self) -> None:
+        async with self.session_factory() as session:
+            task = await session.get(EmailTask, self.email_task_id)
+            assert task is not None
+            material = await session.get(IdentityMaterial, task.primary_material_id)
+            assert material is not None
+            material.original_filename = "resume.pdf"
+            material.file_path = "data/materials/resume.pdf"
+            material.extracted_text = None
+            await session.commit()
 
     async def _insert_running_run(self) -> None:
         async with self.session_factory() as session:
