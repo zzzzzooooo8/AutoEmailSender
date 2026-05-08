@@ -23,6 +23,7 @@ import {
   X,
   XCircle,
 } from "lucide-react";
+import { useDesktopBackend } from "@/context/DesktopBackendContext";
 import { useNotification } from "@/context/NotificationContext";
 import { useSelectionContext } from "@/context/SelectionContext";
 import { NativeSelectField } from "@/components/atoms/NativeSelectField";
@@ -1516,6 +1517,10 @@ export const ProfilePage = () => {
     loading,
   } = useSelectionContext();
   const { notifyError, notifyFormErrors, notifySuccess } = useNotification();
+  const {
+    isReady: desktopBackendReady,
+    disableReason: desktopDisableReason,
+  } = useDesktopBackend();
   const [identityEditorId, setIdentityEditorId] = useState<EditorId>(null);
   const [llmEditorId, setLlmEditorId] = useState<EditorId>(null);
   const [identityForm, setIdentityForm] = useState<IdentityFormState>(
@@ -2125,6 +2130,14 @@ export const ProfilePage = () => {
   const saveIdentity = async ({
     validateTemplate = false,
   }: { validateTemplate?: boolean } = {}): Promise<IdentityDTO | null> => {
+    if (!desktopBackendReady) {
+      notifyError(
+        "系统正在准备本地数据",
+        "这不是身份配置错误。请等待系统准备完成后再保存，已填写内容不会丢失。",
+      );
+      return null;
+    }
+
     if (!identityForm.profile_name.trim() || !identityForm.sender_name.trim()) {
       notifyFormErrors("请检查表单", ["请填写配置名称和发件人姓名"]);
       return null;
@@ -2295,12 +2308,17 @@ export const ProfilePage = () => {
       <button
         type="button"
         onClick={() => void saveIdentity()}
-        disabled={submittingIdentity}
+        disabled={submittingIdentity || !desktopBackendReady}
         className="ui-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
       >
         {submittingIdentity && <Loader2 className="h-4 w-4 animate-spin" />}
-        保存身份
+        {!desktopBackendReady ? (desktopDisableReason ?? "系统准备中") : "保存身份"}
       </button>
+      {!desktopBackendReady && (
+        <p className="basis-full text-xs text-amber-700">
+          本地数据准备完成后即可继续操作，已填写内容不会丢失。
+        </p>
+      )}
       {editingIdentity && (
         <>
           {selectedIdentityId === editingIdentity.id ? (

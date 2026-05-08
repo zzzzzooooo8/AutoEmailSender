@@ -6,11 +6,16 @@ import { updateIdentity } from "@/lib/api/identities";
 import type { IdentityDTO, LLMProfileDTO } from "@/types";
 
 const mockedUseSelectionContext = vi.hoisted(() => vi.fn());
+const mockedUseDesktopBackend = vi.hoisted(() => vi.fn());
 const mockedGetTestComposeThread = vi.hoisted(() => vi.fn());
 const mockedGetTestComposeStatus = vi.hoisted(() => vi.fn());
 
 vi.mock("@/context/SelectionContext", () => ({
   useSelectionContext: mockedUseSelectionContext,
+}));
+
+vi.mock("@/context/DesktopBackendContext", () => ({
+  useDesktopBackend: mockedUseDesktopBackend,
 }));
 
 vi.mock("@/context/NotificationContext", () => ({
@@ -203,6 +208,12 @@ describe("ProfilePage onboarding", () => {
       setSelectedLlmProfileId: vi.fn(),
       refreshSelections: vi.fn(),
       loading: false,
+    });
+    mockedUseDesktopBackend.mockReturnValue({
+      isDesktop: false,
+      isReady: true,
+      disableReason: null,
+      status: null,
     });
   });
 
@@ -414,6 +425,31 @@ describe("ProfilePage onboarding", () => {
         }),
       );
     });
+  });
+
+  it("disables identity saving while desktop backend is not ready", async () => {
+    mockedUseDesktopBackend.mockReturnValue({
+      isDesktop: true,
+      isReady: false,
+      disableReason: "系统准备中",
+      status: {
+        state: "starting",
+        phase: "migrating_database",
+        message: "正在检查和升级本地数据",
+        elapsedSeconds: 12,
+        slowStartup: false,
+        verySlowStartup: false,
+      },
+    });
+
+    renderPage();
+    openSetupSection("发件身份");
+
+    const saveButton = await screen.findByRole("button", { name: "系统准备中" });
+    expect(saveButton).toBeDisabled();
+    expect(
+      screen.getByText("本地数据准备完成后即可继续操作，已填写内容不会丢失。"),
+    ).toBeInTheDocument();
   });
 
   it("renders the material entry and connection testing area for an existing identity", () => {
