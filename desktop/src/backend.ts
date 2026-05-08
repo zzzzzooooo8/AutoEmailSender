@@ -13,6 +13,9 @@ import type {
   BackendExit,
   BackendExitHandler,
   BackendPathInput,
+  BackendStartupPhase,
+  BackendStartupStatus,
+  BackendStatus,
 } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -98,10 +101,20 @@ export async function startBackend(options: {
   child.once("exit", (code, signal) => {
     notifyBackendExit(lifecycle, code, signal);
   });
+  const statusHandlers = new Set<(status: BackendStatus) => void>();
+  const emitStatus = (status: BackendStatus) => {
+    statusHandlers.forEach((handler) => handler(status));
+  };
 
   return {
     baseUrl,
-    ready: waitForReady(baseUrl, child),
+    ready: waitForReady(baseUrl, child, emitStatus),
+    onStatus: (handler) => {
+      statusHandlers.add(handler);
+      return () => {
+        statusHandlers.delete(handler);
+      };
+    },
     stop: () => stopBackend(child, lifecycle),
   };
 }
@@ -150,29 +163,152 @@ function spawnBackend(input: {
 async function waitForReady(
   baseUrl: string,
   child: ChildProcessWithoutNullStreams,
+  onStatus: (status: BackendStatus) => void,
 ): Promise<void> {
-  const deadline = Date.now() + 30_000;
   let stderr = "";
   child.stderr.on("data", (chunk: Buffer) => {
     stderr += chunk.toString("utf8");
   });
 
+  await waitForHealth(baseUrl, child, () => stderr);
+  try {
+    await waitForStartupStatus(baseUrl, { onStatus });
+  } catch (error) {
+    if (child.exitCode !== null) {
+      throw new Error(`后端进程已退出：${stderr.slice(-800)}`);
+    }
+    throw error;
+  }
+}
+
+async function waitForHealth(
+  baseUrl: string,
+  child: ChildProcessWithoutNullStreams,
+  getStderr: () => string,
+): Promise<void> {
+  const deadline = Date.now() + 30_000;
+
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
-      throw new Error(`Backend exited before readiness check succeeded: ${stderr.slice(-800)}`);
+      throw new Error(`Backend exited before health check succeeded: ${getStderr().slice(-800)}`);
     }
-    if (await isReady(baseUrl)) {
+    if (await isEndpointOk(`${baseUrl}/health`)) {
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 400));
   }
 
-  throw new Error(`Backend readiness check timed out: ${stderr.slice(-800)}`);
+  throw new Error(`Backend health check timed out: ${getStderr().slice(-800)}`);
 }
 
-async function isReady(baseUrl: string): Promise<boolean> {
+export async function waitForStartupStatus(
+  baseUrl: string,
+  options: {
+    onStatus: (status: BackendStatus) => void;
+    pollIntervalMs?: number;
+    hardTimeoutMs?: number;
+  },
+): Promise<void> {
+  const pollIntervalMs = options.pollIntervalMs ?? 800;
+  const hardTimeoutMs = options.hardTimeoutMs ?? 10 * 60_000;
+  const deadline = Date.now() + hardTimeoutMs;
+  let lastStatus: BackendStatus | null = null;
+
+  while (Date.now() < deadline) {
+    const status = await fetchStartupStatus(baseUrl);
+    if (status.state === "ready") {
+      const readyStatus: BackendStatus = {
+        state: "ready",
+        baseUrl,
+        phase: "ready",
+        message: status.message,
+        elapsedSeconds: status.elapsed_seconds,
+      };
+      options.onStatus(readyStatus);
+      return;
+    }
+
+    if (status.state === "error") {
+      const errorStatus: BackendStatus = {
+        state: "error",
+        phase: "error",
+        message: "系统准备失败",
+        elapsedSeconds: status.elapsed_seconds,
+        detail: status.error ?? status.message,
+      };
+      options.onStatus(errorStatus);
+      throw new Error(errorStatus.message);
+    }
+
+    const startingStatus: BackendStatus = {
+      state: "starting",
+      phase: isStartupPhase(status.phase) ? status.phase : "starting",
+      message: status.message,
+      elapsedSeconds: status.elapsed_seconds,
+      slowStartup: status.elapsed_seconds >= 30,
+      verySlowStartup: status.elapsed_seconds >= 120,
+    };
+    lastStatus = startingStatus;
+    options.onStatus(startingStatus);
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+
+  const elapsedSeconds =
+    lastStatus?.state === "starting"
+      ? lastStatus.elapsedSeconds
+      : Math.round(hardTimeoutMs / 1000);
+  const timeoutStatus: BackendStatus = {
+    state: "error",
+    phase: "error",
+    message: "系统准备时间过长",
+    elapsedSeconds,
+    detail: "启动状态轮询超过 10 分钟仍未完成",
+  };
+  options.onStatus(timeoutStatus);
+  throw new Error(timeoutStatus.message);
+}
+
+function isStartupPhase(
+  phase: BackendStartupStatus["phase"],
+): phase is Exclude<BackendStartupPhase, "ready" | "error"> {
+  return (
+    phase === "starting" ||
+    phase === "migrating_database" ||
+    phase === "cleaning_logs" ||
+    phase === "starting_workers"
+  );
+}
+
+async function fetchStartupStatus(baseUrl: string): Promise<BackendStartupStatus> {
+  return new Promise((resolve, reject) => {
+    const request = http.get(`${baseUrl}/startup-status`, (response) => {
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk: string) => {
+        body += chunk;
+      });
+      response.on("end", () => {
+        if (response.statusCode !== 200) {
+          reject(new Error(`Startup status request failed: ${response.statusCode}`));
+          return;
+        }
+        try {
+          resolve(JSON.parse(body) as BackendStartupStatus);
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    request.on("error", reject);
+    request.setTimeout(1_000, () => {
+      request.destroy(new Error("Startup status request timed out"));
+    });
+  });
+}
+
+async function isEndpointOk(url: string): Promise<boolean> {
   return new Promise((resolve) => {
-    const request = http.get(`${baseUrl}/ready`, (response) => {
+    const request = http.get(url, (response) => {
       response.resume();
       resolve(response.statusCode === 200);
     });

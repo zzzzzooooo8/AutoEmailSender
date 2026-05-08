@@ -15,6 +15,7 @@ export type BackendEnvInput = {
 export type BackendController = {
   baseUrl: string;
   ready: Promise<void>;
+  onStatus: (handler: (status: BackendStatus) => void) => () => void;
   stop: () => Promise<void>;
 };
 
@@ -25,11 +26,46 @@ export type BackendExit = {
 
 export type BackendExitHandler = (exit: BackendExit) => void;
 
+export type BackendStartupPhase =
+  | "starting"
+  | "migrating_database"
+  | "cleaning_logs"
+  | "starting_workers"
+  | "ready"
+  | "error";
+
+export type BackendStartupStatus = {
+  state: "starting" | "ready" | "error";
+  phase: BackendStartupPhase;
+  message: string;
+  elapsed_seconds: number;
+  error: string | null;
+};
+
 export type BackendStatus =
-  | { state: "starting" }
+  | {
+      state: "starting";
+      phase: Exclude<BackendStartupPhase, "ready" | "error">;
+      message: string;
+      elapsedSeconds: number;
+      slowStartup: boolean;
+      verySlowStartup: boolean;
+    }
   | { state: "restarting"; code: number | null; signal: NodeJS.Signals | null }
-  | { state: "ready"; baseUrl: string }
-  | { state: "error"; message: string };
+  | {
+      state: "ready";
+      baseUrl: string;
+      phase: "ready";
+      message: string;
+      elapsedSeconds: number;
+    }
+  | {
+      state: "error";
+      message: string;
+      phase: "error";
+      elapsedSeconds: number;
+      detail?: string;
+    };
 
 export type UpdateDownloadMode = "differential" | "full";
 

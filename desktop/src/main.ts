@@ -17,7 +17,7 @@ let tray: Tray | null = null;
 let backend: BackendController | null = null;
 let restartingBackend = false;
 let isQuitting = false;
-let currentBackendStatus: BackendStatus = { state: "starting" };
+let currentBackendStatus: BackendStatus = createInitialBackendStatus();
 const windowCreationState = { pendingCreation: null as Promise<void> | null };
 
 const repoRoot = path.resolve(app.getAppPath(), "..");
@@ -147,6 +147,8 @@ async function restartBackendAfterUnexpectedExit(exit: BackendExit): Promise<voi
     publishBackendStatus({
       state: "error",
       message,
+      phase: "error",
+      elapsedSeconds: 0,
     });
   } finally {
     restartingBackend = false;
@@ -154,20 +156,24 @@ async function restartBackendAfterUnexpectedExit(exit: BackendExit): Promise<voi
 }
 
 function publishBackendReady(controller: BackendController): void {
-  publishBackendStatus({ state: "starting" });
+  publishBackendStatus(createInitialBackendStatus());
+  const unsubscribe = controller.onStatus((status) => publishBackendStatus(status));
   controller.ready
     .then(() => {
-      publishBackendStatus({
-        state: "ready",
-        baseUrl: controller.baseUrl,
-      });
+      unsubscribe();
       checkForUpdatesOnStartup();
     })
     .catch((error: unknown) => {
+      unsubscribe();
+      if (currentBackendStatus.state === "error") {
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       publishBackendStatus({
         state: "error",
         message,
+        phase: "error",
+        elapsedSeconds: 0,
       });
     });
 }
@@ -175,6 +181,17 @@ function publishBackendReady(controller: BackendController): void {
 function publishBackendStatus(status: typeof currentBackendStatus): void {
   currentBackendStatus = status;
   mainWindow?.webContents.send("backend:status", status);
+}
+
+function createInitialBackendStatus(): BackendStatus {
+  return {
+    state: "starting",
+    phase: "starting",
+    message: "正在启动系统服务",
+    elapsedSeconds: 0,
+    slowStartup: false,
+    verySlowStartup: false,
+  };
 }
 
 ipcMain.handle("app:get-version", () => app.getVersion());

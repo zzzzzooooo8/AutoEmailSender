@@ -14,7 +14,14 @@ if (document.documentElement) {
 let backendBaseUrl = process.argv
   .find((value) => value.startsWith("--backend-base-url="))
   ?.replace("--backend-base-url=", "");
-let currentBackendStatus: BackendStatus = { state: "starting" };
+let currentBackendStatus: BackendStatus = {
+  state: "starting",
+  phase: "starting",
+  message: "正在启动系统服务",
+  elapsedSeconds: 0,
+  slowStartup: false,
+  verySlowStartup: false,
+};
 const backendStatusCallbacks = new Set<(status: BackendStatus) => void>();
 
 ipcRenderer.on("backend:status", (_event: IpcRendererEvent, status: BackendStatus) => {

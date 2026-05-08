@@ -1,5 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
 import {
   buildBackendEnv,
@@ -8,7 +10,57 @@ import {
   notifyBackendExit,
   normalizePort,
   stopBackend,
+  waitForStartupStatus,
 } from "../src/backend.js";
+
+type StartupStatusFixture = {
+  state: "starting" | "ready" | "error";
+  phase: string;
+  message: string;
+  elapsed_seconds: number;
+  error: string | null;
+};
+
+async function withStartupServer(
+  statuses: StartupStatusFixture[],
+  test: (baseUrl: string) => Promise<void>,
+): Promise<void> {
+  let statusIndex = 0;
+  const server = createServer((request, response) => {
+    if (request.url === "/health") {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ status: "ok" }));
+      return;
+    }
+
+    if (request.url === "/startup-status") {
+      const status = statuses[Math.min(statusIndex, statuses.length - 1)];
+      statusIndex += 1;
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(status));
+      return;
+    }
+
+    response.writeHead(404);
+    response.end();
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  try {
+    await test(`http://127.0.0.1:${address.port}`);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+}
 
 describe("desktop backend helpers", () => {
   it("resolves packaged backend executable path", () => {
@@ -148,5 +200,62 @@ describe("desktop backend helpers", () => {
     );
 
     expect(terminatedPids).toEqual([1234]);
+  });
+
+  it("polls startup status until the backend is ready", async () => {
+    const observed: string[] = [];
+
+    await withStartupServer(
+      [
+        {
+          state: "starting",
+          phase: "migrating_database",
+          message: "正在检查和升级本地数据",
+          elapsed_seconds: 3,
+          error: null,
+        },
+        {
+          state: "ready",
+          phase: "ready",
+          message: "系统已准备就绪",
+          elapsed_seconds: 4,
+          error: null,
+        },
+      ],
+      async (baseUrl) => {
+        await expect(
+          waitForStartupStatus(baseUrl, {
+            onStatus: (status) => observed.push(status.state),
+            pollIntervalMs: 1,
+            hardTimeoutMs: 1_000,
+          }),
+        ).resolves.toBeUndefined();
+      },
+    );
+
+    expect(observed).toEqual(["starting", "ready"]);
+  });
+
+  it("fails startup polling when startup status reports error", async () => {
+    await withStartupServer(
+      [
+        {
+          state: "error",
+          phase: "error",
+          message: "系统准备失败",
+          elapsed_seconds: 5,
+          error: "database is locked",
+        },
+      ],
+      async (baseUrl) => {
+        await expect(
+          waitForStartupStatus(baseUrl, {
+            onStatus: () => undefined,
+            pollIntervalMs: 1,
+            hardTimeoutMs: 1_000,
+          }),
+        ).rejects.toThrow("系统准备失败");
+      },
+    );
   });
 });
