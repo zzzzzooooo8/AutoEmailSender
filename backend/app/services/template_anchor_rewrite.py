@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass, field
 from html import escape
 
-from bs4 import BeautifulSoup, NavigableString
+from bs4 import BeautifulSoup, NavigableString, Tag
 
 from app.services.rich_text import RichTextRenderResult, normalize_email_html
 from app.services.template_run_rewrite import TemplateRun, TemplateRunDocument, TemplateSegment
@@ -117,7 +117,7 @@ def _append_placeholder_run_parts(
                 text=token,
                 segment_id=segment.segment_id,
                 source_runs=[run.run_id],
-                marks=["placeholder"],
+                marks=list(run.marks),
                 locked_placeholders=[placeholder_by_token[token]],
             ),
         )
@@ -203,9 +203,8 @@ def _replace_segment_contents(
 
 
 def _find_segment_container(node: NavigableString):
-    segment_names = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "td", "th"}
     for parent in node.parents:
-        if getattr(parent, "name", None) in segment_names:
+        if getattr(parent, "name", None) in SEGMENT_CONTAINER_NAMES:
             return parent
     raise ValueError("无法定位模板段落容器")
 
@@ -219,7 +218,8 @@ def _anchor_html_map(
     html_by_anchor: dict[str, str] = {}
     for anchor in anchored_segment.anchors:
         if anchor.locked_placeholders:
-            html_by_anchor[anchor.anchor_id] = escape(anchor.locked_placeholders[0]["original"])
+            run = run_map[anchor.source_runs[0]]
+            html_by_anchor[anchor.anchor_id] = _render_placeholder_anchor_html(document, run, anchor)
             continue
         html_parts: list[str] = []
         for run_id in anchor.source_runs:
@@ -229,6 +229,26 @@ def _anchor_html_map(
             html_parts.append(str(parent) if parent is not None else escape(str(node)))
         html_by_anchor[anchor.anchor_id] = "".join(html_parts)
     return html_by_anchor
+
+
+SEGMENT_CONTAINER_NAMES = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "td", "th"}
+
+
+def _render_placeholder_anchor_html(
+    document: TemplateRunDocument,
+    run: TemplateRun,
+    anchor: TemplateAnchor,
+) -> str:
+    original = anchor.locked_placeholders[0]["original"]
+    node = document.nodes[run.node_index]
+    parent = node.parent
+    if (
+        str(node) == original
+        and isinstance(parent, Tag)
+        and parent.name not in SEGMENT_CONTAINER_NAMES
+    ):
+        return str(parent)
+    return escape(original)
 
 
 def _render_replacement_fragment(text: str, anchor_html: dict[str, str]) -> str:

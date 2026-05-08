@@ -22,7 +22,11 @@ from app.services.rich_text import (
     render_rich_text_document,
     text_to_email_html,
 )
-from app.services.template_anchor_rewrite import AnchoredTemplateDocument
+from app.services.template_anchor_rewrite import (
+    AnchoredTemplateDocument,
+    apply_anchored_template_replacements,
+    build_anchored_template_document,
+)
 from app.services.template_run_rewrite import (
     TemplateRunDocument,
     apply_template_run_replacements,
@@ -633,13 +637,14 @@ async def generate_draft_content(
 
     if template_html:
         template_document = build_template_run_document(template_html)
-        prompt = build_template_run_rewrite_prompt(
+        anchored_document = build_anchored_template_document(template_document)
+        prompt = build_template_anchor_rewrite_prompt(
             identity=identity,
             primary_material=primary_material,
             professor=professor,
             available_materials=available_materials,
             subject_template=custom_subject,
-            template_document=template_document,
+            anchored_document=anchored_document,
             current_match=current_match,
             rewrite_preferences=rewrite_preferences,
         )
@@ -650,7 +655,7 @@ async def generate_draft_content(
                 "messages": [
                     {
                         "role": "system",
-                        "content": SYSTEM_TEMPLATE_RUN_REWRITE_PROMPT,
+                        "content": SYSTEM_TEMPLATE_ANCHOR_REWRITE_PROMPT,
                     },
                     {
                         "role": "user",
@@ -661,10 +666,11 @@ async def generate_draft_content(
                 "max_tokens": max_tokens or DEFAULT_LLM_MAX_TOKENS,
             },
         )
-        rewrite_result = parse_structured_result(completion.content, TemplateRunRewriteResult)
+        rewrite_result = parse_structured_result(completion.content, TemplateAnchorRewriteResult)
         try:
-            rendered = apply_template_run_replacements(
+            rendered = apply_anchored_template_replacements(
                 template_document,
+                anchored_document,
                 [item.model_dump() for item in rewrite_result.replacements],
             )
         except ValueError as exc:
@@ -1117,18 +1123,19 @@ def estimate_template_run_draft_tokens(
 
     if template_html:
         document = build_template_run_document(template_html)
-        prompt = build_template_run_rewrite_prompt(
+        anchored_document = build_anchored_template_document(document)
+        prompt = build_template_anchor_rewrite_prompt(
             identity=identity,
             primary_material=primary_material,
             professor=professor,
             available_materials=available_materials,
             subject_template=custom_subject,
-            template_document=document,
+            anchored_document=anchored_document,
             current_match=None,
             rewrite_preferences=DraftRewritePreferences(),
         )
         estimated_prompt_tokens = estimate_text_tokens(
-            f"{SYSTEM_TEMPLATE_RUN_REWRITE_PROMPT}\n{prompt}",
+            f"{SYSTEM_TEMPLATE_ANCHOR_REWRITE_PROMPT}\n{prompt}",
         )
     else:
         prompt = build_draft_prompt(
