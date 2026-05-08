@@ -236,6 +236,62 @@ describe("desktop backend helpers", () => {
     expect(observed).toEqual(["starting", "ready"]);
   });
 
+  it("keeps polling when a startup status request fails temporarily", async () => {
+    const observed: string[] = [];
+    let statusRequests = 0;
+    const server = createServer((request, response) => {
+      if (request.url === "/startup-status") {
+        statusRequests += 1;
+        if (statusRequests === 1) {
+          response.writeHead(503, { "Content-Type": "application/json" });
+          response.end(JSON.stringify({ error: "temporarily unavailable" }));
+          return;
+        }
+
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(
+          JSON.stringify({
+            state: "ready",
+            phase: "ready",
+            message: "系统已准备就绪",
+            elapsed_seconds: 4,
+            error: null,
+          }),
+        );
+        return;
+      }
+
+      response.writeHead(404);
+      response.end();
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address() as AddressInfo;
+
+    try {
+      await expect(
+        waitForStartupStatus(`http://127.0.0.1:${address.port}`, {
+          onStatus: (status) => observed.push(status.state),
+          pollIntervalMs: 1,
+          hardTimeoutMs: 1_000,
+        }),
+      ).resolves.toBeUndefined();
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+    }
+
+    expect(statusRequests).toBe(2);
+    expect(observed).toEqual(["starting", "ready"]);
+  });
+
   it("fails startup polling when startup status reports error", async () => {
     await withStartupServer(
       [

@@ -211,11 +211,36 @@ export async function waitForStartupStatus(
 ): Promise<void> {
   const pollIntervalMs = options.pollIntervalMs ?? 800;
   const hardTimeoutMs = options.hardTimeoutMs ?? 10 * 60_000;
+  const startedAt = Date.now();
   const deadline = Date.now() + hardTimeoutMs;
   let lastStatus: BackendStatus | null = null;
+  let lastStartingPhase: Exclude<BackendStartupPhase, "ready" | "error"> = "starting";
+  let lastElapsedSeconds: number | null = null;
 
   while (Date.now() < deadline) {
-    const status = await fetchStartupStatus(baseUrl);
+    let status: BackendStartupStatus;
+    try {
+      status = await fetchStartupStatus(baseUrl);
+    } catch {
+      const localElapsedSeconds = Math.round((Date.now() - startedAt) / 1000);
+      const elapsedSeconds =
+        lastElapsedSeconds === null
+          ? localElapsedSeconds
+          : Math.max(lastElapsedSeconds, localElapsedSeconds);
+      const startingStatus: BackendStatus = {
+        state: "starting",
+        phase: lastStartingPhase,
+        message: "系统正在准备中",
+        elapsedSeconds,
+        slowStartup: elapsedSeconds >= 30,
+        verySlowStartup: elapsedSeconds >= 120,
+      };
+      lastStatus = startingStatus;
+      options.onStatus(startingStatus);
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      continue;
+    }
+
     if (status.state === "ready") {
       const readyStatus: BackendStatus = {
         state: "ready",
@@ -249,6 +274,8 @@ export async function waitForStartupStatus(
       verySlowStartup: status.elapsed_seconds >= 120,
     };
     lastStatus = startingStatus;
+    lastStartingPhase = startingStatus.phase;
+    lastElapsedSeconds = startingStatus.elapsedSeconds;
     options.onStatus(startingStatus);
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
   }
