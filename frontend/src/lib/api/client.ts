@@ -276,6 +276,14 @@ function getDesktopBackendBaseUrl(): string | null {
   return baseUrl ? baseUrl.replace(/\/+$/, "") : null;
 }
 
+function getDesktopBackendStartupErrorMessage(statusMessage?: string): string {
+  if (statusMessage?.includes("系统准备时间过长")) {
+    return "本地数据准备时间较长。请重启应用后再试；如果问题仍然存在，请导出诊断日志反馈。";
+  }
+
+  return "系统准备失败。请重启应用后再试；如果问题仍然存在，请导出诊断日志反馈。";
+}
+
 async function buildApiPathForFetch(
   path: string,
   params?: Record<string, string | number | null | undefined>,
@@ -301,8 +309,8 @@ async function waitForDesktopBackendBaseUrl(): Promise<string | null> {
     let unsubscribe: () => void = () => undefined;
     const timeout = window.setTimeout(() => {
       unsubscribe();
-      reject(new Error("桌面后端启动超时"));
-    }, 35_000);
+      reject(new Error("系统正在准备本地数据。请保持应用打开，完成后再继续操作。"));
+    }, 10 * 60_000);
     unsubscribe = subscribe((status) => {
       if (status.state === "ready") {
         window.clearTimeout(timeout);
@@ -313,7 +321,7 @@ async function waitForDesktopBackendBaseUrl(): Promise<string | null> {
       if (status.state === "error") {
         window.clearTimeout(timeout);
         unsubscribe();
-        reject(new Error(status.message));
+        reject(new Error(getDesktopBackendStartupErrorMessage(status.message)));
       }
     });
   });
