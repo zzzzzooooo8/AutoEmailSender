@@ -804,6 +804,64 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("<strong>Example University</strong>", prompt)
         self.assertNotIn("套磁信模板正文 HTML", prompt)
 
+    def test_build_template_anchor_rewrite_prompt_sends_rewrite_segments(self) -> None:
+        from app.models import IdentityMaterial, IdentityProfile, Professor
+        from app.services.llm_runtime import build_template_anchor_rewrite_prompt
+        from app.services.template_anchor_rewrite import build_anchored_template_document
+        from app.services.template_run_rewrite import build_template_run_document
+
+        identity = IdentityProfile(
+            name="张三",
+            email_address="sender@example.com",
+            smtp_host="smtp.example.com",
+            smtp_port=465,
+            smtp_username="sender@example.com",
+            smtp_password="secret",
+            default_language="zh-CN",
+            outreach_generation_mode="llm",
+        )
+        primary_material = IdentityMaterial(
+            id=12,
+            identity_id=1,
+            display_name="简历",
+            file_path="data/materials/resume.txt",
+            original_filename="resume.txt",
+            material_type="resume",
+            extracted_text="我做过信息抽取与智能体相关研究。",
+        )
+        professor = Professor(
+            name="李老师",
+            email="prof@example.edu",
+            title="Professor",
+            university="Example University",
+            school="Computer Science",
+            research_direction="Information Extraction",
+        )
+        document = build_template_run_document("<p>老师您好，我来自 <strong>Example University</strong>。</p>")
+        anchored_document = build_anchored_template_document(document)
+
+        prompt = build_template_anchor_rewrite_prompt(
+            identity=identity,
+            primary_material=primary_material,
+            professor=professor,
+            available_materials=[primary_material],
+            subject_template="申请与{{name}}老师交流",
+            anchored_document=anchored_document,
+            current_match=None,
+            rewrite_preferences=None,
+        )
+
+        payload = json.loads(prompt)
+        self.assertEqual(payload["task"], "rewrite_email_template_anchored_segments")
+        self.assertEqual(payload["rewrite_segments"][0]["rewrite_text"], "老师您好，我来自 [[A1]]。")
+        self.assertEqual(payload["rewrite_segments"][0]["anchors"][0]["text"], "Example University")
+        self.assertEqual(
+            payload["response_schema"]["replacements"][0],
+            {"segment_id": "seg_1", "text": "改写后的锚点化 segment 文本"},
+        )
+        self.assertIn("锚点 token 必须原样保留", payload["instructions"])
+        self.assertNotIn("<strong>Example University</strong>", prompt)
+
     def test_build_draft_prompt_uses_dynamic_rewrite_constraints_for_strong_preferences(self) -> None:
         from app.models import IdentityMaterial, IdentityProfile, Professor
 
