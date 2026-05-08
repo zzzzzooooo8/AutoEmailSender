@@ -22,6 +22,11 @@ from app.services.rich_text import (
     render_rich_text_document,
     text_to_email_html,
 )
+from app.services.template_anchor_rewrite import (
+    AnchoredTemplateDocument,
+    apply_anchored_template_replacements,
+    build_anchored_template_document,
+)
 from app.services.template_run_rewrite import (
     TemplateRunDocument,
     apply_template_run_replacements,
@@ -218,6 +223,23 @@ SYSTEM_TEMPLATE_RUN_REWRITE_PROMPT = dedent(
     """
 ).strip()
 
+SYSTEM_TEMPLATE_ANCHOR_REWRITE_PROMPT = dedent(
+    """
+    你是研究生套磁邮件改写助理。你必须只输出 JSON。
+    你不能输出 HTML、Markdown 或解释。
+    你只能改写 rewrite_segments 中的 text。
+    你不能新增、删除、合并、拆分或重排 segment。
+    锚点 token 例如 [[A1]] 必须原样保留，不能改写、删除、新增或移动顺序。
+    占位符已经被锚点保护，不能通过改写绕过锚点。
+
+    JSON 字段必须包含：
+    - subject: 邮件主题
+    - replacements: segment 替换数组
+    - suggested_material_ids: 整数数组，只能从可选材料 ID 中选择
+    replacements 中每项只能包含 segment_id 和 text。
+    """
+).strip()
+
 
 class LLMRuntimeError(RuntimeError):
     def __init__(
@@ -315,6 +337,17 @@ class TemplateSegmentReplacement(BaseModel):
 class TemplateRunRewriteResult(BaseModel):
     subject: str
     replacements: list[TemplateSegmentReplacement] = Field(default_factory=list)
+    suggested_material_ids: list[int] = Field(default_factory=list)
+
+
+class TemplateAnchorSegmentReplacement(BaseModel):
+    segment_id: str
+    text: str
+
+
+class TemplateAnchorRewriteResult(BaseModel):
+    subject: str
+    replacements: list[TemplateAnchorSegmentReplacement] = Field(default_factory=list)
     suggested_material_ids: list[int] = Field(default_factory=list)
 
 
@@ -439,6 +472,7 @@ StructuredResultT = TypeVar(
     MatchEvaluationResult,
     DraftGenerationResult,
     TemplateRunRewriteResult,
+    TemplateAnchorRewriteResult,
 )
 
 
@@ -603,13 +637,14 @@ async def generate_draft_content(
 
     if template_html:
         template_document = build_template_run_document(template_html)
-        prompt = build_template_run_rewrite_prompt(
+        anchored_document = build_anchored_template_document(template_document)
+        prompt = build_template_anchor_rewrite_prompt(
             identity=identity,
             primary_material=primary_material,
             professor=professor,
             available_materials=available_materials,
             subject_template=custom_subject,
-            template_document=template_document,
+            anchored_document=anchored_document,
             current_match=current_match,
             rewrite_preferences=rewrite_preferences,
         )
@@ -620,7 +655,7 @@ async def generate_draft_content(
                 "messages": [
                     {
                         "role": "system",
-                        "content": SYSTEM_TEMPLATE_RUN_REWRITE_PROMPT,
+                        "content": SYSTEM_TEMPLATE_ANCHOR_REWRITE_PROMPT,
                     },
                     {
                         "role": "user",
@@ -631,10 +666,11 @@ async def generate_draft_content(
                 "max_tokens": max_tokens or DEFAULT_LLM_MAX_TOKENS,
             },
         )
-        rewrite_result = parse_structured_result(completion.content, TemplateRunRewriteResult)
+        rewrite_result = parse_structured_result(completion.content, TemplateAnchorRewriteResult)
         try:
-            rendered = apply_template_run_replacements(
+            rendered = apply_anchored_template_replacements(
                 template_document,
+                anchored_document,
                 [item.model_dump() for item in rewrite_result.replacements],
             )
         except ValueError as exc:
@@ -1087,18 +1123,19 @@ def estimate_template_run_draft_tokens(
 
     if template_html:
         document = build_template_run_document(template_html)
-        prompt = build_template_run_rewrite_prompt(
+        anchored_document = build_anchored_template_document(document)
+        prompt = build_template_anchor_rewrite_prompt(
             identity=identity,
             primary_material=primary_material,
             professor=professor,
             available_materials=available_materials,
             subject_template=custom_subject,
-            template_document=document,
+            anchored_document=anchored_document,
             current_match=None,
             rewrite_preferences=DraftRewritePreferences(),
         )
         estimated_prompt_tokens = estimate_text_tokens(
-            f"{SYSTEM_TEMPLATE_RUN_REWRITE_PROMPT}\n{prompt}",
+            f"{SYSTEM_TEMPLATE_ANCHOR_REWRITE_PROMPT}\n{prompt}",
         )
     else:
         prompt = build_draft_prompt(
@@ -1380,6 +1417,101 @@ def build_template_run_rewrite_prompt(
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
+def build_template_anchor_rewrite_prompt(
+    *,
+    identity: IdentityProfile,
+    primary_material: IdentityMaterial | None,
+    professor: Professor,
+    available_materials: list[IdentityMaterial],
+    subject_template: str | None,
+    anchored_document: AnchoredTemplateDocument,
+    current_match: MatchEvaluationResult | None,
+    rewrite_preferences: DraftRewritePreferences | None,
+) -> str:
+    primary_material_text = (primary_material.extracted_text if primary_material else "") or ""
+    if len(primary_material_text) > 5000:
+        primary_material_text = f"{primary_material_text[:5000]}\n...(已截断)"
+
+    payload = {
+        "task": "rewrite_email_template_anchored_segments",
+        "context": {
+            "identity": {
+                "name": _format_nullable(identity.name),
+                "email_address": _format_nullable(identity.email_address),
+                "default_language": _format_nullable(identity.default_language),
+                "match_threshold": identity.match_threshold,
+            },
+            "professor": {
+                "name": _format_nullable(professor.name),
+                "email": _format_nullable(professor.email),
+                "title": _format_nullable(professor.title),
+                "university": _format_nullable(professor.university),
+                "school": _format_nullable(professor.school),
+                "department": _format_nullable(professor.department),
+                "research_direction": _format_nullable(professor.research_direction),
+                "profile_url": _format_nullable(professor.profile_url),
+                "recent_papers": professor.recent_papers or [],
+            },
+            "student": {
+                "primary_material": {
+                    "id": primary_material.id if primary_material else None,
+                    "name": _format_nullable(primary_material.display_name if primary_material else None),
+                    "type": _format_nullable(primary_material.material_type if primary_material else None),
+                    "extracted_text": primary_material_text,
+                },
+            },
+            "current_match": current_match.model_dump() if current_match is not None else None,
+            "rewrite_preferences": asdict(rewrite_preferences or DraftRewritePreferences()),
+        },
+        "subject_template": subject_template or "",
+        "rewrite_segments": [
+            {
+                "segment_id": segment.segment_id,
+                "role": segment.role,
+                "rewrite_text": segment.rewrite_text,
+                "anchors": [
+                    {
+                        "anchor_id": anchor.anchor_id,
+                        "text": anchor.text,
+                        "marks": anchor.marks,
+                        "locked_placeholders": anchor.locked_placeholders,
+                    }
+                    for anchor in segment.anchors
+                ],
+            }
+            for segment in anchored_document.segments
+        ],
+        "response_schema": {
+            "subject": "邮件主题",
+            "replacements": [
+                {"segment_id": "seg_1", "text": "改写后的锚点化 segment 文本"},
+            ],
+            "suggested_material_ids": [material.id for material in available_materials[:1]],
+        },
+        "available_materials": [
+            {
+                "id": material.id,
+                "name": _format_nullable(material.display_name),
+                "type": _format_nullable(material.material_type),
+            }
+            for material in available_materials
+        ],
+        "instructions": [
+            "只返回 JSON 对象。",
+            "replacements 只能引用 rewrite_segments 中已有的 segment_id。",
+            "每个 replacement 只允许包含 segment_id 和 text。",
+            "锚点 token 必须原样保留",
+            "锚点 token 示例：[[A1]]。",
+            "锚点 token 的顺序必须与输入 rewrite_text 一致。",
+            "不要新增未知锚点 token。",
+            "不要返回 HTML 或完整正文。",
+            "不需要改写的 segment 不要放入 replacements。",
+            "suggested_material_ids 只能选择 available_materials 中存在的 id。",
+        ],
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
 def build_draft_rewrite_constraints(preferences: DraftRewritePreferences) -> str:
     intensity = DRAFT_REWRITE_INTENSITY_REQUIREMENT_TEXT.get(
         preferences.draft_rewrite_intensity,
@@ -1616,6 +1748,10 @@ def parse_structured_result(
     if isinstance(result, MatchEvaluationResult):
         return _normalize_match_evaluation_result(result)  # type: ignore[return-value]
     if isinstance(result, TemplateRunRewriteResult):
+        result.subject = _normalize_text_field(result.subject, "subject")
+        result.suggested_material_ids = _normalize_integer_list(result.suggested_material_ids)
+        return result  # type: ignore[return-value]
+    if isinstance(result, TemplateAnchorRewriteResult):
         result.subject = _normalize_text_field(result.subject, "subject")
         result.suggested_material_ids = _normalize_integer_list(result.suggested_material_ids)
         return result  # type: ignore[return-value]
