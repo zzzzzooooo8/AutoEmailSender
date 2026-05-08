@@ -49,6 +49,89 @@ import type {
 } from "@/types";
 
 const SESSION_KEY = "selected_professor_ids";
+const FILTERS_SESSION_KEY_PREFIX = "home_dashboard_filters";
+
+const dashboardStatusValues = new Set(
+  PROFESSOR_DASHBOARD_STATUS_OPTIONS.map(([status]) => status),
+);
+
+const getDashboardFiltersSessionKey = (
+  selectedIdentityId: number | null,
+  selectedLlmProfileId: number | null,
+) =>
+  selectedIdentityId !== null && selectedLlmProfileId !== null
+    ? `${FILTERS_SESSION_KEY_PREFIX}:${selectedIdentityId}:${selectedLlmProfileId}`
+    : null;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const readStringArray = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+
+const readStatusArray = (value: unknown): ProfessorDashboardStatus[] =>
+  Array.isArray(value)
+    ? value.filter(
+        (item): item is ProfessorDashboardStatus =>
+          typeof item === "string" &&
+          dashboardStatusValues.has(item as ProfessorDashboardStatus),
+      )
+    : [];
+
+const readStoredDashboardFilters = (
+  storageKey: string | null,
+): DashboardFilterState => {
+  const defaults = createDefaultDashboardFilters();
+  if (!storageKey) {
+    return defaults;
+  }
+
+  try {
+    const rawValue = window.sessionStorage.getItem(storageKey);
+    if (!rawValue) {
+      return defaults;
+    }
+    const parsedValue = JSON.parse(rawValue);
+    if (!isRecord(parsedValue)) {
+      return defaults;
+    }
+
+    return {
+      keyword:
+        typeof parsedValue.keyword === "string"
+          ? parsedValue.keyword
+          : defaults.keyword,
+      universities: readStringArray(parsedValue.universities),
+      schools: readStringArray(parsedValue.schools),
+      departments: readStringArray(parsedValue.departments),
+      titles: readStringArray(parsedValue.titles),
+      statuses: readStatusArray(parsedValue.statuses),
+      minMatchScore:
+        typeof parsedValue.minMatchScore === "string"
+          ? parsedValue.minMatchScore
+          : defaults.minMatchScore,
+    };
+  } catch {
+    return defaults;
+  }
+};
+
+const writeStoredDashboardFilters = (
+  storageKey: string | null,
+  filters: DashboardFilterState,
+) => {
+  if (!storageKey) {
+    return;
+  }
+
+  try {
+    window.sessionStorage.setItem(storageKey, JSON.stringify(filters));
+  } catch {
+    // Losing ephemeral dashboard filters should not break the page.
+  }
+};
 
 const hasMatchEvidence = (professor: ProfessorDashboardItemDTO) =>
   Boolean(professor.research_direction?.trim()) ||
@@ -130,10 +213,14 @@ export const HomePage = () => {
     selectedLlmProfile,
     loading: selectionLoading,
   } = useSelectionContext();
+  const dashboardFiltersSessionKey = getDashboardFiltersSessionKey(
+    selectedIdentityId,
+    selectedLlmProfileId,
+  );
   const [professors, setProfessors] = useState<ProfessorDashboardItemDTO[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [filters, setFilters] = useState<DashboardFilterState>(
-    createDefaultDashboardFilters,
+  const [filters, setFilters] = useState<DashboardFilterState>(() =>
+    readStoredDashboardFilters(dashboardFiltersSessionKey),
   );
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const [sortKey, setSortKey] = useState<ProfessorDashboardSortKey>("latest");
@@ -146,10 +233,31 @@ export const HomePage = () => {
   const loadedProfessorsKeyRef = useRef<string | null>(null);
   const activeProfessorsRequestKeyRef = useRef<string | null>(null);
   const latestProfessorsRequestIdRef = useRef(0);
+  const filtersSessionKeyRef = useRef(dashboardFiltersSessionKey);
+  const skipNextFiltersPersistRef = useRef(false);
   const professorsRequestKey =
     selectedIdentityId && selectedLlmProfileId
       ? `${selectedIdentityId}:${selectedLlmProfileId}`
       : null;
+
+  useEffect(() => {
+    if (filtersSessionKeyRef.current === dashboardFiltersSessionKey) {
+      return;
+    }
+
+    filtersSessionKeyRef.current = dashboardFiltersSessionKey;
+    skipNextFiltersPersistRef.current = true;
+    setFilters(readStoredDashboardFilters(dashboardFiltersSessionKey));
+  }, [dashboardFiltersSessionKey]);
+
+  useEffect(() => {
+    if (skipNextFiltersPersistRef.current) {
+      skipNextFiltersPersistRef.current = false;
+      return;
+    }
+
+    writeStoredDashboardFilters(dashboardFiltersSessionKey, filters);
+  }, [dashboardFiltersSessionKey, filters]);
 
   const loadProfessors = useCallback(async () => {
     if (!professorsRequestKey || !selectedIdentityId || !selectedLlmProfileId) {

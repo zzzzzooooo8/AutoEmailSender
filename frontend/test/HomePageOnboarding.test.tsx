@@ -1,11 +1,16 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HomePage } from "@/pages/HomePage";
 import type { IdentityDTO, LLMProfileDTO, ProfessorDashboardItemDTO } from "@/types";
 
 const mockedUseSelectionContext = vi.hoisted(() => vi.fn());
 const mockedListProfessors = vi.hoisted(() => vi.fn());
+const mockedNotifications = vi.hoisted(() => ({
+  notifyError: vi.fn(),
+  notifySuccess: vi.fn(),
+  notifyWarning: vi.fn(),
+}));
 
 vi.mock("@/context/SelectionContext", () => ({
   useSelectionContext: mockedUseSelectionContext,
@@ -31,10 +36,7 @@ vi.mock("@/lib/useConfirmDialog", () => ({
 }));
 
 vi.mock("@/context/NotificationContext", () => ({
-  useNotification: () => ({
-    notifyError: vi.fn(),
-    notifyWarning: vi.fn(),
-  }),
+  useNotification: () => mockedNotifications,
 }));
 
 const createIdentity = (overrides: Partial<IdentityDTO> = {}): IdentityDTO => ({
@@ -139,8 +141,30 @@ const renderPage = () =>
     </MemoryRouter>,
   );
 
+const renderPageWithNavigation = () =>
+  render(
+    <MemoryRouter initialEntries={["/"]}>
+      <Routes>
+        <Route path="/" element={<HomePage />} />
+        <Route
+          path="/professors"
+          element={
+            <div>
+              <div>导师管理页</div>
+              <Link to="/">返回首页</Link>
+            </div>
+          }
+        />
+      </Routes>
+    </MemoryRouter>,
+  );
+
 describe("HomePage onboarding", () => {
   beforeEach(() => {
+    window.sessionStorage.clear();
+    mockedNotifications.notifyError.mockClear();
+    mockedNotifications.notifySuccess.mockClear();
+    mockedNotifications.notifyWarning.mockClear();
     mockedListProfessors.mockReset();
     mockedListProfessors.mockResolvedValue([]);
     mockedUseSelectionContext.mockReturnValue({
@@ -382,5 +406,47 @@ describe("HomePage onboarding", () => {
     expect(
       screen.queryByRole("option", { name: "School of Medicine" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("keeps dashboard filters after leaving the home route and returning", async () => {
+    mockedListProfessors.mockResolvedValue([
+      createProfessor(101, "王教授", "not_contacted"),
+      createProfessor(102, "李教授", "not_contacted"),
+    ]);
+    mockedUseSelectionContext.mockReturnValue({
+      selectedIdentityId: 1,
+      selectedLlmProfileId: 1,
+      selectedIdentity: createIdentity({
+        current_primary_material_id: 11,
+        outreach_template_body_text: "老师您好",
+      }),
+      selectedLlmProfile,
+    });
+
+    renderPageWithNavigation();
+
+    expect(await screen.findByTestId("home-dashboard")).toBeInTheDocument();
+    expect(await screen.findByText("王教授")).toBeInTheDocument();
+    expect(screen.getByText("李教授")).toBeInTheDocument();
+
+    fireEvent.change(
+      screen.getByPlaceholderText("导师、学校、学院、系所、职称、研究方向"),
+      { target: { value: "王教授" } },
+    );
+
+    expect(screen.getByText("王教授")).toBeInTheDocument();
+    expect(screen.queryByText("李教授")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("link", { name: "管理导师" }));
+    expect(screen.getByText("导师管理页")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("link", { name: "返回首页" }));
+
+    expect(await screen.findByTestId("home-dashboard")).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText("导师、学校、学院、系所、职称、研究方向"),
+    ).toHaveValue("王教授");
+    expect(screen.getByText("王教授")).toBeInTheDocument();
+    expect(screen.queryByText("李教授")).not.toBeInTheDocument();
   });
 });
