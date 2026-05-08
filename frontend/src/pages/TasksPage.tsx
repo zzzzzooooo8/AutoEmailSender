@@ -189,6 +189,26 @@ function getCandidateEnrichmentFailureMessage(
   return typeof errorMessage === "string" ? errorMessage : null;
 }
 
+function getCrawlEventFailureReason(event: CrawlJobEventDTO): string | null {
+  if (event.event_type !== "enrichment") {
+    return null;
+  }
+  const raw = event.raw;
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const rawStatus = (raw as Record<string, unknown>).status;
+  const rawErrorMessage = (raw as Record<string, unknown>).error_message;
+  if (
+    rawStatus !== "failed" ||
+    typeof rawErrorMessage !== "string" ||
+    rawErrorMessage.trim().length === 0
+  ) {
+    return null;
+  }
+  return rawErrorMessage;
+}
+
 const formatScheduleDate = (value: string) => {
   const match = SCHEDULE_DATE_PATTERN.exec(value);
   if (!match) {
@@ -2897,21 +2917,29 @@ export const TasksPage = () => {
                     data-monitor-section-list
                   >
                     {crawlJobEvents.length > 0 ? (
-                      visibleCrawlJobEvents.map((event) => (
-                        <div key={event.id} className="flex gap-3">
-                          <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" />
-                          <div className="min-w-0 flex-1 rounded-2xl border border-stone-100 px-4 py-3">
-                            <p className="text-sm text-stone-800">
-                              {event.message}
-                            </p>
-                            <p className="mt-1 text-xs text-stone-500">
-                              {formatDisplayTime(event.created_at, {
-                                withSeconds: true,
-                              })}
-                            </p>
+                      visibleCrawlJobEvents.map((event) => {
+                        const failureReason = getCrawlEventFailureReason(event);
+                        return (
+                          <div key={event.id} className="flex gap-3">
+                            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" />
+                            <div className="min-w-0 flex-1 rounded-2xl border border-stone-100 px-4 py-3">
+                              <p className="text-sm text-stone-800">
+                                {event.message}
+                              </p>
+                              {failureReason ? (
+                                <p className="mt-2 text-xs leading-5 text-red-700">
+                                  失败原因：{failureReason}
+                                </p>
+                              ) : null}
+                              <p className="mt-1 text-xs text-stone-500">
+                                {formatDisplayTime(event.created_at, {
+                                  withSeconds: true,
+                                })}
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                      ))
+                        );
+                      })
                     ) : (
                       <p className="rounded-2xl border border-dashed border-stone-200 px-4 py-3 text-sm text-stone-500">
                         暂无执行日志。

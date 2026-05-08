@@ -372,6 +372,34 @@ describe("TasksPage crawler jobs tab", () => {
     expect(candidateDialog).toHaveTextContent("WinError 2");
   });
 
+  it("shows the crawl enrichment failure reason in the realtime monitor log", async () => {
+    vi.mocked(getCrawlJobEvents).mockResolvedValue([
+      {
+        id: "evt-1",
+        job_id: 7,
+        event_type: "enrichment",
+        message: "候选导师详情补全失败：张教授",
+        created_at: "2026-04-26T08:34:00",
+        raw: {
+          candidate_id: 21,
+          profile_url: "https://example.edu/faculty/zhang",
+          status: "failed",
+          error_message:
+            "Crawl4AI browser fetch failed: FileNotFoundError: [WinError 2] 系统找不到指定的文件。",
+        },
+      },
+    ]);
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "教师抓取" }));
+    fireEvent.click(await screen.findByRole("button", { name: "查看详情" }));
+
+    const crawlDialog = await screen.findByRole("dialog", { name: "抓取任务详情" });
+    expect(crawlDialog).toHaveTextContent("候选导师详情补全失败：张教授");
+    expect(crawlDialog).toHaveTextContent("WinError 2");
+  });
+
   it("keeps crawl log and crawled page pagination aligned in the detail dialog", async () => {
     vi.mocked(getCrawlJobEvents).mockResolvedValue(
       Array.from({ length: 6 }, (_, index) => ({
