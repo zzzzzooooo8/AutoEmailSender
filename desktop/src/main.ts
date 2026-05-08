@@ -17,6 +17,7 @@ let tray: Tray | null = null;
 let backend: BackendController | null = null;
 let restartingBackend = false;
 let isQuitting = false;
+let backendStopPromise: Promise<void> | null = null;
 let currentBackendStatus: BackendStatus = createInitialBackendStatus();
 const windowCreationState = { pendingCreation: null as Promise<void> | null };
 
@@ -39,6 +40,19 @@ function showMainWindow(): void {
 function quitFromTray(): void {
   isQuitting = true;
   app.quit();
+}
+
+function stopBackendAndExit(exitCode: number): void {
+  isQuitting = true;
+  if (backendStopPromise !== null) {
+    return;
+  }
+
+  const currentBackend = backend;
+  backend = null;
+  backendStopPromise = (currentBackend?.stop() ?? Promise.resolve()).finally(() => {
+    app.exit(exitCode);
+  });
 }
 
 function ensureTray(): void {
@@ -222,7 +236,13 @@ app.on("before-quit", (event) => {
     return;
   }
   event.preventDefault();
-  const currentBackend = backend;
-  backend = null;
-  currentBackend.stop().finally(() => app.exit(0));
+  stopBackendAndExit(0);
+});
+
+process.once("SIGINT", () => {
+  stopBackendAndExit(130);
+});
+
+process.once("SIGTERM", () => {
+  stopBackendAndExit(143);
 });

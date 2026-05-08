@@ -20,7 +20,7 @@ import type {
 
 const execFileAsync = promisify(execFile);
 
-type BackendProcessTreeTerminator = (pid: number) => Promise<void>;
+type BackendProcessTreeTerminator = (pid: number, port?: number) => Promise<void>;
 
 export function normalizePort(value: string): number {
   const port = Number(value);
@@ -115,7 +115,7 @@ export async function startBackend(options: {
         statusHandlers.delete(handler);
       };
     },
-    stop: () => stopBackend(child, lifecycle),
+    stop: () => stopBackend(child, lifecycle, terminateBackendProcessTree, port),
   };
 }
 
@@ -362,9 +362,10 @@ export async function stopBackend(
   child: ChildProcessWithoutNullStreams,
   lifecycle: BackendLifecycle,
   terminateProcessTree: BackendProcessTreeTerminator = terminateBackendProcessTree,
+  port?: number,
 ): Promise<void> {
   lifecycle.intentionalStop = true;
-  if (child.exitCode !== null) {
+  if (child.exitCode !== null && port === undefined) {
     return;
   }
 
@@ -385,7 +386,7 @@ export async function stopBackend(
     child.kill();
   } else {
     try {
-      await terminateProcessTree(child.pid);
+      await terminateProcessTree(child.pid, port);
     } catch {
       child.kill();
     }
@@ -394,13 +395,49 @@ export async function stopBackend(
   await waitForExit;
 }
 
-async function terminateBackendProcessTree(pid: number): Promise<void> {
+async function terminateBackendProcessTree(pid: number, port?: number): Promise<void> {
   if (process.platform === "win32") {
-    await execFileAsync("taskkill", ["/pid", String(pid), "/t", "/f"], {
-      windowsHide: true,
-    });
+    let taskkillError: unknown;
+    try {
+      await execFileAsync("taskkill", ["/pid", String(pid), "/t", "/f"], {
+        windowsHide: true,
+      });
+    } catch (error) {
+      taskkillError = error;
+    }
+
+    if (port !== undefined) {
+      await terminateWindowsDesktopEntryProcesses(port);
+      return;
+    }
+
+    if (taskkillError !== undefined) {
+      throw taskkillError;
+    }
     return;
   }
 
   process.kill(pid);
+}
+
+async function terminateWindowsDesktopEntryProcesses(port: number): Promise<void> {
+  const script = `
+$port = '${port}'
+Get-CimInstance Win32_Process |
+  Where-Object {
+    $_.Name -eq 'python.exe' -and
+    $_.CommandLine -like '*desktop_entry.py*' -and
+    $_.CommandLine -like '*--port*' -and
+    $_.CommandLine -like "*$port*"
+  } |
+  ForEach-Object {
+    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+  }
+`;
+
+  await execFileAsync(
+    "powershell.exe",
+    ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+    { windowsHide: true },
+  );
 }
