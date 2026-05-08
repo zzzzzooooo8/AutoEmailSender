@@ -19,6 +19,7 @@ class CrawlJobStatus(str, Enum):
     RUNNING = "running"
     PAUSED = "paused"
     NEEDS_REVIEW = "needs_review"
+    PARTIALLY_COMPLETED = "partially_completed"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELED = "canceled"

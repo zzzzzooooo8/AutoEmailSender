@@ -17,6 +17,7 @@ CrawlJobStatusDTO = Literal[
     "running",
     "paused",
     "needs_review",
+    "partially_completed",
     "completed",
     "failed",
     "canceled",

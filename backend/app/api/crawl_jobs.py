@@ -230,7 +230,11 @@ async def approve_crawl_candidates(
     session: AsyncSession = Depends(get_async_session),
 ) -> CrawlJobApproveResult:
     job = await _get_crawl_job_or_404(session, job_id)
-    if job.status not in {CrawlJobStatus.NEEDS_REVIEW.value, CrawlJobStatus.CANCELED.value}:
+    if job.status not in {
+        CrawlJobStatus.NEEDS_REVIEW.value,
+        CrawlJobStatus.PARTIALLY_COMPLETED.value,
+        CrawlJobStatus.CANCELED.value,
+    }:
         raise HTTPException(status_code=409, detail="抓取任务尚未进入审核状态")
     if not payload.candidate_ids:
         raise HTTPException(status_code=400, detail="请至少选择一位候选导师")
@@ -287,8 +291,24 @@ async def approve_crawl_candidates(
         candidate.review_status = CrawlCandidateReviewStatus.ACCEPTED.value
         candidate.updated_at = now
 
-    if job.status == CrawlJobStatus.NEEDS_REVIEW.value:
-        job.status = CrawlJobStatus.COMPLETED.value
+    await session.flush()
+    if job.status in {
+        CrawlJobStatus.NEEDS_REVIEW.value,
+        CrawlJobStatus.PARTIALLY_COMPLETED.value,
+    }:
+        remaining_pending_count = await session.scalar(
+            select(func.count())
+            .select_from(CrawlCandidate)
+            .where(
+                CrawlCandidate.job_id == job_id,
+                CrawlCandidate.review_status == CrawlCandidateReviewStatus.PENDING.value,
+            ),
+        )
+        job.status = (
+            CrawlJobStatus.PARTIALLY_COMPLETED.value
+            if int(remaining_pending_count or 0) > 0
+            else CrawlJobStatus.COMPLETED.value
+        )
     job.updated_at = now
     await record_operation_log(
         session,
@@ -323,9 +343,13 @@ async def enrich_crawl_candidates(
     session: AsyncSession = Depends(get_async_session),
 ) -> CrawlJobEnrichResult:
     job = await _get_crawl_job_or_404(session, job_id)
+    review_status_before_enrich = job.status
     if job.status == CrawlJobStatus.RUNNING.value:
         raise HTTPException(status_code=409, detail="候选信息正在补全中，请稍后再试")
-    if job.status != CrawlJobStatus.NEEDS_REVIEW.value:
+    if job.status not in {
+        CrawlJobStatus.NEEDS_REVIEW.value,
+        CrawlJobStatus.PARTIALLY_COMPLETED.value,
+    }:
         raise HTTPException(status_code=409, detail="抓取任务尚未进入审核状态")
     if not payload.candidate_ids:
         raise HTTPException(status_code=400, detail="请至少选择一位候选导师")
@@ -373,12 +397,12 @@ async def enrich_crawl_candidates(
         async with get_session_factory()() as final_session:
             final_job = await final_session.get(CrawlJob, job_id)
             if final_job is not None and final_job.status == CrawlJobStatus.RUNNING.value:
-                final_job.status = CrawlJobStatus.NEEDS_REVIEW.value
+                final_job.status = review_status_before_enrich
                 final_job.updated_at = datetime.now(UTC)
                 await mark_crawl_job_run_finished(
                     final_session,
                     final_job,
-                    status=CrawlJobStatus.NEEDS_REVIEW.value,
+                    status=review_status_before_enrich,
                     now=datetime.now(UTC),
                 )
                 await final_session.commit()

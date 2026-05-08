@@ -32,34 +32,36 @@ const buildCandidate = (
 });
 
 describe('reviewCandidates', () => {
-  it('returns only non-rejected candidate ids as reviewable', () => {
+  it('returns only pending candidate ids as reviewable', () => {
     const candidates = [
       buildCandidate({ id: 1, review_status: 'pending' }),
       buildCandidate({ id: 2, review_status: 'rejected' }),
       buildCandidate({ id: 3, review_status: 'accepted' }),
+      buildCandidate({ id: 4, review_status: 'merged' }),
     ];
 
-    expect(getReviewableCandidateIds(candidates)).toEqual([1, 3]);
+    expect(getReviewableCandidateIds(candidates)).toEqual([1]);
   });
 
-  it('returns only reviewable candidate ids without email', () => {
+  it('returns only pending candidate ids without email', () => {
     const candidates = [
       buildCandidate({ id: 1, email: null, review_status: 'pending' }),
       buildCandidate({ id: 2, email: '', review_status: 'pending' }),
       buildCandidate({ id: 3, email: 'alice@example.edu', review_status: 'pending' }),
-      buildCandidate({ id: 4, email: null, review_status: 'rejected' }),
+      buildCandidate({ id: 4, email: null, review_status: 'accepted' }),
     ];
 
     expect(getReviewableCandidateIdsWithoutEmail(candidates)).toEqual([1, 2]);
   });
 
-  it('prunes selected ids that no longer exist or were rejected', () => {
+  it('prunes selected ids that no longer exist or are no longer pending', () => {
     const candidates = [
       buildCandidate({ id: 1, review_status: 'pending' }),
       buildCandidate({ id: 2, review_status: 'rejected' }),
-      buildCandidate({ id: 3, review_status: 'pending' }),
+      buildCandidate({ id: 3, review_status: 'accepted' }),
+      buildCandidate({ id: 4, review_status: 'pending' }),
     ];
 
-    expect(pruneSelectedCandidateIds([3, 2, 999, 1], candidates)).toEqual([3, 1]);
+    expect(pruneSelectedCandidateIds([4, 3, 2, 999, 1], candidates)).toEqual([4, 1]);
   });
 });
