@@ -3,7 +3,10 @@ from __future__ import annotations
 import unittest
 
 from app.services.template_run_rewrite import build_template_run_document
-from app.services.template_anchor_rewrite import build_anchored_template_document
+from app.services.template_anchor_rewrite import (
+    apply_anchored_template_replacements,
+    build_anchored_template_document,
+)
 
 
 class TemplateAnchorRewriteTests(unittest.TestCase):
@@ -35,3 +38,49 @@ class TemplateAnchorRewriteTests(unittest.TestCase):
         self.assertEqual(segment.rewrite_text, "尊敬的[[A1]]教授：")
         self.assertEqual(segment.anchors[0].text, "[[PH_1]]")
         self.assertEqual(segment.anchors[0].locked_placeholders, [{"token": "[[PH_1]]", "original": "{{name}}"}])
+
+    def test_apply_anchored_replacements_preserves_strong_anchor(self) -> None:
+        document = build_template_run_document(
+            "<p>我是王俊杰，<strong>以专业第一的成绩获得</strong>"
+            "<strong>了</strong><strong>推免资格</strong>。现在联系您或许有些晚了，附件中是我的简历。</p>",
+        )
+        anchored = build_anchored_template_document(document)
+
+        rendered = apply_anchored_template_replacements(
+            document,
+            anchored,
+            [
+                {
+                    "segment_id": "seg_1",
+                    "text": "我是王俊杰，[[A1]]。冒昧来信咨询，不知老师今年是否还有硕士招生名额？附件中是我的简历。",
+                },
+            ],
+        )
+
+        self.assertIn("<strong>", rendered.html)
+        self.assertIn("以专业第一的成绩获得", rendered.html)
+        self.assertIn("推免资格", rendered.html)
+        self.assertIn("推免资格 。冒昧来信咨询", rendered.text)
+        self.assertNotIn("推免资格冒昧", rendered.text)
+
+    def test_apply_anchored_replacements_rejects_missing_anchor(self) -> None:
+        document = build_template_run_document("<p>尊敬的{{name}}教授：</p>")
+        anchored = build_anchored_template_document(document)
+
+        with self.assertRaisesRegex(ValueError, "锚点缺失: seg_1/A1"):
+            apply_anchored_template_replacements(
+                document,
+                anchored,
+                [{"segment_id": "seg_1", "text": "尊敬的教授："}],
+            )
+
+    def test_apply_anchored_replacements_rejects_reordered_anchor(self) -> None:
+        document = build_template_run_document("<p><strong>A</strong> 普通 <em>B</em></p>")
+        anchored = build_anchored_template_document(document)
+
+        with self.assertRaisesRegex(ValueError, "锚点顺序错误: seg_1"):
+            apply_anchored_template_replacements(
+                document,
+                anchored,
+                [{"segment_id": "seg_1", "text": "[[A2]] 普通 [[A1]]"}],
+            )
