@@ -298,7 +298,7 @@ def _crawl_run_to_record(run: CrawlJobRun) -> TokenUsageRecordRead:
     job = run.job
     title_context = None
     if job is not None:
-        title_context = job.school or job.university or job.start_url
+        title_context = _crawl_job_title_context(job)
     return TokenUsageRecordRead(
         id=f"crawl:{run.id}",
         feature_type="crawl",
@@ -314,6 +314,16 @@ def _crawl_run_to_record(run: CrawlJobRun) -> TokenUsageRecordRead:
         status=_map_crawl_status(run.status),
     )
 
+
+def _crawl_job_title_context(job: CrawlJob) -> str | None:
+    location_parts = [
+        value.strip()
+        for value in (job.university, job.school)
+        if isinstance(value, str) and value.strip()
+    ]
+    if location_parts:
+        return " · ".join(location_parts)
+    return job.start_url
 
 def _match_run_to_record(run: MatchAnalysisRun) -> TokenUsageRecordRead:
     professor_name = run.professor.name if run.professor else "未关联导师"
