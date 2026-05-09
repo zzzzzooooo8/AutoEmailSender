@@ -11,7 +11,6 @@ from markitdown import MarkItDown
 
 from app.core.config import get_settings
 
-
 TEXT_EXTRACTABLE_SUFFIXES = {".pdf", ".docx", ".txt", ".md"}
 logger = logging.getLogger(__name__)
 
@@ -65,12 +64,85 @@ def extract_text_from_document(file_path: str) -> str | None:
     if suffix not in TEXT_EXTRACTABLE_SUFFIXES:
         return None
 
+    if suffix in {".txt", ".md"}:
+        return _extract_text_file(path)
+
+    content = _extract_text_with_markitdown(path)
+    if content:
+        return content
+
+    if suffix == ".docx":
+        return _extract_docx_text(path)
+    if suffix == ".pdf":
+        return _extract_pdf_text(path)
+
+    return None
+
+
+def _extract_text_with_markitdown(path: Path) -> str | None:
     try:
         result = _get_markitdown().convert(path)
         content = (result.markdown or result.text_content or "").strip()
         return content or None
     except Exception:
         logger.exception("材料 Markdown 提取失败: %s", path.as_posix())
+        return None
+
+
+def _extract_text_file(path: Path) -> str | None:
+    try:
+        content = path.read_bytes()
+    except OSError:
+        logger.exception("材料文本读取失败: %s", path.as_posix())
+        return None
+
+    for encoding in ("utf-8-sig", "utf-8", "gb18030"):
+        try:
+            text = content.decode(encoding).strip()
+            return text or None
+        except UnicodeDecodeError:
+            continue
+    text = content.decode("utf-8", errors="ignore").strip()
+    return text or None
+
+
+def _extract_docx_text(path: Path) -> str | None:
+    try:
+        from docx import Document
+
+        document = Document(path)
+        paragraphs = [paragraph.text.strip() for paragraph in document.paragraphs]
+        table_cells = [
+            cell.text.strip()
+            for table in document.tables
+            for row in table.rows
+            for cell in row.cells
+        ]
+        content = "\n".join(item for item in [*paragraphs, *table_cells] if item).strip()
+        return content or None
+    except Exception:
+        logger.exception("材料 DOCX 提取失败: %s", path.as_posix())
+        return None
+
+
+def _extract_pdf_text(path: Path) -> str | None:
+    try:
+        from pdfminer.high_level import extract_text
+
+        content = (extract_text(path.as_posix()) or "").strip()
+        if content:
+            return content
+    except Exception:
+        logger.exception("材料 PDF pdfminer 提取失败: %s", path.as_posix())
+
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(path)
+        content = "\n".join((page.extract_text() or "").strip() for page in reader.pages).strip()
+        return content or None
+    except Exception:
+        logger.exception("材料 PDF pypdf 提取失败: %s", path.as_posix())
         return None
 
 

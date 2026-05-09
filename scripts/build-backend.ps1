@@ -26,6 +26,11 @@ try {
     --name backend `
     --specpath build `
     --hidden-import main `
+    --collect-all markitdown `
+    --collect-all mammoth `
+    --collect-all pdfminer `
+    --collect-all pdfplumber `
+    --collect-all pypdf `
     --add-data "$AlembicIni;." `
     --add-data "$AlembicDir;alembic" `
     desktop_entry.py
