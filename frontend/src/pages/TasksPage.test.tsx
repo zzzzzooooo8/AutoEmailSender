@@ -59,6 +59,8 @@ const notificationMocks = vi.hoisted(() => ({
   notifySuccess: vi.fn(),
 }));
 
+const confirmMock = vi.hoisted(() => vi.fn().mockResolvedValue(true));
+
 vi.mock("@/context/SelectionContext", () => ({
   useSelectionContext: () => ({
     selectedIdentityId: 1,
@@ -72,7 +74,7 @@ vi.mock("@/context/NotificationContext", () => ({
 
 vi.mock("@/lib/useConfirmDialog", () => ({
   useConfirmDialog: () => ({
-    confirm: vi.fn().mockResolvedValue(true),
+    confirm: confirmMock,
     dialog: null,
   }),
 }));
@@ -257,7 +259,7 @@ describe("CrawlJobCard", () => {
     );
 
     expect(screen.getByRole("button", { name: "删除" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "恢复" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "还原任务" })).not.toBeInTheDocument();
   });
 
   it.each(["queued", "running", "paused"] as const)(
@@ -308,9 +310,59 @@ describe("CrawlJobCard", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "恢复" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "还原任务" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "删除" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "重新抓取" })).not.toBeInTheDocument();
+  });
+});
+
+describe("TasksPage crawl job action copy", () => {
+  it("uses the visible re-crawl label in the cancel confirmation", async () => {
+    apiMocks.listCrawlJobs.mockResolvedValue([
+      buildCrawlJob({ status: "running" }),
+    ]);
+
+    render(
+      <MemoryRouter>
+        <TasksPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "教师抓取" }));
+    fireEvent.click(await screen.findByRole("button", { name: "取消抓取" }));
+
+    await waitFor(() => {
+      expect(confirmMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          description:
+            "取消后本次抓取不会继续。如需重新抓取，请点击“重新抓取”。",
+        }),
+      );
+    });
+  });
+
+  it("uses re-crawl wording after retrying a failed crawl job", async () => {
+    apiMocks.listCrawlJobs.mockResolvedValue([buildCrawlJob()]);
+    apiMocks.retryCrawlJob.mockResolvedValue(buildCrawlJob({ status: "queued" }));
+
+    render(
+      <MemoryRouter>
+        <TasksPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "教师抓取" }));
+    fireEvent.click(await screen.findByRole("button", { name: "重新抓取" }));
+
+    await waitFor(() => {
+      expect(apiMocks.retryCrawlJob).toHaveBeenCalledWith(9, {
+        clear_existing_data: true,
+      });
+    });
+    expect(notificationMocks.notifySuccess).toHaveBeenCalledWith(
+      "抓取任务已重新加入队列",
+      "任务已进入队列，稍后开始执行",
+    );
   });
 });
 
@@ -452,6 +504,7 @@ const buildWorkspaceThread = (
 
 beforeEach(() => {
   vi.clearAllMocks();
+  confirmMock.mockResolvedValue(true);
   apiMocks.listBatchTasks.mockResolvedValue([]);
   apiMocks.listBatchTaskItems.mockResolvedValue([]);
   apiMocks.listCrawlJobs.mockResolvedValue([]);

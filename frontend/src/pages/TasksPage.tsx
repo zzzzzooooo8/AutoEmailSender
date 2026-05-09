@@ -380,7 +380,7 @@ export const CrawlJobCard = ({
             className="ui-btn-primary"
           >
             <RotateCcw className="h-4 w-4" />
-            恢复
+            还原任务
           </button>
         ) : null}
         {listView === "current" && canDeleteCrawlJob(job) ? (
@@ -1516,7 +1516,7 @@ const selectedCrawlJobCanReview =
   const handleCancelCrawlJob = async (jobId: number) => {
     const confirmed = await confirm({
       title: "确认取消这个抓取任务？",
-      description: "取消后本次抓取不会继续。如需重新抓取，请使用重试。",
+      description: "取消后本次抓取不会继续。如需重新抓取，请点击“重新抓取”。",
       confirmLabel: "取消抓取",
       cancelLabel: "先保留",
       tone: "danger",
@@ -1573,7 +1573,7 @@ const selectedCrawlJobCanReview =
         eventName: "tasks.crawl_job_retry_succeeded",
         data: diagnosticData,
       });
-      notifySuccess("抓取任务重启成功", "任务已进入队列，稍后开始执行");
+      notifySuccess("抓取任务已重新加入队列", "任务已进入队列，稍后开始执行");
       await loadCrawlJobs();
       if (selectedCrawlJobId === jobId) {
         await loadCrawlJobDetails(jobId, { showLoading: false });
@@ -1585,7 +1585,7 @@ const selectedCrawlJobCanReview =
         level: "error",
       });
       const message =
-        actionError instanceof Error ? actionError.message : "抓取任务重启失败";
+        actionError instanceof Error ? actionError.message : "重新抓取任务失败";
       notifyError("抓取任务操作失败", message);
     } finally {
       setRetryingCrawlJobId((currentJobId) =>
@@ -1966,12 +1966,12 @@ const selectedCrawlJobCanReview =
   const handleRestoreBatchTask = async (taskId: number) => {
     try {
       await restoreBatchTask(taskId);
-      notifySuccess("已恢复任务");
+      notifySuccess("已还原任务");
       await loadTasks();
     } catch (actionError) {
       const message =
-        actionError instanceof Error ? actionError.message : "恢复任务失败";
-      notifyError("恢复任务失败", message);
+        actionError instanceof Error ? actionError.message : "还原任务失败";
+      notifyError("还原任务失败", message);
     }
   };
 
@@ -2003,12 +2003,12 @@ const selectedCrawlJobCanReview =
   const handleRestoreCrawlJob = async (jobId: number) => {
     try {
       await restoreCrawlJob(jobId);
-      notifySuccess("已恢复任务");
+      notifySuccess("已还原任务");
       await loadCrawlJobs();
     } catch (actionError) {
       const message =
-        actionError instanceof Error ? actionError.message : "恢复任务失败";
-      notifyError("恢复任务失败", message);
+        actionError instanceof Error ? actionError.message : "还原任务失败";
+      notifyError("还原任务失败", message);
     }
   };
 
@@ -2040,12 +2040,12 @@ const selectedCrawlJobCanReview =
   const handleRestoreMatchJob = async (jobId: number) => {
     try {
       await restoreMatchAnalysisJob(jobId);
-      notifySuccess("已恢复任务");
+      notifySuccess("已还原任务");
       await loadMatchAnalysisJobs();
     } catch (actionError) {
       const message =
-        actionError instanceof Error ? actionError.message : "恢复任务失败";
-      notifyError("恢复任务失败", message);
+        actionError instanceof Error ? actionError.message : "还原任务失败";
+      notifyError("还原任务失败", message);
     }
   };
 
@@ -2289,7 +2289,7 @@ const selectedCrawlJobCanReview =
                           className="ui-btn-primary"
                         >
                           <RotateCcw className="h-4 w-4" />
-                          恢复
+                          还原任务
                         </button>
                       ) : null}
                       {activeTaskListView === "current" &&
@@ -2414,7 +2414,7 @@ const selectedCrawlJobCanReview =
                         className="ui-btn-primary"
                       >
                         <RotateCcw className="h-4 w-4" />
-                        恢复
+                        还原任务
                       </button>
                     ) : null}
                     {activeTaskListView === "current" &&
