@@ -54,7 +54,7 @@ def build_template_run_document(html: str) -> TemplateRunDocument:
             node_index = len(nodes)
             nodes.append(text_node)
             run_text, run_placeholders = _lock_placeholders(text, placeholders)
-            marks = _collect_marks(text_node)
+            marks = _collect_marks(text_node, element)
             if run_placeholders and "placeholder" not in marks:
                 marks.append("placeholder")
             runs.append(
@@ -210,20 +210,54 @@ def _segment_role(element: Tag) -> str:
     return "paragraph"
 
 
-def _collect_marks(text_node: NavigableString) -> list[str]:
+def _collect_marks(text_node: NavigableString, container: Tag) -> list[str]:
     marks: list[str] = []
     for parent in text_node.parents:
         if not isinstance(parent, Tag):
             continue
-        if parent.name in {"strong", "b"} and "strong" not in marks:
-            marks.append("strong")
-        if parent.name in {"em", "i"} and "emphasis" not in marks:
-            marks.append("emphasis")
-        if parent.name == "u" and "underline" not in marks:
-            marks.append("underline")
+        if parent is container:
+            continue
+        if parent.name in {"strong", "b"} or _style_has_weight(parent):
+            if "strong" not in marks:
+                marks.append("strong")
+        if parent.name in {"em", "i"} or _style_has_italic(parent):
+            if "emphasis" not in marks:
+                marks.append("emphasis")
+        if parent.name == "u" or _style_has_underline(parent):
+            if "underline" not in marks:
+                marks.append("underline")
         if parent.name == "a" and "link" not in marks:
             marks.append("link")
+        if _has_inline_formatting(parent) and "style" not in marks:
+            marks.append("style")
     return marks
+
+def _has_inline_formatting(tag: Tag) -> bool:
+    if tag.name == "font":
+        return True
+
+    style = str(tag.get("style", "")).lower()
+    if not style:
+        return False
+
+    return bool(
+        re.search(r"font-(?:family|size|weight)\s*:\s*[^;]+", style)
+        or re.search(r"text-decoration(?:-line)?\s*:\s*underline\b", style)
+        or re.search(r"font-style\s*:\s*(italic|oblique)\b", style)
+        or re.search(r"color\s*:\s*[^;]+", style)
+    )
+
+def _style_has_weight(tag: Tag) -> bool:
+    style = str(tag.get("style", "")).lower()
+    return bool(re.search(r"font-weight\s*:\s*(bold|bolder|[7-9]00)\b", style))
+
+def _style_has_italic(tag: Tag) -> bool:
+    style = str(tag.get("style", "")).lower()
+    return bool(re.search(r"font-style\s*:\s*(italic|oblique)\b", style))
+
+def _style_has_underline(tag: Tag) -> bool:
+    style = str(tag.get("style", "")).lower()
+    return bool(re.search(r"text-decoration(?:-line)?\s*:\s*underline\b", style))
 
 
 def _lock_placeholders(

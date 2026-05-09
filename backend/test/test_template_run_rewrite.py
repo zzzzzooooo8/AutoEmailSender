@@ -26,6 +26,14 @@ class TemplateRunRewriteTests(unittest.TestCase):
         )
         self.assertEqual(document.placeholders["[[PH_1]]"], "{{research_direction}}")
 
+    def test_plain_inline_span_does_not_add_marks(self) -> None:
+        document = build_template_run_document("<p>老师<span>您好</span></p>")
+
+        self.assertEqual(
+            [(run.text, run.marks) for run in document.segments[0].runs],
+            [("老师", []), ("您好", [])],
+        )
+
     def test_applies_replacements_preserving_styles_and_table(self) -> None:
         document = build_template_run_document(
             '<p style="font-family:SimSun;font-size:12pt">我对您的 '

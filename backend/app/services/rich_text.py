@@ -12,6 +12,7 @@ ALLOWED_HTML_TAGS = {
     "a",
     "b",
     "br",
+    "font",
     "em",
     "h1",
     "h2",
@@ -40,7 +41,10 @@ ALLOWED_NON_LINK_ATTRS = {
     "cellpadding",
     "cellspacing",
     "colspan",
+    "color",
+    "face",
     "rowspan",
+    "size",
     "style",
 }
 
