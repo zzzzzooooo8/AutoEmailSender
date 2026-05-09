@@ -50,10 +50,46 @@ describe("WorkspaceMessageThread", () => {
   it("uses a wider thread layout that matches the workspace frame", () => {
     render(<WorkspaceMessageThread messages={[buildMessage()]} />);
 
-    expect(screen.getByText("通信记录").closest("[data-message-thread-inner]")).toHaveClass(
+    expect(screen.getByText("通信记录").closest("[data-message-thread-root]")).toHaveClass(
+      "overflow-hidden",
+      "max-h-[min(68vh,680px)]",
+    );
+    expect(screen.getByRole("button", { name: /展开/ }).closest("[data-message-thread-scroll]")).toHaveClass(
       "max-w-6xl",
+      "overflow-y-auto",
     );
     expect(screen.getByRole("button", { name: /展开/ })).toHaveClass("max-w-[86%]");
+  });
+
+  it("keeps the empty state compact instead of stretching the message area", () => {
+    render(<WorkspaceMessageThread messages={[]} />);
+
+    expect(screen.getByText("暂无通信记录").closest("[data-message-thread-scroll]")).not.toHaveClass(
+      "min-h-full",
+    );
+    expect(screen.getByText("暂无通信记录").closest("[data-empty-thread]")).toHaveClass(
+      "flex",
+      "w-full",
+      "justify-center",
+    );
+    expect(screen.getByText("暂无通信记录").parentElement).toHaveClass("w-full", "max-w-2xl");
+  });
+
+  it("shows readable text when summary content still contains html markup", () => {
+    render(
+      <WorkspaceMessageThread
+        messages={[
+          buildMessage({
+            content:
+              '<html><body><p>老师回复</p><p><strong>欢迎继续交流</strong></p></body></html>',
+            content_html: null,
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.queryByText(/<html/i)).not.toBeInTheDocument();
+    expect(screen.getByText("老师回复 欢迎继续交流")).toBeInTheDocument();
   });
 
   it("shows reply monitoring status and a manual refresh action", () => {

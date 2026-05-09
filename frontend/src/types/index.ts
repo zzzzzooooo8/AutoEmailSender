@@ -535,6 +535,7 @@ export type WorkspaceTaskStatus =
   | 'review_required'
   | 'approved'
   | 'scheduled'
+  | 'sending'
   | 'sent'
   | 'send_failed'
   | 'reply_detected'
@@ -818,6 +819,7 @@ export const PROFESSOR_STATUS_LABELS = {
   review_required: '待审核',
   approved: '待发送',
   scheduled: '已排程',
+  sending: '发送中',
   sent: '已发送',
   reply_detected: '已回复',
   send_failed: '发送失败',

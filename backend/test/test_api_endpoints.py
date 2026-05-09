@@ -19,7 +19,7 @@ from test.migrated_database import create_migrated_sqlite_database
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "c6d7e8f9a012"
+HEAD_REVISION = "d0f1a2b3c4d5"
 
 
 class ApiEndpointTests(unittest.TestCase):
@@ -895,6 +895,65 @@ class ApiEndpointTests(unittest.TestCase):
             first_payload["current_task"]["id"],
         )
         self.assertEqual(second_payload["messages"], [])
+
+    def test_workspace_ensure_task_creates_new_manual_task_after_schedule_expired_history(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "过期工作区导师",
+                "email": "expired-workspace@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Agents",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        first_response = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(first_response.status_code, 200, msg=first_response.text)
+        first_task = first_response.json()["current_task"]
+        self.assertIsNotNone(first_task["id"])
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            connection.execute(
+                """
+                UPDATE email_tasks
+                SET status = ?,
+                    cancellation_reason = ?,
+                    updated_at = datetime('now')
+                WHERE id = ?
+                """,
+                ("canceled", "schedule_expired", first_task["id"]),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        second_response = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(second_response.status_code, 200, msg=second_response.text)
+        second_task = second_response.json()["current_task"]
+
+        self.assertNotEqual(second_task["id"], first_task["id"])
+        self.assertEqual(second_task["source"], "manual")
+        self.assertEqual(second_task["parent_task_id"], first_task["id"])
+        self.assertEqual(second_task["batch_task_id"], None)
+        self.assertNotEqual(second_task["status"], "canceled")
 
     def test_template_mode_can_generate_draft_without_primary_material(self) -> None:
         identity_id = self._create_identity(with_imap=False)
@@ -3625,8 +3684,10 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(sent_workspace["current_task"]["status"], "sent")
         self.assertEqual(sent_workspace["current_task"]["last_rfc_message_id"], "<msg-1@example.com>")
 
+        reply_sent_at = datetime(2026, 5, 1, 8, 0, tzinfo=UTC)
+        reply_received_at = datetime(2026, 5, 1, 8, 30, tzinfo=UTC)
         with patch(
-            "app.services.task_runtime.mail_runtime.fetch_recent_inbox_messages",
+            "app.services.task_runtime.mail_runtime.fetch_inbox_messages_from_sender",
             AsyncMock(
                 return_value=[
                     self._build_received_email(
@@ -3635,11 +3696,17 @@ class ApiEndpointTests(unittest.TestCase):
                         content="谢谢来信，我们可以进一步聊聊。",
                         message_id="<reply-1@example.com>",
                         in_reply_to="<msg-1@example.com>",
+                        sent_at=reply_sent_at,
+                        received_at=reply_received_at,
                     ),
                 ],
             ),
         ):
-            self._run_async(self._poll_replies())
+            refresh_response = self.client.post(
+                f"/api/workspaces/{professor_id}/refresh-replies",
+                params={"identity_id": identity_id, "llm_profile_id": llm_id},
+            )
+            self.assertEqual(refresh_response.status_code, 200, msg=refresh_response.text)
 
         replied_workspace = self.client.get(
             f"/api/workspaces/{professor_id}",
@@ -3647,7 +3714,66 @@ class ApiEndpointTests(unittest.TestCase):
         ).json()
         self.assertEqual(replied_workspace["current_task"]["status"], "reply_detected")
         self.assertTrue(replied_workspace["current_task"]["is_replied"])
-        self.assertEqual(replied_workspace["messages"][-1]["direction"], "received")
+        received_message = next(
+            message
+            for message in replied_workspace["messages"]
+            if message["direction"] == "received"
+        )
+        received_created_at = datetime.fromisoformat(
+            received_message["created_at"].replace("Z", "+00:00"),
+        )
+        if received_created_at.tzinfo is None:
+            received_created_at = received_created_at.replace(tzinfo=UTC)
+        self.assertEqual(received_created_at, reply_received_at)
+
+        wrong_refresh_time = datetime(2026, 5, 9, 0, 2, tzinfo=UTC)
+        connection = sqlite3.connect(self.db_path)
+        try:
+            connection.execute(
+                "UPDATE email_logs SET created_at = ? WHERE rfc_message_id = ?",
+                (wrong_refresh_time.isoformat(), "<reply-1@example.com>"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        with patch(
+            "app.services.task_runtime.mail_runtime.fetch_inbox_messages_from_sender",
+            AsyncMock(
+                return_value=[
+                    self._build_received_email(
+                        from_email="sample.professor@example.edu",
+                        subject="Re: 套磁申请",
+                        content="谢谢来信，我们可以进一步聊聊。",
+                        message_id="<reply-1@example.com>",
+                        in_reply_to="<msg-1@example.com>",
+                        sent_at=reply_sent_at,
+                        received_at=reply_received_at,
+                    ),
+                ],
+            ),
+        ):
+            repair_response = self.client.post(
+                f"/api/workspaces/{professor_id}/refresh-replies",
+                params={"identity_id": identity_id, "llm_profile_id": llm_id},
+            )
+            self.assertEqual(repair_response.status_code, 200, msg=repair_response.text)
+
+        repaired_workspace = self.client.get(
+            f"/api/workspaces/{professor_id}",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        ).json()
+        repaired_received_message = next(
+            message
+            for message in repaired_workspace["messages"]
+            if message["direction"] == "received"
+        )
+        repaired_created_at = datetime.fromisoformat(
+            repaired_received_message["created_at"].replace("Z", "+00:00"),
+        )
+        if repaired_created_at.tzinfo is None:
+            repaired_created_at = repaired_created_at.replace(tzinfo=UTC)
+        self.assertEqual(repaired_created_at, reply_received_at)
 
     def test_batch_task_card_hides_delivery_mode_snapshot(self) -> None:
         identity_id = self._create_identity(with_imap=False)
@@ -4949,6 +5075,8 @@ class ApiEndpointTests(unittest.TestCase):
         content: str,
         message_id: str,
         in_reply_to: str,
+        sent_at: datetime | None = None,
+        received_at: datetime | None = None,
     ):
         from app.services.mail_runtime import ReceivedEmail
 
@@ -4960,7 +5088,7 @@ class ApiEndpointTests(unittest.TestCase):
             message_id=message_id,
             in_reply_to=in_reply_to,
             references=in_reply_to,
-            sent_at=datetime.now(UTC),
+            sent_at=sent_at or datetime.now(UTC),
             headers={
                 "from": from_email,
                 "subject": subject,
@@ -4969,6 +5097,7 @@ class ApiEndpointTests(unittest.TestCase):
                 "references": in_reply_to,
                 "to": "sender@example.com",
             },
+            received_at=received_at,
         )
 
     @staticmethod

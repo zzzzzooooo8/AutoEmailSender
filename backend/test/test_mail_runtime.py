@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import imaplib
 import unittest
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 from app.models import IdentityProfile
 from app.services.mail_runtime import (
     MailRuntimeError,
+    fetch_inbox_messages_from_sender,
     _fetch_recent_inbox_messages_sync,
     _test_imap_connection_sync,
     parse_received_email,
@@ -14,9 +17,17 @@ from app.services.mail_runtime import (
 
 
 class _FakeImapClient:
-    def __init__(self, select_status: str = "OK") -> None:
+    def __init__(
+        self,
+        select_status: str = "OK",
+        search_data: bytes = b"",
+        fetch_payload=None,
+    ) -> None:
         self.select_status = select_status
+        self.search_data = search_data
+        self.fetch_payload = fetch_payload
         self.search_called = False
+        self.search_criteria: list[str] = []
         self.commands: list[str] = []
 
     def login(self, username: str, password: str):
@@ -36,7 +47,12 @@ class _FakeImapClient:
 
     def search(self, charset, criterion: str):
         self.search_called = True
-        return "OK", [b""]
+        self.search_criteria.append(criterion)
+        return "OK", [self.search_data]
+
+    def fetch(self, message_id: bytes, query: str):
+        self.commands.append(f"fetch:{query}")
+        return "OK", self.fetch_payload or []
 
     def logout(self):
         return "OK", [b"logout"]
@@ -91,6 +107,67 @@ class MailRuntimeTest(unittest.TestCase):
 
         self.assertFalse(client.search_called)
 
+    def test_fetch_recent_messages_uses_imap_internaldate_as_received_time(self) -> None:
+        raw_message = (
+            "From: teacher@example.com\r\n"
+            "To: sender@example.com\r\n"
+            "Subject: Re: hello\r\n"
+            "Message-ID: <reply-internaldate@example.com>\r\n"
+            "Date: Fri, 08 May 2026 20:00:00 +0800\r\n"
+            "Content-Type: text/plain; charset=utf-8\r\n"
+            "\r\n"
+            "欢迎报考\r\n"
+        ).encode("utf-8")
+        client = _FakeImapClient(
+            search_data=b"1",
+            fetch_payload=[
+                (
+                    b'1 (RFC822 {123} INTERNALDATE "09-May-2026 00:02:00 +0800"',
+                    raw_message,
+                ),
+                b")",
+            ],
+        )
+
+        with patch("app.services.mail_runtime._open_imap_client", return_value=client):
+            messages = _fetch_recent_inbox_messages_sync(_build_identity())
+
+        self.assertEqual(client.commands[-1], "fetch:(RFC822 INTERNALDATE)")
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0].sent_at, datetime(2026, 5, 8, 12, 0, tzinfo=UTC))
+        self.assertEqual(messages[0].received_at, datetime(2026, 5, 8, 16, 2, tzinfo=UTC))
+
+    def test_fetch_messages_from_sender_uses_from_search_and_internaldate(self) -> None:
+        raw_message = (
+            "From: teacher@example.com\r\n"
+            "To: sender@example.com\r\n"
+            "Subject: Re: hello\r\n"
+            "Message-ID: <reply-from-sender@example.com>\r\n"
+            "Date: Fri, 08 May 2026 20:00:00 +0800\r\n"
+            "Content-Type: text/plain; charset=utf-8\r\n"
+            "\r\n"
+            "欢迎报考\r\n"
+        ).encode("utf-8")
+        client = _FakeImapClient(
+            search_data=b"1",
+            fetch_payload=[
+                (
+                    b'1 (RFC822 {123} INTERNALDATE "09-May-2026 00:03:00 +0800"',
+                    raw_message,
+                ),
+                b")",
+            ],
+        )
+
+        with patch("app.services.mail_runtime._open_imap_client", return_value=client):
+            messages = asyncio.run(
+                fetch_inbox_messages_from_sender(_build_identity(), "teacher@example.com"),
+            )
+
+        self.assertEqual(client.search_criteria[-1], '(FROM "teacher@example.com")')
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0].received_at, datetime(2026, 5, 8, 16, 3, tzinfo=UTC))
+
     def test_parse_received_email_strips_quoted_original_message_from_plain_text(self) -> None:
         raw_message = (
             "From: juniexd <juniexd@qq.com>\r\n"
@@ -127,6 +204,7 @@ class MailRuntimeTest(unittest.TestCase):
 
         received = parse_received_email(raw_message)
 
+        self.assertEqual(received.content, "欢迎报考")
         self.assertIn("欢迎报考", received.content_html or "")
         self.assertNotIn("回复的原邮件", received.content_html or "")
         self.assertNotIn("尊敬的老师", received.content_html or "")

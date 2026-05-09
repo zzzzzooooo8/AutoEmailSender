@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import mimetypes
 import smtplib
 import imaplib
@@ -13,6 +14,7 @@ from email.message import EmailMessage
 from email.parser import BytesParser
 from email.utils import formataddr, make_msgid, parseaddr, parsedate_to_datetime
 from html import escape
+from html.parser import HTMLParser
 from imaplib import IMAP4, IMAP4_SSL
 from pathlib import Path
 from socket import timeout as SocketTimeout
@@ -40,6 +42,22 @@ REPLY_QUOTE_HTML_PATTERNS = (
     re.compile(r"-{2,}\s*Original Message\s*-{2,}", re.IGNORECASE),
     re.compile(r"<blockquote\b", re.IGNORECASE),
 )
+HTML_TEXT_BLOCK_TAGS = {
+    "br",
+    "div",
+    "li",
+    "p",
+    "tr",
+    "table",
+    "ul",
+    "ol",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+}
 
 
 class MailRuntimeError(RuntimeError):
@@ -69,6 +87,26 @@ class ReceivedEmail:
     references: str | None
     sent_at: datetime
     headers: dict[str, str]
+    received_at: datetime | None = None
+
+class _HtmlTextExtractor(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() in HTML_TEXT_BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() in HTML_TEXT_BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        self.parts.append(data)
+
+    def get_text(self) -> str:
+        return re.sub(r"[ \t\r\f\v]+", " ", "".join(self.parts)).strip()
 
 
 async def test_smtp_connection(identity: IdentityProfile) -> tuple[bool, str]:
@@ -157,6 +195,17 @@ async def fetch_recent_inbox_messages(identity: IdentityProfile) -> list[Receive
     if not identity.imap_host or not identity.imap_username or not identity.imap_password:
         return []
     return await asyncio.to_thread(_fetch_recent_inbox_messages_sync, identity)
+
+
+async def fetch_inbox_messages_from_sender(
+    identity: IdentityProfile,
+    from_email: str,
+) -> list[ReceivedEmail]:
+    if not identity.imap_host or not identity.imap_username or not identity.imap_password:
+        return []
+    if not from_email.strip():
+        return []
+    return await asyncio.to_thread(_fetch_inbox_messages_from_sender_sync, identity, from_email.strip().lower())
 
 
 def build_email_message(
@@ -255,6 +304,20 @@ def _send_email_sync(identity: IdentityProfile, message: EmailMessage) -> None:
 
 
 def _fetch_recent_inbox_messages_sync(identity: IdentityProfile) -> list[ReceivedEmail]:
+    since_date = (datetime.now(UTC) - timedelta(hours=get_settings().imap_lookback_hours)).strftime(
+        "%d-%b-%Y",
+    )
+    return _fetch_inbox_messages_sync(identity, f'(SINCE "{since_date}")')
+
+
+def _fetch_inbox_messages_from_sender_sync(
+    identity: IdentityProfile,
+    from_email: str,
+) -> list[ReceivedEmail]:
+    return _fetch_inbox_messages_sync(identity, f'(FROM "{_escape_imap_search_value(from_email)}")')
+
+
+def _fetch_inbox_messages_sync(identity: IdentityProfile, search_criterion: str) -> list[ReceivedEmail]:
     client: IMAP4 | IMAP4_SSL | None = None
     messages: list[ReceivedEmail] = []
     try:
@@ -263,21 +326,20 @@ def _fetch_recent_inbox_messages_sync(identity: IdentityProfile) -> list[Receive
         _send_imap_client_id(client, identity)
         _select_inbox_or_raise(client)
 
-        since_date = (datetime.now(UTC) - timedelta(hours=get_settings().imap_lookback_hours)).strftime(
-            "%d-%b-%Y",
-        )
-        status, data = client.search(None, f'(SINCE "{since_date}")')
+        status, data = client.search(None, search_criterion)
         if status != "OK":
             raise MailRuntimeError("IMAP 搜索失败")
 
         for message_id in data[0].split():
-            fetch_status, payload = client.fetch(message_id, "(RFC822)")
+            fetch_status, payload = client.fetch(message_id, "(RFC822 INTERNALDATE)")
             if fetch_status != "OK" or not payload or payload[0] is None:
                 continue
             raw_message = payload[0][1]
             if not isinstance(raw_message, (bytes, bytearray)):
                 continue
-            messages.append(parse_received_email(bytes(raw_message)))
+            message = parse_received_email(bytes(raw_message))
+            message.received_at = _extract_received_at_from_fetch_payload(payload)
+            messages.append(message)
     except MailRuntimeError:
         raise
     except OSError as exc:
@@ -318,6 +380,23 @@ def _send_imap_client_id(client: IMAP4 | IMAP4_SSL, identity: IdentityProfile) -
 
 def _escape_imap_id_value(value: object) -> str:
     return str(value).replace("\\", "\\\\").replace('"', r"\"")
+
+
+def _escape_imap_search_value(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', r"\"")
+
+
+def _extract_received_at_from_fetch_payload(payload: list[object]) -> datetime | None:
+    for item in payload:
+        if not isinstance(item, tuple) or not item:
+            continue
+        response = item[0]
+        if not isinstance(response, (bytes, bytearray)):
+            continue
+        internaldate = imaplib.Internaldate2tuple(bytes(response))
+        if internaldate is not None:
+            return datetime.fromtimestamp(time.mktime(internaldate), tz=UTC)
+    return None
 
 
 def _select_inbox_or_raise(client: IMAP4 | IMAP4_SSL) -> None:
@@ -412,8 +491,19 @@ def extract_message_content(message: EmailMessage) -> tuple[str, str | None]:
         "\n".join(part.strip() for part in html_parts if part.strip()).strip(),
     ) or None
     if not text_content and html_content:
-        text_content = strip_quoted_reply_text(html_content)
+        text_content = strip_quoted_reply_text(convert_html_to_text(html_content))
     return text_content or "", html_content
+
+
+def convert_html_to_text(content: str) -> str:
+    parser = _HtmlTextExtractor()
+    parser.feed(content)
+    parser.close()
+    return "\n".join(
+        line.strip()
+        for line in parser.get_text().splitlines()
+        if line.strip()
+    )
 
 
 def strip_quoted_reply_text(content: str) -> str:

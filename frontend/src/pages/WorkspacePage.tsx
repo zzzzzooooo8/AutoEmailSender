@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import clsx from 'clsx';
 import { Link, Navigate, useParams } from 'react-router-dom';
 import { ArrowLeft, CalendarClock, Loader2, X } from 'lucide-react';
 import { WorkspaceComposerDock } from '@/components/organisms/WorkspaceComposerDock';
@@ -8,6 +9,7 @@ import { useNotification } from '@/context/NotificationContext';
 import { useSelectionContext } from '@/context/SelectionContext';
 import { getTaskModeCopy } from '@/features/create-task/client/taskCopy';
 import { getWorkspaceNextStep } from '@/features/workspace/client/getWorkspaceNextStep';
+import { bootstrapWorkspaceThread } from '@/features/workspace/client/openWorkspaceThread';
 import {
   approveAndSchedule,
   approveAndSend,
@@ -18,8 +20,12 @@ import {
   startFollowUp,
   updateTaskOutreachConfig,
 } from '@/lib/api/emailTasksApi';
-import { ensureWorkspaceTask, getWorkspaceThread } from '@/lib/api/workspacesApi';
+import {
+  getWorkspaceThread,
+  refreshWorkspaceReplies,
+} from '@/lib/api/workspacesApi';
 import { parseApiDateTime } from '@/lib/dateTime';
+import { extractPlainTextFromHtml } from '@/lib/htmlPreview';
 import { textToEmailHtml } from '@/lib/richEmail';
 import { useConfirmDialog } from '@/lib/useConfirmDialog';
 import {
@@ -40,6 +46,7 @@ const WORKSPACE_STATUS_LABELS: Record<WorkspaceTaskStatusLabelKey, string> = {
   review_required: PROFESSOR_STATUS_LABELS.review_required,
   approved: '待发送',
   scheduled: PROFESSOR_STATUS_LABELS.scheduled,
+  sending: PROFESSOR_STATUS_LABELS.sending,
   sent: PROFESSOR_STATUS_LABELS.sent,
   send_failed: PROFESSOR_STATUS_LABELS.send_failed,
   reply_detected: PROFESSOR_STATUS_LABELS.reply_detected,
@@ -64,6 +71,17 @@ const buildDraftGenerationSuccessDescription = (
     elapsedMs,
   )}`;
 
+const buildMessagePreviewText = (message: WorkspaceMessageDTO) => {
+  const htmlSource = message.content_html?.trim() || message.content.trim();
+  if (htmlSource) {
+    const htmlText = extractPlainTextFromHtml(htmlSource);
+    if (htmlText) {
+      return htmlText;
+    }
+  }
+  return message.content.replace(/\s+/g, ' ').trim();
+};
+
 const getReceivedMessages = (messages: WorkspaceMessageDTO[]) =>
   messages.filter((message) => message.direction === 'received');
 
@@ -75,7 +93,7 @@ const buildNewReplyNotificationDescription = (
   if (subject) {
     return `${professorName}回复了：${subject}`;
   }
-  const content = message.content.replace(/\s+/g, ' ').trim();
+  const content = buildMessagePreviewText(message);
   return `${professorName}回复了${content ? `：${content.slice(0, 36)}` : ''}`;
 };
 
@@ -90,6 +108,10 @@ const getCurrentTaskOrNull = (
   thread: WorkspaceThreadDTO | null,
 ): WorkspaceTaskSummaryDTO | null =>
   thread?.current_task?.id != null ? thread.current_task : null;
+
+type SyncComposerOptions = {
+  preserveDirty?: boolean;
+};
 
 const getLatestDraftMessage = (messages: WorkspaceMessageDTO[]) => {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -325,12 +347,17 @@ export const WorkspacePage = () => {
   const currentWorkspaceRequestKeyRef = useRef<string | null>(null);
   const latestActionRequestIdRef = useRef(0);
   const knownReceivedMessageIdsRef = useRef<Set<number>>(new Set());
+  const composerDirtyRef = useRef(false);
   const workspaceRequestKey =
     Number.isFinite(professorId) && selectedIdentityId && selectedLlmProfileId
       ? `${professorId}:${selectedIdentityId}:${selectedLlmProfileId}`
       : null;
 
-  const syncComposer = useCallback((data: WorkspaceThreadDTO) => {
+  const syncComposer = useCallback((data: WorkspaceThreadDTO, options: SyncComposerOptions = {}) => {
+    if (options.preserveDirty && composerDirtyRef.current) {
+      return;
+    }
+
     const currentTask = getCurrentTaskOrNull(data);
     const blockedDraftActions = shouldBlockDirectDraftActions(currentTask);
     const latestDraftMessage = getLatestDraftMessage(data.messages);
@@ -401,9 +428,10 @@ export const WorkspacePage = () => {
           })()
         : getDefaultScheduledAtValue(),
     );
+    composerDirtyRef.current = false;
   }, []);
 
-  const loadThread = useCallback(async (options: { silent?: boolean } = {}) => {
+  const loadThread = useCallback(async (options: { refreshReplies?: boolean; silent?: boolean } = {}) => {
     const silent = options.silent ?? false;
     if (!workspaceRequestKey || !selectedIdentityId || !selectedLlmProfileId || !Number.isFinite(professorId)) {
       latestThreadRequestIdRef.current += 1;
@@ -416,6 +444,7 @@ export const WorkspacePage = () => {
       setThreadRefreshing(false);
       setLastThreadCheckedAt(null);
       setNewReceivedCount(0);
+      composerDirtyRef.current = false;
       return;
     }
 
@@ -428,19 +457,17 @@ export const WorkspacePage = () => {
       setLoading(true);
     }
     try {
-      const data = await getWorkspaceThread(
+      const data = await (options.refreshReplies ? refreshWorkspaceReplies : getWorkspaceThread)(
         professorId,
         selectedIdentityId,
         selectedLlmProfileId,
       );
-      const workspaceData =
-        data.current_task.id == null
-          ? await ensureWorkspaceTask(
-              professorId,
-              selectedIdentityId,
-              selectedLlmProfileId,
-            )
-          : data;
+      const workspaceData = await bootstrapWorkspaceThread(
+        data,
+        professorId,
+        selectedIdentityId,
+        selectedLlmProfileId,
+      );
       if (
         latestThreadRequestIdRef.current !== requestId ||
         activeThreadRequestKeyRef.current !== workspaceRequestKey
@@ -468,7 +495,7 @@ export const WorkspacePage = () => {
           buildNewReplyNotificationDescription(workspaceData.professor.name, latestReceived),
         );
       }
-      syncComposer(workspaceData);
+      syncComposer(workspaceData, { preserveDirty: silent });
       loadedThreadKeyRef.current = workspaceRequestKey;
     } catch (loadError) {
       if (
@@ -537,6 +564,7 @@ export const WorkspacePage = () => {
     setThreadRefreshing(false);
     setLastThreadCheckedAt(null);
     setNewReceivedCount(0);
+    composerDirtyRef.current = false;
   }, [workspaceRequestKey]);
 
   useEffect(() => {
@@ -572,9 +600,10 @@ export const WorkspacePage = () => {
     () => thread?.messages.filter((message) => message.direction !== 'draft').length ?? 0,
     [thread?.messages],
   );
+  const hasRealMessages = realMessageCount > 0;
   const handleRefreshThread = useCallback(() => {
     setNewReceivedCount(0);
-    void loadThread({ silent: true });
+    void loadThread({ refreshReplies: true, silent: true });
   }, [loadThread]);
   const preparedBodyText = deriveBodyTextFromDraft({ content, contentHtml });
   const hasDraft = composerHasSendableDraft;
@@ -634,13 +663,24 @@ export const WorkspacePage = () => {
     [notifyError, syncComposer, workspaceRequestKey],
   );
 
+  const handleSubjectChange = useCallback((value: string) => {
+    composerDirtyRef.current = true;
+    setSubject(value);
+  }, []);
+
   const handleContentChange = useCallback((value: { html: string; text: string }) => {
+    composerDirtyRef.current = true;
     setContent(value.text);
     setContentHtml(value.html);
     setComposerHasSendableDraft(hasMeaningfulBody({
       content: value.text,
       contentHtml: value.html,
     }));
+  }, []);
+
+  const handleSelectedMaterialIdsChange = useCallback((ids: number[]) => {
+    composerDirtyRef.current = true;
+    setSelectedMaterialIds(ids);
   }, []);
 
   const handleSendNow = useCallback(() => {
@@ -900,7 +940,12 @@ export const WorkspacePage = () => {
             <WorkspaceSidebar thread={thread} />
           </div>
 
-          <section className="order-2 flex min-h-0 flex-col overflow-hidden rounded-[36px] border border-stone-200 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(255,252,247,0.98))] shadow-[0_24px_54px_-36px_rgba(41,37,36,0.34)] lg:order-1">
+          <section
+            className={clsx(
+              'order-2 flex min-h-0 flex-col overflow-hidden rounded-[36px] border border-stone-200 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(255,252,247,0.98))] shadow-[0_24px_54px_-36px_rgba(41,37,36,0.34)] lg:order-1',
+              !hasRealMessages && 'lg:self-start',
+            )}
+          >
             {currentTask ? (
               <>
                 <WorkspaceMessageThread
@@ -935,9 +980,9 @@ export const WorkspacePage = () => {
                   onToggleExpanded={() =>
                     setComposerExpanded((current) => !current)
                   }
-                  onSubjectChange={setSubject}
+                  onSubjectChange={handleSubjectChange}
                   onContentChange={handleContentChange}
-                  onSelectedMaterialIdsChange={setSelectedMaterialIds}
+                  onSelectedMaterialIdsChange={handleSelectedMaterialIdsChange}
                   onSendNow={handleSendNow}
                   onScheduleSend={handleScheduleSend}
                   onCancelSchedule={handleCancelSchedule}

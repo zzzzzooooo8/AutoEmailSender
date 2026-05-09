@@ -30,3 +30,19 @@ export const ensureWorkspaceTask = (
       llm_profile_id: llmProfileId,
     },
   );
+
+export const refreshWorkspaceReplies = (
+  professorId: number,
+  identityId: number,
+  llmProfileId: number,
+) =>
+  apiFetch<WorkspaceThreadDTO>(
+    `/api/workspaces/${professorId}/refresh-replies`,
+    {
+      method: 'POST',
+    },
+    {
+      identity_id: identityId,
+      llm_profile_id: llmProfileId,
+    },
+  );

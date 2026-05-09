@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  extractPlainTextFromHtml,
   hasRenderablePreviewContent,
   sanitizeTemplateHtmlForPreview,
 } from "@/lib/htmlPreview";
@@ -14,6 +15,16 @@ describe("sanitizeTemplateHtmlForPreview", () => {
     expect(result).toContain("{{sender_name}}");
     expect(result).toContain("<strong>");
     expect(result).toContain('style="text-align:left;"');
+  });
+
+  it("preserves font tags and color attrs in previews", () => {
+    const result = sanitizeTemplateHtmlForPreview(
+      '<p><font face="宋体" color="#333333">老师您好</font></p>',
+    );
+
+    expect(result).toContain("<font");
+    expect(result).toContain('face="宋体"');
+    expect(result).toContain('color="#333333"');
   });
 
   it("removes scripts, event handlers, and javascript urls", () => {
@@ -36,5 +47,15 @@ describe("hasRenderablePreviewContent", () => {
 
   it("returns true for visible html", () => {
     expect(hasRenderablePreviewContent("<p>{{name}}老师您好，</p>")).toBe(true);
+  });
+});
+
+describe("extractPlainTextFromHtml", () => {
+  it("converts html document content to readable text", () => {
+    expect(
+      extractPlainTextFromHtml(
+        '<html><body><p>老师回复</p><p><strong>欢迎继续交流</strong></p></body></html>',
+      ),
+    ).toBe("老师回复 欢迎继续交流");
   });
 });

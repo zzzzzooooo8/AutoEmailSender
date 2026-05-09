@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, tzinfo
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
@@ -59,6 +59,22 @@ TASK_RELATION_OPTIONS = (
     selectinload(EmailTask.professor),
     selectinload(EmailTask.primary_material),
 )
+
+DISPATCHABLE_EMAIL_TASK_STATUSES = (
+    EmailTaskStatus.APPROVED.value,
+    EmailTaskStatus.SCHEDULED.value,
+)
+
+STALE_SENDING_TASK_AFTER = timedelta(minutes=30)
+
+MANUAL_DRAFT_CLAIMABLE_STATUSES = {
+    EmailTaskStatus.DISCOVERED.value,
+    EmailTaskStatus.MATCHED.value,
+    EmailTaskStatus.DRAFT_FAILED.value,
+    EmailTaskStatus.REVIEW_REQUIRED.value,
+    EmailTaskStatus.APPROVED.value,
+    EmailTaskStatus.SCHEDULED.value,
+}
 
 
 def _has_professor_match_evidence(professor: Professor) -> bool:
@@ -113,6 +129,8 @@ async def dispatch_due_tasks_once(
     now_utc, local_now = _resolve_dispatch_clocks(now, local_timezone)
     if limit <= 0:
         return 0
+
+    await recover_stale_sending_tasks(session_factory, now=now_utc)
 
     async with session_factory() as session:
         await _expire_overdue_scheduled_batch_tasks(session, local_now)
@@ -342,6 +360,40 @@ async def poll_for_replies_once(
         detected += await poll_identity_replies(session_factory, identity_id)
     return detected
 
+async def recover_stale_sending_tasks(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    stale_after: timedelta = STALE_SENDING_TASK_AFTER,
+    now: datetime | None = None,
+) -> int:
+    resolved_now = now or datetime.now(UTC)
+    cutoff = resolved_now - stale_after
+    async with session_factory() as session:
+        tasks = list(
+            await session.scalars(
+                select(EmailTask)
+                .options(selectinload(EmailTask.batch_task))
+                .where(
+                    EmailTask.status == EmailTaskStatus.SENDING.value,
+                    or_(
+                        and_(
+                            EmailTask.last_send_attempt_at.is_not(None),
+                            EmailTask.last_send_attempt_at < cutoff,
+                        ),
+                        and_(
+                            EmailTask.last_send_attempt_at.is_(None),
+                            EmailTask.updated_at < cutoff,
+                        ),
+                    ),
+                ),
+            ),
+        )
+        for task in tasks:
+            _restore_or_cancel_interrupted_send(task)
+            task.updated_at = resolved_now
+        await session.commit()
+        return len(tasks)
+
 
 async def generate_task_draft(
     session_factory: async_sessionmaker[AsyncSession],
@@ -356,6 +408,7 @@ async def generate_task_draft(
         task = await _load_email_task(session, task_id)
         if not task:
             raise ValueError(f"EmailTask {task_id} 不存在")
+        task_identity = (task.professor_id, task.identity_id, task.llm_profile_id)
         if task.status == EmailTaskStatus.GENERATING_DRAFT.value and not automatic_batch:
             raise ValueError("草稿正在后台生成，请稍后刷新")
         if (
@@ -366,7 +419,35 @@ async def generate_task_draft(
             if automatic_batch or require_running_batch:
                 _restore_or_cancel_interrupted_draft_generation(task)
                 await session.commit()
-            return task.professor_id, task.identity_id, task.llm_profile_id
+            return task_identity
+
+        if not automatic_batch:
+            claim_result = await session.execute(
+                update(EmailTask)
+                .where(
+                    EmailTask.id == task_id,
+                    EmailTask.status.in_(MANUAL_DRAFT_CLAIMABLE_STATUSES),
+                )
+                .values(
+                    status=EmailTaskStatus.GENERATING_DRAFT.value,
+                    draft_generation_previous_status=task.status,
+                    last_error=None,
+                    updated_at=datetime.now(UTC),
+                ),
+            )
+            if claim_result.rowcount != 1:
+                await session.rollback()
+                current_status = await session.scalar(
+                    select(EmailTask.status).where(EmailTask.id == task_id),
+                )
+                if current_status == EmailTaskStatus.GENERATING_DRAFT.value:
+                    raise ValueError("草稿正在后台生成，请稍后刷新")
+                return task_identity
+            await session.commit()
+            task = await _load_email_task(session, task_id)
+            if not task:
+                raise ValueError(f"EmailTask {task_id} 不存在")
+            task_identity = (task.professor_id, task.identity_id, task.llm_profile_id)
 
         batch_task = task.batch_task
 
@@ -491,6 +572,9 @@ async def generate_task_draft(
             if automatic_batch:
                 task.status = EmailTaskStatus.DRAFT_FAILED.value
                 task.draft_generation_previous_status = None
+            else:
+                task.status = task.draft_generation_previous_status or EmailTaskStatus.DISCOVERED.value
+                task.draft_generation_previous_status = None
             task.updated_at = datetime.now(UTC)
             await session.commit()
             if automatic_batch:
@@ -500,6 +584,9 @@ async def generate_task_draft(
             task.last_error = str(exc)
             if automatic_batch:
                 task.status = EmailTaskStatus.DRAFT_FAILED.value
+                task.draft_generation_previous_status = None
+            else:
+                task.status = task.draft_generation_previous_status or EmailTaskStatus.DISCOVERED.value
                 task.draft_generation_previous_status = None
             task.updated_at = datetime.now(UTC)
             await session.commit()
@@ -545,7 +632,7 @@ async def generate_task_draft(
             },
         )
         await session.commit()
-        return task.professor_id, task.identity_id, task.llm_profile_id
+        return task_identity
 
 
 async def calculate_task_match(
@@ -1019,17 +1106,28 @@ async def continue_task_manually(
         ):
             raise ValueError("只有 canceled 且 cancellation_reason 为 batch_stopped 的任务支持继续联系")
 
+        professor_id = task.professor_id
+        identity_id = task.identity_id
+        llm_profile_id = task.llm_profile_id
+        parent_task_id = task.id
         child_task = _create_manual_child_task(task, reuse_existing_draft=True)
         session.add(child_task)
-        await session.flush()
+        try:
+            await session.flush()
+        except IntegrityError:
+            await session.rollback()
+            existing_child_id = await _get_manual_child_task_id(session, parent_task_id)
+            if existing_child_id is not None:
+                return professor_id, identity_id, llm_profile_id
+            raise
         await _record_email_task_log(
             session,
             child_task,
             "email_task.continued_manually",
-            metadata={"parent_task_id": task.id},
+            metadata={"parent_task_id": parent_task_id},
         )
         await _commit_manual_child_task(session)
-        return task.professor_id, task.identity_id, task.llm_profile_id
+        return professor_id, identity_id, llm_profile_id
 
 
 async def start_follow_up_task(
@@ -1047,21 +1145,32 @@ async def start_follow_up_task(
         }:
             raise ValueError("只有 sent 或 reply_detected 的任务支持发起跟进")
 
+        professor_id = task.professor_id
+        identity_id = task.identity_id
+        llm_profile_id = task.llm_profile_id
+        parent_task_id = task.id
         child_task = _create_manual_child_task(
             task,
             reuse_existing_draft=False,
             minimum_status=EmailTaskStatus.MATCHED.value,
         )
         session.add(child_task)
-        await session.flush()
+        try:
+            await session.flush()
+        except IntegrityError:
+            await session.rollback()
+            existing_child_id = await _get_manual_child_task_id(session, parent_task_id)
+            if existing_child_id is not None:
+                return professor_id, identity_id, llm_profile_id
+            raise
         await _record_email_task_log(
             session,
             child_task,
             "email_task.follow_up_started",
-            metadata={"parent_task_id": task.id},
+            metadata={"parent_task_id": parent_task_id},
         )
         await _commit_manual_child_task(session)
-        return task.professor_id, task.identity_id, task.llm_profile_id
+        return professor_id, identity_id, llm_profile_id
 
 
 async def dispatch_email_task(
@@ -1073,13 +1182,46 @@ async def dispatch_email_task(
         task = await _load_email_task(session, task_id)
         if not task:
             raise ValueError(f"EmailTask {task_id} 不存在")
-        if task.status not in {
-            EmailTaskStatus.APPROVED.value,
-            EmailTaskStatus.SCHEDULED.value,
-        }:
-            return task.professor_id, task.identity_id, task.llm_profile_id
+        task_identity = (task.professor_id, task.identity_id, task.llm_profile_id)
+        if task.status not in DISPATCHABLE_EMAIL_TASK_STATUSES:
+            return task_identity
         if task.batch_task and task.batch_task.status != BatchTaskStatus.RUNNING.value:
-            return task.professor_id, task.identity_id, task.llm_profile_id
+            return task_identity
+
+        claimed_at = datetime.now(UTC)
+        claim_result = await session.execute(
+            update(EmailTask)
+            .where(
+                EmailTask.id == task_id,
+                EmailTask.status.in_(DISPATCHABLE_EMAIL_TASK_STATUSES),
+            )
+            .values(
+                status=EmailTaskStatus.SENDING.value,
+                last_send_attempt_at=claimed_at,
+                retry_count=func.coalesce(EmailTask.retry_count, 0) + 1,
+                updated_at=claimed_at,
+            ),
+        )
+        if claim_result.rowcount != 1:
+            await session.rollback()
+            return task_identity
+        await session.commit()
+        task = await _load_email_task(session, task_id)
+        if not task:
+            raise ValueError(f"EmailTask {task_id} 不存在")
+        task_identity = (task.professor_id, task.identity_id, task.llm_profile_id)
+        if task.batch_task and task.batch_task.status != BatchTaskStatus.RUNNING.value:
+            if task.batch_task.status == BatchTaskStatus.PAUSED.value:
+                task.status = EmailTaskStatus.APPROVED.value
+            elif task.batch_task.status == BatchTaskStatus.EXPIRED.value:
+                task.status = EmailTaskStatus.CANCELED.value
+                task.cancellation_reason = EmailTaskCancellationReason.SCHEDULE_EXPIRED.value
+            else:
+                task.status = EmailTaskStatus.CANCELED.value
+                task.cancellation_reason = EmailTaskCancellationReason.BATCH_STOPPED.value
+            task.updated_at = datetime.now(UTC)
+            await session.commit()
+            return task_identity
 
         subject_template = task.approved_subject or task.generated_subject
         body_text_template = task.approved_body_text or task.generated_content_text
@@ -1104,8 +1246,6 @@ async def dispatch_email_task(
             task.identity_id,
             task.selected_material_ids,
         )
-        task.last_send_attempt_at = datetime.now(UTC)
-        task.retry_count = (task.retry_count or 0) + 1
 
         try:
             result = await mail_runtime.send_email(
@@ -1191,14 +1331,50 @@ async def poll_identity_replies(
         return 0
 
     messages = await mail_runtime.fetch_recent_inbox_messages(identity)
+    return await _process_incoming_reply_messages(session_factory, identity_id, messages)
+
+
+async def repair_identity_replies(
+    session_factory: async_sessionmaker[AsyncSession],
+    identity_id: int,
+    *,
+    professor_email: str | None = None,
+) -> int:
+    async with session_factory() as session:
+        identity = await session.get(IdentityProfile, identity_id)
+    if not identity:
+        return 0
+
+    messages: list[ReceivedEmail] = []
+    if professor_email and professor_email.strip():
+        messages = await mail_runtime.fetch_inbox_messages_from_sender(identity, professor_email)
+    if not messages:
+        messages = await mail_runtime.fetch_recent_inbox_messages(identity)
+    return await _process_incoming_reply_messages(session_factory, identity_id, messages)
+
+
+async def _process_incoming_reply_messages(
+    session_factory: async_sessionmaker[AsyncSession],
+    identity_id: int,
+    messages: list[ReceivedEmail],
+) -> int:
     detected = 0
     for message in messages:
         async with session_factory() as session:
+            reply_created_at = _get_reply_created_at(message)
             if message.message_id:
                 existing = await session.scalar(
-                    select(EmailLog.id).where(EmailLog.rfc_message_id == message.message_id),
+                    select(EmailLog).where(EmailLog.rfc_message_id == message.message_id),
                 )
                 if existing:
+                    if (
+                        existing.direction == EmailDirection.RECEIVED.value
+                        and not _datetimes_match(existing.created_at, reply_created_at)
+                    ):
+                        existing.created_at = reply_created_at
+                        existing.reply_headers = message.headers
+                        session.add(existing)
+                        await session.commit()
                     continue
 
             task = await _find_reply_target(session, identity_id, message)
@@ -1208,29 +1384,47 @@ async def poll_identity_replies(
             task.is_replied = True
             task.status = EmailTaskStatus.REPLY_DETECTED.value
             task.updated_at = datetime.now(UTC)
-            session.add(
-                EmailLog(
-                    email_task_id=task.id,
-                    identity_id=task.identity_id,
-                    llm_profile_id=task.llm_profile_id,
-                    professor_id=task.professor_id,
-                    direction=EmailDirection.RECEIVED.value,
-                    subject=message.subject,
-                    content=message.content,
-                    content_html=message.content_html,
-                    rfc_message_id=message.message_id,
-                    reply_headers=message.headers,
-                ),
-            )
-            await _record_email_task_log(
-                session,
-                task,
-                "email_task.reply_detected",
-                metadata={"message_id": message.message_id},
-            )
-            await session.commit()
+            try:
+                session.add(
+                    EmailLog(
+                        email_task_id=task.id,
+                        identity_id=task.identity_id,
+                        llm_profile_id=task.llm_profile_id,
+                        professor_id=task.professor_id,
+                        direction=EmailDirection.RECEIVED.value,
+                        subject=message.subject,
+                        content=message.content,
+                        content_html=message.content_html,
+                        rfc_message_id=message.message_id,
+                        reply_headers=message.headers,
+                        created_at=reply_created_at,
+                    ),
+                )
+                await _record_email_task_log(
+                    session,
+                    task,
+                    "email_task.reply_detected",
+                    metadata={"message_id": message.message_id},
+                )
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                continue
             detected += 1
     return detected
+
+
+def _get_reply_created_at(message: mail_runtime.ReceivedEmail) -> datetime:
+    return message.received_at or message.sent_at
+
+
+def _datetimes_match(left: datetime, right: datetime) -> bool:
+    def normalize(value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+
+    return normalize(left) == normalize(right)
 
 
 async def _snapshot_approval(
@@ -1391,6 +1585,11 @@ async def _ensure_no_manual_child_exists(session: AsyncSession, parent_task_id: 
         raise ValueError("该任务已创建过手动子任务，不能重复派生")
 
 
+async def _get_manual_child_task_id(session: AsyncSession, parent_task_id: int) -> int | None:
+    return await session.scalar(
+        select(EmailTask.id).where(EmailTask.parent_task_id == parent_task_id).limit(1),
+    )
+
 async def _commit_manual_child_task(session: AsyncSession) -> None:
     try:
         await session.commit()
@@ -1448,6 +1647,26 @@ def _restore_or_cancel_interrupted_draft_generation(
         task.cancellation_reason = EmailTaskCancellationReason.BATCH_STOPPED.value
     task.draft_generation_previous_status = None
     task.updated_at = datetime.now(UTC)
+
+
+def _restore_or_cancel_interrupted_send(task: EmailTask) -> None:
+    batch_status = task.batch_task.status if task.batch_task else None
+    if batch_status == BatchTaskStatus.EXPIRED.value:
+        task.status = EmailTaskStatus.CANCELED.value
+        task.cancellation_reason = EmailTaskCancellationReason.SCHEDULE_EXPIRED.value
+    elif batch_status == BatchTaskStatus.STOPPED.value:
+        task.status = EmailTaskStatus.CANCELED.value
+        task.cancellation_reason = EmailTaskCancellationReason.BATCH_STOPPED.value
+    elif batch_status == BatchTaskStatus.PAUSED.value:
+        task.status = EmailTaskStatus.APPROVED.value
+        task.cancellation_reason = None
+    else:
+        task.status = (
+            EmailTaskStatus.SCHEDULED.value
+            if task.scheduled_at is not None
+            else EmailTaskStatus.APPROVED.value
+        )
+        task.cancellation_reason = None
 
 
 def _ensure_batch_task_has_future_window(task: EmailTask) -> None:

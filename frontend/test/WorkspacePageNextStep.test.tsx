@@ -13,6 +13,7 @@ import type {
 const mockedUseSelectionContext = vi.hoisted(() => vi.fn());
 const mockedGetWorkspaceThread = vi.hoisted(() => vi.fn());
 const mockedEnsureWorkspaceTask = vi.hoisted(() => vi.fn());
+const mockedRefreshWorkspaceReplies = vi.hoisted(() => vi.fn());
 const mockedWorkspaceComposerDock = vi.hoisted(() => vi.fn());
 const mockedApproveAndSend = vi.hoisted(() => vi.fn());
 const mockedApproveAndSchedule = vi.hoisted(() => vi.fn());
@@ -37,6 +38,7 @@ vi.mock("@/context/NotificationContext", () => ({
 vi.mock("@/lib/api/workspacesApi", () => ({
   getWorkspaceThread: mockedGetWorkspaceThread,
   ensureWorkspaceTask: mockedEnsureWorkspaceTask,
+  refreshWorkspaceReplies: mockedRefreshWorkspaceReplies,
 }));
 
 vi.mock("@/lib/api/emailTasksApi", () => ({
@@ -92,6 +94,7 @@ vi.mock("@/components/organisms/WorkspaceComposerDock", () => ({
     canSubmitDraft: boolean;
     content: string;
     contentHtml: string;
+    onSubjectChange: (value: string) => void;
     onContentChange: (value: { html: string; text: string }) => void;
     canCalculateMatch: boolean;
     onGenerateDraft: () => void;
@@ -112,6 +115,20 @@ vi.mock("@/components/organisms/WorkspaceComposerDock", () => ({
         <div>{props.canCalculateMatch ? "can-calculate-match" : "cannot-calculate-match"}</div>
         <button type="button" onClick={props.onGenerateDraft}>
           mock-generate-draft
+        </button>
+        <button type="button" onClick={() => props.onSubjectChange("用户编辑主题")}>
+          mock-edit-subject
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            props.onContentChange({
+              html: "<p>用户编辑正文</p>",
+              text: "用户编辑正文",
+            })
+          }
+        >
+          mock-edit-content
         </button>
         {props.canSubmitDraft ? (
           <>
@@ -303,6 +320,7 @@ describe("WorkspacePage next-step", () => {
     mockedWorkspaceComposerDock.mockReset();
     mockedGetWorkspaceThread.mockReset();
     mockedEnsureWorkspaceTask.mockReset();
+    mockedRefreshWorkspaceReplies.mockReset();
     mockedApproveAndSend.mockReset();
     mockedApproveAndSchedule.mockReset();
     mockedContinueManually.mockReset();
@@ -401,6 +419,112 @@ describe("WorkspacePage next-step", () => {
       );
       expect(screen.getByText("new-replies:1")).toBeInTheDocument();
     });
+
+    vi.useRealTimers();
+  });
+
+  it("uses readable text in reply notifications when the message body is html", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    mockedGetWorkspaceThread
+      .mockResolvedValueOnce(buildThread())
+      .mockResolvedValueOnce(
+        buildThread({
+          status: "reply_detected",
+          messages: [
+            buildWorkspaceMessage({
+              id: 2,
+              direction: "received",
+              subject: null,
+              content:
+                "<html><body><p>欢迎继续交流</p><p><strong>后续联系</strong></p></body></html>",
+              content_html: null,
+            }),
+          ],
+        }),
+      );
+
+    renderPage();
+
+    expect(await screen.findByText("mock-message-thread")).toBeInTheDocument();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    await waitFor(() => {
+      expect(mockedNotificationApi.notifySuccess).toHaveBeenCalledWith(
+        "收到老师回复",
+        "王教授回复了：欢迎继续交流 后续联系",
+      );
+    });
+
+    vi.useRealTimers();
+  });
+
+  it("manual thread refresh checks mailbox before reloading workspace messages", async () => {
+    mockedGetWorkspaceThread.mockResolvedValueOnce(buildThread());
+    mockedRefreshWorkspaceReplies.mockResolvedValueOnce(
+      buildThread({
+        status: "reply_detected",
+        messages: [
+          buildWorkspaceMessage({
+            id: 2,
+            direction: "received",
+            subject: "Re: 测试主题",
+            content: "欢迎继续交流",
+            content_html: "<p>欢迎继续交流</p>",
+          }),
+        ],
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("mock-message-thread")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("mock-refresh-thread"));
+
+    await waitFor(() => {
+      expect(mockedRefreshWorkspaceReplies).toHaveBeenCalledWith(101, 1, 1);
+      expect(mockedGetWorkspaceThread).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("keeps local composer edits when a background refresh returns older draft content", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    mockedGetWorkspaceThread
+      .mockResolvedValueOnce(
+        buildThread({
+          generatedSubject: "服务器旧主题",
+          generatedContentText: "服务器旧正文",
+          generatedContentHtml: "<p>服务器旧正文</p>",
+        }),
+      )
+      .mockResolvedValueOnce(
+        buildThread({
+          generatedSubject: "服务器旧主题",
+          generatedContentText: "服务器旧正文",
+          generatedContentHtml: "<p>服务器旧正文</p>",
+        }),
+      );
+
+    renderPage();
+
+    expect(await screen.findByText("draft-subject:服务器旧主题")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "mock-edit-subject" }));
+    fireEvent.click(screen.getByRole("button", { name: "mock-edit-content" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("draft-subject:用户编辑主题")).toBeInTheDocument();
+      expect(screen.getByText("draft-content:用户编辑正文")).toBeInTheDocument();
+    });
+
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    await waitFor(() => {
+      expect(mockedGetWorkspaceThread).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.getByText("draft-subject:用户编辑主题")).toBeInTheDocument();
+    expect(screen.getByText("draft-content:用户编辑正文")).toBeInTheDocument();
+    expect(screen.queryByText("draft-subject:服务器旧主题")).not.toBeInTheDocument();
 
     vi.useRealTimers();
   });
@@ -706,6 +830,41 @@ describe("WorkspacePage next-step", () => {
     await waitFor(() => {
       expect(mockedContinueManually).toHaveBeenCalledWith(301);
     });
+  });
+
+  it("reopens an expired history task as a fresh manual workspace task", async () => {
+    mockedGetWorkspaceThread.mockResolvedValueOnce(
+      buildThread({
+        status: "canceled",
+        cancellationReason: "schedule_expired",
+        primaryMaterialId: null,
+      }),
+    );
+    const resumedThread = buildThread({
+      status: "matched",
+      primaryMaterialId: null,
+    });
+    resumedThread.current_task.id = 302;
+    resumedThread.current_task.batch_task_id = null;
+    resumedThread.current_task.parent_task_id = 301;
+    mockedEnsureWorkspaceTask.mockResolvedValueOnce(resumedThread);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(mockedEnsureWorkspaceTask).toHaveBeenCalledWith(101, 1, 1);
+    });
+
+    await waitFor(() => {
+      expect(latestComposerDockProps()).toEqual(
+        expect.objectContaining({
+          canSubmitDraft: true,
+          canContinueManually: false,
+          canStartFollowUp: false,
+        }),
+      );
+    });
+    expect(screen.getByRole("button", { name: "mock-send-now" })).toBeInTheDocument();
   });
 
   it("starts a follow-up draft from the workspace action", async () => {
