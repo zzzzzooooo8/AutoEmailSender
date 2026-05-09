@@ -150,6 +150,7 @@ const BATCH_ITEM_STATUS_TONES: Record<WorkspaceTaskStatus, string> = {
   review_required: "bg-amber-50 text-amber-700",
   approved: "bg-primary/10 text-primary",
   scheduled: "bg-indigo-50 text-indigo-700",
+  sending: "bg-sky-50 text-sky-700",
   sent: "bg-emerald-50 text-emerald-700",
   send_failed: "bg-red-50 text-red-700",
   reply_detected: "bg-emerald-100 text-emerald-800",
