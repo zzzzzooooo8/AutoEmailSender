@@ -21,6 +21,7 @@ class BatchTaskStatus(StrEnum):
     PAUSED = "paused"
     STOPPED = "stopped"
     COMPLETED = "completed"
+    EXPIRED = "expired"
 
 
 class BatchTask(Base):

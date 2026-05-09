@@ -11,6 +11,7 @@ import type {
 } from "@/types";
 import {
   buildBatchPendingItemAction,
+  getBatchTaskItemCancellationText,
   getBatchTaskWaitingSendCount,
 } from "@/features/batch-tasks/client/batchTaskDisplay";
 import { getCrawlEventFailureReason } from "@/features/crawl-review/client/crawlJobEvents";
@@ -612,5 +613,48 @@ describe("batch task send queue copy", () => {
     );
 
     expect(action).toBeNull();
+  });
+
+  it("describes schedule-expired canceled items with explicit copy", () => {
+    const text = getBatchTaskItemCancellationText(
+      buildBatchItem({
+        status: "canceled",
+        cancellation_reason: "schedule_expired",
+      }),
+    );
+
+    expect(text).toBe("发送窗口已过期");
+  });
+});
+
+describe("batch task expiration display", () => {
+  it("shows expired batch status and schedule-expired cancellation text in the detail panel", async () => {
+    const task = buildBatchTask({
+      status: "expired",
+      review_required_count: 1,
+      approved_count: 0,
+      scheduled_count: 0,
+    });
+    apiMocks.listBatchTasks.mockResolvedValue([task]);
+    apiMocks.listBatchTaskItems.mockResolvedValue([
+      buildBatchItem({
+        status: "canceled",
+        cancellation_reason: "schedule_expired",
+      }),
+    ]);
+
+    render(
+      <MemoryRouter>
+        <TasksPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("模板定时任务")).toBeInTheDocument();
+    expect(screen.getByText("已过期")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "查看详情" }));
+
+    expect(await screen.findByText("发送窗口已过期，剩余邮件已取消。可重新创建任务。")).toBeInTheDocument();
+    expect(await screen.findByText("发送窗口已过期")).toBeInTheDocument();
   });
 });

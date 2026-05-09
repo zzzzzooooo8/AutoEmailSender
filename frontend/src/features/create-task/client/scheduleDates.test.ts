@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyDateRule,
+  hasFutureScheduleWindow,
   normalizeScheduledDates,
   toggleScheduledDate,
 } from './scheduleDates';
@@ -57,5 +58,29 @@ describe('scheduleDates', () => {
       '2026-05-04',
       '2026-05-06',
     ]);
+  });
+
+  it('detects whether any selected schedule window is still in the future', () => {
+    expect(
+      hasFutureScheduleWindow(
+        ['2026-05-08'],
+        '18:00',
+        new Date('2026-05-08T09:00:00'),
+      ),
+    ).toBe(true);
+    expect(
+      hasFutureScheduleWindow(
+        ['2026-05-08'],
+        '18:00',
+        new Date('2026-05-08T18:00:00'),
+      ),
+    ).toBe(false);
+    expect(
+      hasFutureScheduleWindow(
+        ['2026-05-08', '2026-05-09'],
+        '09:00',
+        new Date('2026-05-08T20:00:00'),
+      ),
+    ).toBe(true);
   });
 });

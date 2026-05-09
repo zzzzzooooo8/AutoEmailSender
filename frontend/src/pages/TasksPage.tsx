@@ -70,6 +70,7 @@ import {
 } from "@/features/crawl-review/client/crawlJobEvents";
 import {
   buildBatchPendingItemAction,
+  getBatchTaskItemCancellationText,
   getBatchTaskWaitingSendCount,
 } from "@/features/batch-tasks/client/batchTaskDisplay";
 import { formatApiDateTime } from "@/lib/dateTime";
@@ -240,7 +241,7 @@ const canDeleteCrawlJob = (job: CrawlJobSummaryDTO) =>
   job.status === "canceled";
 
 const canDeleteBatchTask = (task: BatchTaskCardDTO) =>
-  task.status === "stopped" || task.status === "completed";
+  task.status === "stopped" || task.status === "completed" || task.status === "expired";
 
 const canDeleteMatchJob = (job: MatchAnalysisJobDTO) =>
   job.status === "completed" ||
@@ -792,7 +793,8 @@ export const TasksPage = () => {
       selectedBatchTaskItems.filter(
         (item) =>
           (item.status === "canceled" &&
-            item.cancellation_reason === "batch_stopped") ||
+            (item.cancellation_reason === "batch_stopped" ||
+              item.cancellation_reason === "schedule_expired")) ||
           (item.status !== "sent" &&
           item.status !== "reply_detected" &&
           item.status !== "generating_draft" &&
@@ -2325,7 +2327,8 @@ const selectedCrawlJobCanReview =
                       ) : null}
                       {activeTaskListView === "current" &&
                       task.status !== "stopped" &&
-                      task.status !== "completed" ? (
+                      task.status !== "completed" &&
+                      task.status !== "expired" ? (
                         <button
                           type="button"
                           onClick={() => void handleAction(task.id, "stop")}
@@ -2789,6 +2792,11 @@ const selectedCrawlJobCanReview =
                   </div>
                 </div>
               </div>
+              {selectedBatchTask.status === "expired" ? (
+                <p className="mt-4 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm leading-6 text-red-800">
+                  发送窗口已过期，剩余邮件已取消。可重新创建任务。
+                </p>
+              ) : null}
 
               <section className="mt-6">
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2910,6 +2918,7 @@ const selectedCrawlJobCanReview =
                   {pendingBatchTaskItems.length > 0 ? (
                     pendingBatchTaskItems.map((item) => {
                       const action = buildBatchPendingItemAction(item, selectedBatchTask);
+                      const cancellationText = getBatchTaskItemCancellationText(item);
                       return (
                         <div
                           key={item.id}
@@ -2942,7 +2951,11 @@ const selectedCrawlJobCanReview =
                                 计划发送 {formatDisplayTime(item.scheduled_at)}
                               </span>
                             ) : null}
-                            {action?.kind === "message" ? (
+                            {cancellationText ? (
+                              <span className="font-medium text-red-700">
+                                {cancellationText}
+                              </span>
+                            ) : action?.kind === "message" ? (
                               <span className="font-medium text-stone-600">
                                 {action.text}
                               </span>

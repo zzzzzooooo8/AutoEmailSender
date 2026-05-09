@@ -69,3 +69,13 @@ export const toggleScheduledDate = (dates: string[], date: string) => {
   }
   return normalizeScheduledDates([...dates, date]);
 };
+
+export const hasFutureScheduleWindow = (
+  dates: string[],
+  endTime: string,
+  now = new Date(),
+) =>
+  normalizeScheduledDates(dates).some((date) => {
+    const endAt = new Date(`${date}T${endTime}:00`);
+    return now.getTime() < endAt.getTime();
+  });

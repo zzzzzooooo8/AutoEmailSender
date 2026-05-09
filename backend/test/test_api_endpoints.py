@@ -1520,6 +1520,8 @@ class ApiEndpointTests(unittest.TestCase):
         llm_profile_id = self._create_llm()
         self.client.post("/api/professors/import-sample")
         professor_id = self.client.get("/api/professors").json()[0]["id"]
+        tomorrow = (datetime.now().date() + timedelta(days=1)).isoformat()
+        day_after_tomorrow = (datetime.now().date() + timedelta(days=2)).isoformat()
 
         response = self.client.post(
             "/api/batch-tasks",
@@ -1529,7 +1531,7 @@ class ApiEndpointTests(unittest.TestCase):
                 "name": "日历定时发送",
                 "professor_ids": [professor_id],
                 "schedule_type": "scheduled",
-                "scheduled_dates": ["2026-05-04", "2026-04-28", "2026-05-04"],
+                "scheduled_dates": [day_after_tomorrow, tomorrow, day_after_tomorrow],
                 "window_start_time": "09:00",
                 "window_end_time": "18:00",
                 "emails_per_window": 20,
@@ -1545,7 +1547,40 @@ class ApiEndpointTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.json()["scheduled_dates"], ["2026-04-28", "2026-05-04"])
+        self.assertEqual(response.json()["scheduled_dates"], [tomorrow, day_after_tomorrow])
+
+    def test_create_scheduled_batch_task_rejects_expired_windows(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_profile_id = self._create_llm()
+        self.client.post("/api/professors/import-sample")
+        professor_id = self.client.get("/api/professors").json()[0]["id"]
+        expired_date = (datetime.now().date() - timedelta(days=1)).isoformat()
+
+        response = self.client.post(
+            "/api/batch-tasks",
+            json={
+                "identity_id": identity_id,
+                "llm_profile_id": llm_profile_id,
+                "name": "过期定时发送",
+                "professor_ids": [professor_id],
+                "schedule_type": "scheduled",
+                "scheduled_dates": [expired_date],
+                "window_start_time": "09:00",
+                "window_end_time": "18:00",
+                "emails_per_window": 20,
+                "primary_material_id": None,
+                "email_subject": "Hello {{导师姓名}}",
+                "email_body": "Body",
+                "selected_material_ids": None,
+                "outreach_generation_mode": "template",
+                "outreach_template_subject": "Hello {{导师姓名}}",
+                "outreach_template_body_text": "Body",
+                "outreach_template_body_html": None,
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("发送窗口已全部过期", response.json()["detail"])
 
     def test_create_scheduled_batch_task_rejects_invalid_window_time_format(self) -> None:
         identity_id = self._create_identity(with_imap=False)
@@ -3679,6 +3714,7 @@ class ApiEndpointTests(unittest.TestCase):
         )
         self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
         professor_id = professor_response.json()["id"]
+        scheduled_date = (datetime.now().date() + timedelta(days=1)).isoformat()
 
         response = self.client.post(
             "/api/batch-tasks",
@@ -3688,7 +3724,7 @@ class ApiEndpointTests(unittest.TestCase):
                 "name": "模板批量任务",
                 "professor_ids": [professor_id],
                 "schedule_type": "scheduled",
-                "scheduled_dates": ["2026-05-08"],
+                "scheduled_dates": [scheduled_date],
                 "window_start_time": "09:00",
                 "window_end_time": "18:00",
                 "emails_per_window": 10,
@@ -3711,6 +3747,38 @@ class ApiEndpointTests(unittest.TestCase):
         items = self.client.get(f"/api/batch-tasks/{task_id}/items")
         self.assertEqual(items.status_code, 200, msg=items.text)
         self.assertEqual(items.json()[0]["status"], "approved")
+
+    def test_approve_batch_draft_rejects_expired_scheduled_batch(self) -> None:
+        batch_task_id, task_id = self._create_expired_scheduled_batch_review_task()
+
+        response = self.client.post(
+            f"/api/email-tasks/{task_id}/approve",
+            json={
+                "subject": "申请与导师交流",
+                "body_text": "老师您好，我是申请人。",
+                "body_html": "<p>老师您好，我是申请人。</p>",
+                "selected_material_ids": [],
+            },
+        )
+
+        self.assertEqual(response.status_code, 400, msg=response.text)
+        self.assertIn("发送窗口已全部过期", response.json()["detail"])
+        items = self.client.get(f"/api/batch-tasks/{batch_task_id}/items")
+        self.assertEqual(items.status_code, 200, msg=items.text)
+        self.assertEqual(items.json()[0]["status"], "review_required")
+
+    def test_resume_scheduled_batch_task_expires_when_window_has_passed(self) -> None:
+        batch_task_id, task_id = self._create_expired_scheduled_batch_review_task(batch_status="paused")
+
+        response = self.client.post(f"/api/batch-tasks/{batch_task_id}/resume")
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        self.assertEqual(response.json()["task"]["status"], "expired")
+        items = self.client.get(f"/api/batch-tasks/{batch_task_id}/items")
+        self.assertEqual(items.status_code, 200, msg=items.text)
+        self.assertEqual(items.json()[0]["status"], "canceled")
+        self.assertEqual(items.json()[0]["cancellation_reason"], "schedule_expired")
+        self.assertEqual(task_id, items.json()[0]["id"])
 
     def test_template_immediate_batch_task_sends_items_on_create(self) -> None:
         identity_id = self._create_identity(with_imap=False)
@@ -4462,6 +4530,108 @@ class ApiEndpointTests(unittest.TestCase):
             connection.close()
 
         return task_id
+
+    def _create_expired_scheduled_batch_review_task(
+        self,
+        *,
+        batch_status: str = "running",
+    ) -> tuple[int, int]:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "过期窗口导师",
+                "email": f"expired-window-{datetime.now(UTC).timestamp()}@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Agents",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+        scheduled_date = (datetime.now().date() + timedelta(days=1)).isoformat()
+        expired_date = (datetime.now().date() - timedelta(days=1)).isoformat()
+
+        create_response = self.client.post(
+            "/api/batch-tasks",
+            json={
+                "identity_id": identity_id,
+                "llm_profile_id": llm_id,
+                "name": "过期窗口批量任务",
+                "professor_ids": [professor_id],
+                "schedule_type": "scheduled",
+                "scheduled_dates": [scheduled_date],
+                "window_start_time": "09:00",
+                "window_end_time": "18:00",
+                "emails_per_window": 10,
+                "primary_material_id": None,
+                "email_subject": "申请与{{name}}老师交流",
+                "email_body": "老师您好，我是{{sender_name}}。",
+                "selected_material_ids": None,
+                "outreach_generation_mode": "llm",
+                "outreach_template_subject": None,
+                "outreach_template_body_text": None,
+                "outreach_template_body_html": None,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        batch_task_id = create_response.json()["id"]
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            task_id = connection.execute(
+                """
+                SELECT id
+                FROM email_tasks
+                WHERE batch_task_id = ?
+                """,
+                (batch_task_id,),
+            ).fetchone()[0]
+            connection.execute(
+                """
+                UPDATE batch_tasks
+                SET status = ?,
+                    scheduled_dates = ?
+                WHERE id = ?
+                """,
+                (batch_status, json.dumps([expired_date]), batch_task_id),
+            )
+            connection.execute(
+                """
+                UPDATE email_tasks
+                SET status = ?,
+                    generated_subject = ?,
+                    generated_content_text = ?,
+                    generated_content_html = ?,
+                    approved_subject = ?,
+                    approved_body_text = ?,
+                    approved_body_html = ?,
+                    approved_at = ?
+                WHERE id = ?
+                """,
+                (
+                    "review_required",
+                    "申请与导师交流",
+                    "老师您好，我是申请人。",
+                    "<p>老师您好，我是申请人。</p>",
+                    None,
+                    None,
+                    None,
+                    datetime.now(UTC).isoformat(),
+                    task_id,
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        return batch_task_id, task_id
 
     async def _dispatch_due_tasks(self) -> None:
         from app.core.database import get_session_factory

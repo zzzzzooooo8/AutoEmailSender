@@ -524,7 +524,7 @@ export const MATCH_ANALYSIS_JOB_STATUS_LABELS: Record<
   canceled: '已取消',
 };
 
-export type BatchTaskRuntimeStatus = 'running' | 'paused' | 'stopped' | 'completed';
+export type BatchTaskRuntimeStatus = 'running' | 'paused' | 'stopped' | 'completed' | 'expired';
 export type TaskListView = 'current' | 'trash';
 
 export type WorkspaceTaskStatus =
@@ -541,7 +541,7 @@ export type WorkspaceTaskStatus =
   | 'canceled';
 
 export type WorkspaceTaskStatusLabelKey = WorkspaceTaskStatus;
-export type WorkspaceTaskCancellationReason = 'batch_stopped';
+export type WorkspaceTaskCancellationReason = 'batch_stopped' | 'schedule_expired';
 
 export interface BatchTaskCardDTO {
   id: number;
@@ -829,6 +829,7 @@ export const BATCH_TASK_STATUS_LABELS: Record<BatchTaskRuntimeStatus, string> = 
   paused: '已暂停',
   stopped: '已中止',
   completed: '已完成',
+  expired: '已过期',
 };
 
 export const MATERIAL_TYPE_LABELS: Record<IdentityMaterialType, string> = {

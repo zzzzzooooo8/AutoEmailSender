@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime
+from datetime import date, datetime, time
 
 
 DATE_FORMAT_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -39,3 +39,39 @@ def is_datetime_in_batch_window(
 
     current = now.strftime("%H:%M")
     return window_start_time <= current < window_end_time
+
+
+def has_future_batch_window(
+    now: datetime,
+    *,
+    scheduled_dates: list[str] | None,
+    window_end_time: str | None,
+) -> bool:
+    if not window_end_time:
+        return False
+
+    dates = normalize_scheduled_dates(scheduled_dates)
+    if not dates:
+        return False
+
+    current = now.replace(tzinfo=None)
+    end_clock = time.fromisoformat(window_end_time)
+    for value in dates:
+        if datetime.combine(date.fromisoformat(value), end_clock) > current:
+            return True
+    return False
+
+
+def is_batch_window_expired(
+    now: datetime,
+    *,
+    scheduled_dates: list[str] | None,
+    window_end_time: str | None,
+) -> bool:
+    if not scheduled_dates or not window_end_time:
+        return False
+    return not has_future_batch_window(
+        now,
+        scheduled_dates=scheduled_dates,
+        window_end_time=window_end_time,
+    )
