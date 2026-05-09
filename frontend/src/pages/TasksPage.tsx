@@ -25,7 +25,7 @@ import { useSelectionContext } from "@/context/SelectionContext";
 import { useConfirmDialog } from "@/lib/useConfirmDialog";
 import { safeRecordUserAction } from "@/lib/diagnosticUserActions";
 import { approveAndSend, approveDraft } from "@/lib/api/emailTasksApi";
-import { getWorkspaceThread } from "@/lib/api/workspacesApi";
+import { openWorkspaceThread } from "@/features/workspace/client/openWorkspaceThread";
 import {
   deleteBatchTask,
   listBatchTasks,
@@ -1810,7 +1810,7 @@ const selectedCrawlJobCanReview =
     setBatchReviewThread(null);
     setBatchReviewLoading(true);
     try {
-      const thread = await getWorkspaceThread(
+      const thread = await openWorkspaceThread(
         item.professor_id,
         selectedBatchTask.identity_id,
         selectedBatchTask.llm_profile_id,

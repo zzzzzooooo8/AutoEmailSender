@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TasksPage } from "@/pages/TasksPage";
 import { listBatchTaskItems, listBatchTasks } from "@/lib/api/batchTasksApi";
 import { listMatchAnalysisJobs } from "@/lib/api/matchAnalysisJobsApi";
+import { ensureWorkspaceTask, getWorkspaceThread } from "@/lib/api/workspacesApi";
+import type { WorkspaceThreadDTO } from "@/types";
 
 const mockedUseSelectionContext = vi.hoisted(() => vi.fn());
 
@@ -37,6 +39,11 @@ vi.mock("@/lib/api/matchAnalysisJobsApi", () => ({
   listMatchAnalysisJobs: vi.fn(),
   cancelMatchAnalysisJob: vi.fn(),
   retryFailedMatchAnalysisJob: vi.fn(),
+}));
+
+vi.mock("@/lib/api/workspacesApi", () => ({
+  ensureWorkspaceTask: vi.fn(),
+  getWorkspaceThread: vi.fn(),
 }));
 
 const renderPage = () =>
@@ -163,6 +170,79 @@ const canceledBatchStoppedTaskItem = {
   updated_at: "2026-04-26T11:27:00Z",
 } as const;
 
+const buildWorkspaceThread = (
+  overrides: Partial<WorkspaceThreadDTO["current_task"]> = {},
+): WorkspaceThreadDTO => ({
+  professor: {
+    id: 102,
+    name: "李老师",
+    email: "li@example.edu",
+    title: "副教授",
+    university: "测试大学",
+    school: "软件学院",
+    research_direction: "软件工程",
+    recent_papers: [],
+  },
+  identity: {
+    id: 1,
+    name: "测试身份",
+    profile_name: "测试身份",
+    sender_name: "测试同学",
+    email_address: "sender@example.com",
+  },
+  llm_profile: {
+    id: 2,
+    name: "测试模型",
+    provider: "openai",
+    model_name: "gpt-test",
+  },
+  material_options: [],
+  current_task: {
+    id: 301,
+    source: "batch",
+    batch_task_id: runningTask.id,
+    parent_task_id: null,
+    status: "review_required",
+    cancellation_reason: null,
+    can_continue_manually: false,
+    can_write_follow_up: false,
+    outreach_generation_mode: "llm",
+    outreach_template_subject: "模板主题",
+    outreach_template_body_text: "模板正文",
+    outreach_template_body_html: null,
+    match_score: 76,
+    match_reason: "方向匹配",
+    fit_points: [],
+    risk_points: [],
+    match_keywords: [],
+    generated_subject: "原草稿主题",
+    generated_content_text: "原草稿正文",
+    generated_content_html: "<p>原草稿正文</p>",
+    approved_subject: null,
+    approved_body_text: null,
+    approved_body_html: null,
+    primary_material_id: null,
+    primary_material: null,
+    selected_material_ids: [],
+    approved_at: null,
+    scheduled_at: null,
+    last_send_attempt_at: null,
+    sent_at: null,
+    last_rfc_message_id: null,
+    retry_count: 0,
+    last_error: null,
+    is_replied: false,
+    estimated_prompt_tokens: null,
+    estimated_completion_tokens_upper_bound: null,
+    estimated_total_tokens_upper_bound: null,
+    last_draft_prompt_tokens: null,
+    last_draft_completion_tokens: null,
+    last_draft_total_tokens: null,
+    ...overrides,
+  },
+  messages: [],
+});
+
 describe("TasksPage layout", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -173,6 +253,8 @@ describe("TasksPage layout", () => {
     vi.mocked(listBatchTasks).mockResolvedValue([]);
     vi.mocked(listBatchTaskItems).mockResolvedValue([]);
     vi.mocked(listMatchAnalysisJobs).mockResolvedValue([]);
+    vi.mocked(getWorkspaceThread).mockResolvedValue(buildWorkspaceThread());
+    vi.mocked(ensureWorkspaceTask).mockResolvedValue(buildWorkspaceThread());
   });
 
   it("uses the same wide page shell as the other primary pages", async () => {
@@ -313,5 +395,43 @@ describe("TasksPage layout", () => {
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "批量任务详情" })).not.toBeInTheDocument();
     });
+  });
+
+  it("bootstraps a fresh manual workspace task before reviewing an expired batch draft", async () => {
+    vi.mocked(listBatchTasks).mockResolvedValue([runningTask]);
+    vi.mocked(listBatchTaskItems).mockResolvedValue([pendingTaskItem]);
+    vi.mocked(getWorkspaceThread).mockResolvedValueOnce(
+      buildWorkspaceThread({
+        id: 701,
+        status: "canceled",
+        cancellation_reason: "schedule_expired",
+        generated_subject: "过期草稿主题",
+      }),
+    );
+    vi.mocked(ensureWorkspaceTask).mockResolvedValueOnce(
+      buildWorkspaceThread({
+        id: 802,
+        source: "manual",
+        batch_task_id: null,
+        parent_task_id: 701,
+        status: "matched",
+        cancellation_reason: null,
+        generated_subject: "新手动草稿主题",
+      }),
+    );
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "查看详情" }));
+    fireEvent.click(await screen.findByRole("button", { name: "审核草稿" }));
+
+    await waitFor(() => {
+      expect(getWorkspaceThread).toHaveBeenCalledWith(102, 1, 2);
+      expect(ensureWorkspaceTask).toHaveBeenCalledWith(102, 1, 2);
+    });
+    expect(
+      screen.getByRole("textbox", { name: "邮件主题" }),
+    ).toHaveTextContent("新手动草稿主题");
+    expect(screen.queryByText("过期草稿主题")).not.toBeInTheDocument();
   });
 });
