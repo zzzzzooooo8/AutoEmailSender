@@ -310,7 +310,7 @@ describe("CrawlJobCard", () => {
 
     expect(screen.getByRole("button", { name: "恢复" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "删除" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "重启抓取" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重新抓取" })).not.toBeInTheDocument();
   });
 });
 

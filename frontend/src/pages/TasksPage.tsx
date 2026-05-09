@@ -446,7 +446,7 @@ export const CrawlJobCard = ({
               className="ui-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Play className="h-4 w-4" />
-              {retryingCrawlJobId === job.id ? "重启中..." : "重启抓取"}
+              {retryingCrawlJobId === job.id ? "重新抓取中..." : "重新抓取"}
             </button>
             <button
               type="button"
@@ -1551,10 +1551,10 @@ const selectedCrawlJobCanReview =
 
   const handleRetryCrawlJob = async (jobId: number) => {
     const confirmed = await confirm({
-      title: "确认重启抓取任务？",
+      title: "确认重新抓取任务？",
       description:
-        "重启后会清空该任务历史抓取数据（页面与候选导师），并重新加入队列执行。",
-      confirmLabel: "确认重启",
+        "重新抓取会清空该任务历史抓取数据（页面与候选导师），并重新加入队列执行。",
+      confirmLabel: "确认重新抓取",
       cancelLabel: "暂不处理",
     });
     if (!confirmed) {
