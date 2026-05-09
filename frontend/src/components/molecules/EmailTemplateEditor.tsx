@@ -22,6 +22,7 @@ import { FontSize } from "@/components/molecules/tiptap/FontSize";
 import { LineHeight } from "@/components/molecules/tiptap/LineHeight";
 import { FirstLineIndent } from "@/components/molecules/tiptap/FirstLineIndent";
 import { BlockTypography } from "@/components/molecules/tiptap/BlockTypography";
+import { TextColor } from "@/components/molecules/tiptap/TextColor";
 import {
   EmailTable,
   EmailTableCell,
@@ -37,7 +38,7 @@ import { TemplatePlaceholder } from "@/components/molecules/tiptap/TemplatePlace
 import {
   TEMPLATE_PLACEHOLDER_OPTIONS,
   areTemplatePlaceholderHtmlEquivalent,
-  prepareTemplatePlaceholderHtml,
+  prepareTemplateEditorHtml,
   serializeTemplatePlaceholderHtml,
   type TemplatePlaceholderKey,
 } from "@/lib/templatePlaceholders";
@@ -153,11 +154,12 @@ export const EmailTemplateEditor = ({
       TemplatePlaceholder,
       FontFamily,
       FontSize,
+      TextColor,
       LineHeight,
       FirstLineIndent,
       BlockTypography,
     ],
-    content: prepareTemplatePlaceholderHtml(html),
+    content: prepareTemplateEditorHtml(html),
     immediatelyRender: false,
     editorProps: {
       attributes: {
@@ -177,7 +179,7 @@ export const EmailTemplateEditor = ({
   });
 
   useEffect(() => {
-    const preparedHtml = prepareTemplatePlaceholderHtml(html);
+    const preparedHtml = prepareTemplateEditorHtml(html);
     if (editor && !areTemplatePlaceholderHtmlEquivalent(preparedHtml, editor.getHTML())) {
       editor.commands.setContent(preparedHtml, false);
     }

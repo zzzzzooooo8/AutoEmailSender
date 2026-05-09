@@ -10,7 +10,8 @@ export const FontFamily = Extension.create({
         attributes: {
           fontFamily: {
             default: null,
-            parseHTML: (element) => element.style.fontFamily || null,
+            parseHTML: (element) =>
+              element.style.fontFamily || element.getAttribute("face") || null,
             renderHTML: (attributes) =>
               attributes.fontFamily
                 ? { style: `font-family:${attributes.fontFamily}` }

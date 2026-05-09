@@ -25,6 +25,17 @@ describe("richEmail", () => {
     expect(deriveTextFromEmailHtml(html)).toContain("老师您好");
   });
 
+  it("preserves font tags and color attributes for imported html", () => {
+    const html = normalizeEmailHtml(
+      '<p><font face="宋体" color="#333333">老师您好</font></p>',
+    );
+
+    expect(html).toContain("<font");
+    expect(html).toContain('face="宋体"');
+    expect(html).toContain('color="#333333"');
+    expect(deriveTextFromEmailHtml(html)).toBe("老师您好");
+  });
+
   it("preserves imported word heading and paragraph styles", () => {
     const html = normalizeEmailHtml(
       '<h1 style="font-family:SimSun;font-size:16pt;text-align:center">标题</h1><p style="text-indent:2em;line-height:1.5;text-align:right">落款</p>',
