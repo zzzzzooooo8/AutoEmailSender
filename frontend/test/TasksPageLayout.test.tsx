@@ -267,10 +267,7 @@ describe("TasksPage layout", () => {
       .closest(".rounded-2xl") as HTMLElement;
     expect(canceledItem).toBeInTheDocument();
     expect(within(canceledItem).getByText("已取消")).toBeInTheDocument();
-    expect(within(canceledItem).getByRole("link", { name: "去处理" })).toHaveAttribute(
-      "href",
-      "/workspace/105",
-    );
+    expect(within(canceledItem).getByText("批量任务已中止")).toBeInTheDocument();
     expect(within(dialog).getByRole("heading", { name: "正在生成草稿" })).toBeInTheDocument();
     expect(within(dialog).getByText("赵老师")).toBeInTheDocument();
     expect(within(dialog).getByRole("heading", { name: "草稿生成失败" })).toBeInTheDocument();

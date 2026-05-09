@@ -27,7 +27,11 @@ from app.models import (
 )
 from app.schemas.email_task import EmailTaskApprovalRequest, EmailTaskScheduleRequest
 from app.services import llm_runtime, mail_runtime
-from app.services.batch_schedule import is_datetime_in_batch_window
+from app.services.batch_schedule import (
+    has_future_batch_window,
+    is_batch_window_expired,
+    is_datetime_in_batch_window,
+)
 from app.services.mail_runtime import MailAttachment, ReceivedEmail
 from app.services.materials import (
     build_material_download_name,
@@ -111,6 +115,7 @@ async def dispatch_due_tasks_once(
         return 0
 
     async with session_factory() as session:
+        await _expire_overdue_scheduled_batch_tasks(session, local_now)
         sent_counts: dict[int, int] = {}
         task_ids: list[int] = []
         page_size = max(limit, 10)
@@ -120,7 +125,7 @@ async def dispatch_due_tasks_once(
                 (
                     await session.execute(
                         select(EmailTask)
-                        .options(selectinload(EmailTask.batch_task))
+                        .options(selectinload(EmailTask.batch_task).selectinload(BatchTask.email_tasks))
                         .join(BatchTask, EmailTask.batch_task_id == BatchTask.id, isouter=True)
                         .where(
                             EmailTask.status.in_(
@@ -185,6 +190,32 @@ async def dispatch_due_tasks_once(
     return processed
 
 
+async def _expire_overdue_scheduled_batch_tasks(
+    session: AsyncSession,
+    local_now: datetime,
+) -> int:
+    batch_tasks = list(
+        (
+            await session.execute(
+                select(BatchTask)
+                .options(selectinload(BatchTask.email_tasks))
+                .where(
+                    BatchTask.status == BatchTaskStatus.RUNNING.value,
+                    BatchTask.schedule_type == "scheduled",
+                    BatchTask.deleted_at.is_(None),
+                ),
+            )
+        ).scalars().unique()
+    )
+    expired_count = 0
+    for batch_task in batch_tasks:
+        if await expire_batch_task_if_needed(session, batch_task, local_now):
+            expired_count += 1
+    if expired_count > 0:
+        await session.commit()
+    return expired_count
+
+
 def _resolve_dispatch_clocks(
     now: datetime | None,
     local_timezone: tzinfo | None,
@@ -207,6 +238,60 @@ def _batch_task_allows_dispatch(batch_task: BatchTask | None, now: datetime) -> 
         window_start_time=batch_task.window_start_time,
         window_end_time=batch_task.window_end_time,
     )
+
+
+async def expire_batch_task_if_needed(
+    session: AsyncSession,
+    batch_task: BatchTask,
+    local_now: datetime,
+) -> bool:
+    if batch_task.schedule_type != "scheduled":
+        return False
+    if batch_task.status != BatchTaskStatus.RUNNING.value:
+        return False
+    if not is_batch_window_expired(
+        local_now,
+        scheduled_dates=batch_task.scheduled_dates,
+        window_end_time=batch_task.window_end_time,
+    ):
+        return False
+
+    canceled_count = 0
+    now_utc = datetime.now(UTC)
+    for email_task in batch_task.email_tasks:
+        if email_task.status in {
+            EmailTaskStatus.DISCOVERED.value,
+            EmailTaskStatus.MATCHED.value,
+            EmailTaskStatus.GENERATING_DRAFT.value,
+            EmailTaskStatus.DRAFT_FAILED.value,
+            EmailTaskStatus.REVIEW_REQUIRED.value,
+            EmailTaskStatus.APPROVED.value,
+            EmailTaskStatus.SCHEDULED.value,
+        }:
+            email_task.status = EmailTaskStatus.CANCELED.value
+            email_task.cancellation_reason = EmailTaskCancellationReason.SCHEDULE_EXPIRED.value
+            email_task.draft_generation_previous_status = None
+            email_task.updated_at = now_utc
+            canceled_count += 1
+
+    if canceled_count == 0:
+        return False
+
+    batch_task.status = BatchTaskStatus.EXPIRED.value
+    batch_task.updated_at = now_utc
+    await record_operation_log(
+        session,
+        category="email",
+        event_name="batch_task.expired",
+        entity_type="batch_task",
+        entity_id=str(batch_task.id),
+        metadata={
+            "canceled_count": canceled_count,
+            "scheduled_dates": batch_task.scheduled_dates,
+            "window_end_time": batch_task.window_end_time,
+        },
+    )
+    return True
 
 
 async def _batch_task_sent_count_on_date(
@@ -832,6 +917,7 @@ async def approve_and_send_task(
         if not task:
             raise ValueError(f"EmailTask {task_id} 不存在")
         _ensure_task_allows_legacy_manual_actions(task)
+        _ensure_batch_task_has_future_window(task)
         await _snapshot_approval(session, task, payload)
         task.status = EmailTaskStatus.APPROVED.value
         await _record_email_task_log(
@@ -859,6 +945,7 @@ async def approve_draft_task(
         if not task:
             raise ValueError(f"EmailTask {task_id} 不存在")
         _ensure_task_allows_legacy_manual_actions(task)
+        _ensure_batch_task_has_future_window(task)
         await _snapshot_approval(session, task, payload)
         task.status = EmailTaskStatus.APPROVED.value
         task.scheduled_at = None
@@ -882,6 +969,7 @@ async def approve_and_schedule_task(
         if not task:
             raise ValueError(f"EmailTask {task_id} 不存在")
         _ensure_task_allows_legacy_manual_actions(task)
+        _ensure_batch_task_has_future_window(task)
         await _snapshot_approval(session, task, payload)
         task.status = EmailTaskStatus.SCHEDULED.value
         task.scheduled_at = payload.scheduled_at.astimezone(UTC)
@@ -1352,11 +1440,28 @@ def _restore_or_cancel_interrupted_draft_generation(
     resolved_batch_status = batch_status or (task.batch_task.status if task.batch_task else None)
     if resolved_batch_status == BatchTaskStatus.PAUSED.value:
         task.status = task.draft_generation_previous_status or EmailTaskStatus.DISCOVERED.value
+    elif resolved_batch_status == BatchTaskStatus.EXPIRED.value:
+        task.status = EmailTaskStatus.CANCELED.value
+        task.cancellation_reason = EmailTaskCancellationReason.SCHEDULE_EXPIRED.value
     else:
         task.status = EmailTaskStatus.CANCELED.value
         task.cancellation_reason = EmailTaskCancellationReason.BATCH_STOPPED.value
     task.draft_generation_previous_status = None
     task.updated_at = datetime.now(UTC)
+
+
+def _ensure_batch_task_has_future_window(task: EmailTask) -> None:
+    batch_task = task.batch_task
+    if batch_task is None or batch_task.schedule_type != "scheduled":
+        return
+
+    local_now = datetime.now().astimezone()
+    if batch_task.status == BatchTaskStatus.EXPIRED.value or not has_future_batch_window(
+        local_now,
+        scheduled_dates=batch_task.scheduled_dates,
+        window_end_time=batch_task.window_end_time,
+    ):
+        raise ValueError("当前批量任务的发送窗口已全部过期，请重新安排发送时间后再审核发送。")
 
 
 def _resolve_task_outreach_config(task: EmailTask):

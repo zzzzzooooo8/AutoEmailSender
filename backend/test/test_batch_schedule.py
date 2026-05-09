@@ -2,6 +2,8 @@ import unittest
 from datetime import UTC, datetime
 
 from app.services.batch_schedule import (
+    has_future_batch_window,
+    is_batch_window_expired,
     is_datetime_in_batch_window,
     normalize_scheduled_dates,
 )
@@ -50,5 +52,51 @@ class BatchScheduleTest(unittest.TestCase):
                 scheduled_dates=["2026-05-04"],
                 window_start_time="11:00",
                 window_end_time="18:00",
+            ),
+        )
+
+    def test_has_future_batch_window_includes_active_and_future_windows(self) -> None:
+        self.assertTrue(
+            has_future_batch_window(
+                datetime(2026, 5, 4, 10, 30, tzinfo=UTC),
+                scheduled_dates=["2026-05-04"],
+                window_end_time="18:00",
+            ),
+        )
+        self.assertTrue(
+            has_future_batch_window(
+                datetime(2026, 5, 4, 20, 0, tzinfo=UTC),
+                scheduled_dates=["2026-05-05"],
+                window_end_time="09:00",
+            ),
+        )
+        self.assertFalse(
+            has_future_batch_window(
+                datetime(2026, 5, 4, 18, 0, tzinfo=UTC),
+                scheduled_dates=["2026-05-04"],
+                window_end_time="18:00",
+            ),
+        )
+
+    def test_is_batch_window_expired_only_after_last_window_end(self) -> None:
+        self.assertFalse(
+            is_batch_window_expired(
+                datetime(2026, 5, 4, 17, 59, tzinfo=UTC),
+                scheduled_dates=["2026-05-04"],
+                window_end_time="18:00",
+            ),
+        )
+        self.assertFalse(
+            is_batch_window_expired(
+                datetime(2026, 5, 4, 20, 0, tzinfo=UTC),
+                scheduled_dates=["2026-05-04", "2026-05-05"],
+                window_end_time="09:00",
+            ),
+        )
+        self.assertTrue(
+            is_batch_window_expired(
+                datetime(2026, 5, 5, 9, 0, tzinfo=UTC),
+                scheduled_dates=["2026-05-04", "2026-05-05"],
+                window_end_time="09:00",
             ),
         )

@@ -7,10 +7,23 @@ export type BatchPendingItemAction =
 export const getBatchTaskWaitingSendCount = (task: BatchTaskCardDTO) =>
   task.approved_count + task.scheduled_count;
 
+export const getBatchTaskItemCancellationText = (item: BatchTaskItemDTO) => {
+  if (item.cancellation_reason === "schedule_expired") {
+    return "发送窗口已过期";
+  }
+  if (item.cancellation_reason === "batch_stopped") {
+    return "批量任务已中止";
+  }
+  return null;
+};
+
 export const buildBatchPendingItemAction = (
   item: BatchTaskItemDTO,
   task: BatchTaskCardDTO,
 ): BatchPendingItemAction | null => {
+  if (item.status === "canceled") {
+    return null;
+  }
   if (item.status === "matched") {
     return null;
   }

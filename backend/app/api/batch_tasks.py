@@ -27,7 +27,7 @@ from app.schemas.batch_task import (
     BatchTaskItemRead,
     CreateBatchTaskRequest,
 )
-from app.services.batch_schedule import normalize_scheduled_dates
+from app.services.batch_schedule import has_future_batch_window, normalize_scheduled_dates
 from app.services.materials import material_can_be_primary
 from app.services.operation_logs import record_operation_log
 from app.services.outreach_templates import (
@@ -36,7 +36,7 @@ from app.services.outreach_templates import (
     render_outreach_template,
     resolve_outreach_template_config,
 )
-from app.services.task_runtime import dispatch_email_task
+from app.services.task_runtime import dispatch_email_task, expire_batch_task_if_needed
 
 
 router = APIRouter(prefix="/api/batch-tasks", tags=["batch-tasks"])
@@ -87,6 +87,12 @@ async def create_batch_task(
         _validate_time_window(payload.window_start_time, payload.window_end_time)
         if not payload.emails_per_window or payload.emails_per_window <= 0:
             raise HTTPException(status_code=400, detail="请输入每天发送数量")
+        if not has_future_batch_window(
+            datetime.now().astimezone(),
+            scheduled_dates=scheduled_dates,
+            window_end_time=payload.window_end_time,
+        ):
+            raise HTTPException(status_code=400, detail="当前定时发送窗口已全部过期，请重新选择发送日期或结束时间。")
 
     identity = await session.scalar(
         select(IdentityProfile)
@@ -295,7 +301,9 @@ async def resume_batch_task(
     task = await _get_batch_task(session, task_id)
     task.status = BatchTaskStatus.RUNNING.value
     task.updated_at = datetime.now(UTC)
-    await _record_batch_task_action(session, task, "batch_task.resumed")
+    expired = await expire_batch_task_if_needed(session, task, datetime.now().astimezone())
+    if not expired:
+        await _record_batch_task_action(session, task, "batch_task.resumed")
     await session.commit()
     await session.refresh(task, attribute_names=["email_tasks"])
     return BatchTaskActionResponse(ok=True, task=_serialize_batch_task(task))
@@ -330,6 +338,7 @@ async def stop_batch_task(
 BATCH_TASK_DELETABLE_STATUSES = {
     BatchTaskStatus.STOPPED.value,
     BatchTaskStatus.COMPLETED.value,
+    BatchTaskStatus.EXPIRED.value,
 }
 
 
@@ -465,7 +474,10 @@ def _serialize_batch_task(task: BatchTask) -> BatchTaskCardRead:
     if (
         task.target_count > 0
         and completed_count >= task.target_count
-        and task.status != BatchTaskStatus.STOPPED.value
+        and task.status not in {
+            BatchTaskStatus.STOPPED.value,
+            BatchTaskStatus.EXPIRED.value,
+        }
     ):
         status = BatchTaskStatus.COMPLETED.value
 

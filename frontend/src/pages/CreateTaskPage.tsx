@@ -15,7 +15,10 @@ import { textToEmailHtml } from '@/lib/richEmail';
 import { useSelectionContext } from '@/context/SelectionContext';
 import { getTaskModeCopy } from '@/features/create-task/client/taskCopy';
 import { buildBatchCreateConfirmDescription } from '@/features/create-task/client/batchCreateConfirmDescription';
-import { normalizeScheduledDates } from '@/features/create-task/client/scheduleDates';
+import {
+  hasFutureScheduleWindow,
+  normalizeScheduledDates,
+} from '@/features/create-task/client/scheduleDates';
 import { useConfirmDialog } from '@/lib/useConfirmDialog';
 import {
   MATERIAL_TYPE_LABELS,
@@ -207,6 +210,14 @@ export const CreateTaskPage = () => {
     }
     if (scheduleType === 'scheduled' && (!startTime || !endTime || !emailsPerWindow)) {
       validationErrors.push('定时发送需要填写发送时间窗口和窗口内发送数量');
+    }
+    if (
+      scheduleType === 'scheduled' &&
+      endTime &&
+      normalizedScheduledDates.length > 0 &&
+      !hasFutureScheduleWindow(normalizedScheduledDates, endTime)
+    ) {
+      validationErrors.push('当前定时发送窗口已全部过期，请重新选择发送日期或结束时间');
     }
     if (taskMode === 'template' && !templateReady) {
       validationErrors.push('直接套用模板需要填写纯文本正文或 HTML 正文');
