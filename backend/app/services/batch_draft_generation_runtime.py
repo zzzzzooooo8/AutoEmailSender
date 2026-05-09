@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import AsyncIterator
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
@@ -120,9 +120,20 @@ async def _claim_queued_llm_drafts(
         for task in candidates:
             if task.batch_task_id is None:
                 continue
-            task.draft_generation_previous_status = task.status
-            task.status = EmailTaskStatus.GENERATING_DRAFT.value
-            task.updated_at = now
+            claim_result = await session.execute(
+                update(EmailTask)
+                .where(
+                    EmailTask.id == task.id,
+                    EmailTask.status == task.status,
+                )
+                .values(
+                    draft_generation_previous_status=task.status,
+                    status=EmailTaskStatus.GENERATING_DRAFT.value,
+                    updated_at=now,
+                ),
+            )
+            if claim_result.rowcount != 1:
+                continue
             claimed.append((task.id, task.batch_task_id))
         await session.commit()
         return claimed

@@ -320,6 +320,7 @@ async def stop_batch_task(
     task.updated_at = datetime.now(UTC)
     for email_task in task.email_tasks:
         if email_task.status not in {
+            EmailTaskStatus.SENDING.value,
             EmailTaskStatus.SENT.value,
             EmailTaskStatus.REPLY_DETECTED.value,
             EmailTaskStatus.SEND_FAILED.value,

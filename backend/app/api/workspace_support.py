@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 from fastapi import HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -29,6 +30,7 @@ from app.services import llm_runtime
 from app.services.mail_runtime import strip_quoted_reply_html, strip_quoted_reply_text
 from app.services.operation_logs import record_operation_log
 from app.services.outreach_templates import get_identity_sender_name, resolve_outreach_template_config
+from app.services.task_runtime import _create_manual_child_task
 
 
 async def build_workspace_thread(
@@ -190,18 +192,22 @@ async def ensure_workspace_task(
     professor = await _get_professor(session, professor_id)
     identity = await _get_identity(session, identity_id)
     await _get_llm_profile(session, llm_profile_id)
+    professor_pk = professor.id
+    identity_pk = identity.id
 
-    current_task = await _get_latest_email_task(session, professor.id, identity.id, llm_profile_id)
+    current_task = await _get_latest_email_task(session, professor_pk, identity_pk, llm_profile_id)
     if current_task is not None:
+        if _should_resume_workspace_task(current_task):
+            return await _create_workspace_resume_task(session, current_task)
         return current_task
 
     snapshot = resolve_outreach_template_config(identity)
     task = EmailTask(
         source="manual",
         batch_task_id=None,
-        identity_id=identity.id,
+        identity_id=identity_pk,
         llm_profile_id=llm_profile_id,
-        professor_id=professor.id,
+        professor_id=professor_pk,
         primary_material_id=identity.current_primary_material_id,
         outreach_generation_mode=snapshot.generation_mode,
         outreach_template_subject=_normalize_nullable_text(snapshot.subject_template),
@@ -213,7 +219,14 @@ async def ensure_workspace_task(
         updated_at=datetime.now(UTC),
     )
     session.add(task)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError:
+        await session.rollback()
+        existing_task = await _get_latest_email_task(session, professor_pk, identity_pk, llm_profile_id)
+        if existing_task is not None:
+            return existing_task
+        raise
     await record_operation_log(
         session,
         category="email",
@@ -231,6 +244,39 @@ async def ensure_workspace_task(
     await session.commit()
     await session.refresh(task)
     return task
+
+async def _create_workspace_resume_task(
+    session: AsyncSession,
+    task: EmailTask,
+) -> EmailTask:
+    professor_id = task.professor_id
+    identity_id = task.identity_id
+    llm_profile_id = task.llm_profile_id
+    resumed_task = _create_manual_child_task(task, reuse_existing_draft=True)
+    session.add(resumed_task)
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        await session.rollback()
+        existing_task = await _get_latest_email_task(session, professor_id, identity_id, llm_profile_id)
+        if existing_task is not None:
+            return existing_task
+        raise ValueError("该工作区已经存在可继续编辑的手动任务") from exc
+
+    await record_operation_log(
+        session,
+        category="email",
+        event_name="email_task.continued_manually",
+        entity_type="email_task",
+        entity_id=str(resumed_task.id),
+        metadata={
+            "parent_task_id": task.id,
+            "workspace_resume_reason": task.cancellation_reason,
+        },
+    )
+    await session.commit()
+    await session.refresh(resumed_task)
+    return resumed_task
 
 
 async def _get_professor(session: AsyncSession, professor_id: int) -> Professor:
@@ -369,4 +415,11 @@ def _can_write_follow_up(task: EmailTask | None) -> bool:
             EmailTaskStatus.SENT.value,
             EmailTaskStatus.REPLY_DETECTED.value,
         }
+    )
+
+def _should_resume_workspace_task(task: EmailTask | None) -> bool:
+    return bool(
+        task is not None
+        and task.status == EmailTaskStatus.CANCELED.value
+        and task.cancellation_reason == EmailTaskCancellationReason.SCHEDULE_EXPIRED.value
     )

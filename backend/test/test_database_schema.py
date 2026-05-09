@@ -14,7 +14,7 @@ from test.migrated_database import create_migrated_sqlite_database
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "c6d7e8f9a012"
+HEAD_REVISION = "d0f1a2b3c4d5"
 LEGACY_RUNTIME_REVISION = "7a1d5e42c9bd"
 
 
@@ -310,6 +310,69 @@ class DatabaseSchemaTests(unittest.TestCase):
         connection.close()
 
         self.assertEqual(version, HEAD_REVISION)
+
+    def test_concurrency_guard_migration_cleans_existing_duplicates(self) -> None:
+        legacy_db_path = Path(self.temp_dir.name) / "concurrency_guard_duplicates.db"
+        env = os.environ.copy()
+        env["DATABASE_URL"] = f"sqlite+aiosqlite:///{legacy_db_path.as_posix()}"
+
+        self._run_alembic(env, "upgrade", "c6d7e8f9a012")
+        connection = sqlite3.connect(legacy_db_path)
+        connection.execute("PRAGMA foreign_keys = ON")
+        try:
+            identity_id = self._insert_identity_into(connection, email_address="duplicate-identity@example.com")
+            llm_profile_id = self._insert_llm_profile_into(connection, name="重复清理模型")
+            professor_id = self._insert_professor_into(connection, "duplicate-professor@example.edu")
+            first_task_id = self._insert_workspace_root_task_into(connection, identity_id, llm_profile_id, professor_id)
+            second_task_id = self._insert_workspace_root_task_into(connection, identity_id, llm_profile_id, professor_id)
+            self._insert_email_log_into(
+                connection,
+                first_task_id,
+                identity_id,
+                llm_profile_id,
+                professor_id,
+                rfc_message_id="<duplicate@example.edu>",
+            )
+            self._insert_email_log_into(
+                connection,
+                second_task_id,
+                identity_id,
+                llm_profile_id,
+                professor_id,
+                rfc_message_id="<duplicate@example.edu>",
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        self._run_alembic(env, "upgrade", "head")
+
+        connection = sqlite3.connect(legacy_db_path)
+        try:
+            version = connection.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+            root_count = connection.execute(
+                """
+                SELECT COUNT(*)
+                FROM email_tasks
+                WHERE source = 'manual'
+                  AND batch_task_id IS NULL
+                  AND parent_task_id IS NULL
+                  AND professor_id = ?
+                  AND identity_id = ?
+                  AND llm_profile_id = ?
+                """,
+                (professor_id, identity_id, llm_profile_id),
+            ).fetchone()[0]
+            log_count = connection.execute(
+                "SELECT COUNT(*) FROM email_logs WHERE rfc_message_id = ?",
+                ("<duplicate@example.edu>",),
+            ).fetchone()[0]
+        finally:
+            connection.close()
+
+        self.assertEqual(version, HEAD_REVISION)
+        self.assertEqual(root_count, 1)
+        self.assertEqual(log_count, 1)
 
     def test_runtime_code_has_no_mail_delivery_mode_residue(self) -> None:
         banned_terms = [
@@ -911,7 +974,11 @@ class DatabaseSchemaTests(unittest.TestCase):
         return list(raw_value)
 
     def _insert_identity(self) -> int:
-        cursor = self.connection.execute(
+        return self._insert_identity_into(self.connection, email_address="identity-default@example.com")
+
+    @staticmethod
+    def _insert_identity_into(connection: sqlite3.Connection, *, email_address: str) -> int:
+        cursor = connection.execute(
             """
             INSERT INTO identity_profiles (
                 name,
@@ -928,16 +995,20 @@ class DatabaseSchemaTests(unittest.TestCase):
                 "默认身份",
                 "默认身份",
                 "默认发件人",
-                "identity-default@example.com",
+                email_address,
                 "smtp.example.com",
-                "identity-default@example.com",
+                email_address,
                 "secret",
             ),
         )
         return int(cursor.lastrowid)
 
     def _insert_llm_profile(self) -> int:
-        cursor = self.connection.execute(
+        return self._insert_llm_profile_into(self.connection, name="默认模型")
+
+    @staticmethod
+    def _insert_llm_profile_into(connection: sqlite3.Connection, *, name: str) -> int:
+        cursor = connection.execute(
             """
             INSERT INTO llm_profiles (
                 name,
@@ -948,7 +1019,7 @@ class DatabaseSchemaTests(unittest.TestCase):
             VALUES (?, ?, ?, ?)
             """,
             (
-                "默认模型",
+                name,
                 "openai",
                 "sk-test-key",
                 "gpt-4o-mini",
@@ -957,12 +1028,66 @@ class DatabaseSchemaTests(unittest.TestCase):
         return int(cursor.lastrowid)
 
     def _insert_professor(self, email: str) -> int:
-        cursor = self.connection.execute(
+        return self._insert_professor_into(self.connection, email)
+
+    @staticmethod
+    def _insert_professor_into(connection: sqlite3.Connection, email: str) -> int:
+        cursor = connection.execute(
             """
             INSERT INTO professors (name, email, research_direction, crawl_status)
             VALUES (?, ?, ?, ?)
             """,
             ("王老师", email, "知识图谱与大模型", "discovered"),
+        )
+        return int(cursor.lastrowid)
+
+    @staticmethod
+    def _insert_workspace_root_task_into(
+        connection: sqlite3.Connection,
+        identity_id: int,
+        llm_profile_id: int,
+        professor_id: int,
+    ) -> int:
+        cursor = connection.execute(
+            """
+            INSERT INTO email_tasks (
+                source,
+                identity_id,
+                llm_profile_id,
+                professor_id,
+                status,
+                selected_material_ids
+            )
+            VALUES ('manual', ?, ?, ?, 'discovered', ?)
+            """,
+            (identity_id, llm_profile_id, professor_id, json.dumps([])),
+        )
+        return int(cursor.lastrowid)
+
+    @staticmethod
+    def _insert_email_log_into(
+        connection: sqlite3.Connection,
+        email_task_id: int,
+        identity_id: int,
+        llm_profile_id: int,
+        professor_id: int,
+        *,
+        rfc_message_id: str,
+    ) -> int:
+        cursor = connection.execute(
+            """
+            INSERT INTO email_logs (
+                email_task_id,
+                identity_id,
+                llm_profile_id,
+                professor_id,
+                direction,
+                content,
+                rfc_message_id
+            )
+            VALUES (?, ?, ?, ?, 'sent', 'hello', ?)
+            """,
+            (email_task_id, identity_id, llm_profile_id, professor_id, rfc_message_id),
         )
         return int(cursor.lastrowid)
 

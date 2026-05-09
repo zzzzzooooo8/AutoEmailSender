@@ -536,6 +536,7 @@ def _map_dashboard_status(tasks: list[EmailTask], sent_count: int = 0) -> str:
     if latest_task.status in {
         EmailTaskStatus.APPROVED.value,
         EmailTaskStatus.SCHEDULED.value,
+        EmailTaskStatus.SENDING.value,
     }:
         return "ready_to_send"
 

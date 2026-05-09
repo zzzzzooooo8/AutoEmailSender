@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -26,6 +26,7 @@ class EmailTaskStatus(StrEnum):
     REVIEW_REQUIRED = "review_required"
     APPROVED = "approved"
     SCHEDULED = "scheduled"
+    SENDING = "sending"
     SENT = "sent"
     SEND_FAILED = "send_failed"
     REPLY_DETECTED = "reply_detected"
@@ -46,6 +47,14 @@ class EmailTask(Base):
     __tablename__ = "email_tasks"
     __table_args__ = (
         UniqueConstraint("parent_task_id", name="uq_email_tasks_parent_task_id"),
+        Index(
+            "uq_email_tasks_workspace_task",
+            "professor_id",
+            "identity_id",
+            "llm_profile_id",
+            unique=True,
+            sqlite_where=text("source = 'manual' AND batch_task_id IS NULL AND parent_task_id IS NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

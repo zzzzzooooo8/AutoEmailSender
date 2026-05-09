@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.models import (
     Base,
+    AppSetting,
     BatchTask,
     BatchTaskStatus,
     EmailTask,
@@ -76,6 +77,38 @@ class BatchDraftGenerationRuntimeTests(unittest.TestCase):
 
         self.assertEqual(processed, 2)
         self.assertEqual(max_seen, 1)
+
+    def test_run_queued_batch_drafts_claims_task_before_generation(self) -> None:
+        self._run_async(self._create_batch_with_tasks([EmailTaskStatus.DISCOVERED.value]))
+
+        async def fake_generate(**kwargs):
+            await asyncio.sleep(0.05)
+            return self._build_draft_generation_result()
+
+        async def run_twice() -> list[int]:
+            return list(
+                await asyncio.gather(
+                    run_queued_batch_drafts_once(
+                        self.session_factory,
+                        concurrency=1,
+                        coordinator=BatchDraftGenerationCoordinator(),
+                    ),
+                    run_queued_batch_drafts_once(
+                        self.session_factory,
+                        concurrency=1,
+                        coordinator=BatchDraftGenerationCoordinator(),
+                    ),
+                ),
+            )
+
+        with patch(
+            "app.services.task_runtime.llm_runtime.generate_draft_content",
+            new=AsyncMock(side_effect=fake_generate),
+        ) as mocked_generate:
+            processed_counts = self._run_async(run_twice())
+
+        self.assertEqual(sum(processed_counts), 1)
+        mocked_generate.assert_awaited_once()
 
     def test_recover_stale_generating_draft_restores_previous_status(self) -> None:
         task_ids = self._run_async(
@@ -159,6 +192,7 @@ class BatchDraftGenerationRuntimeTests(unittest.TestCase):
         updated_at: datetime | None = None,
     ) -> list[int]:
         async with self.session_factory() as session:
+            session.add(AppSetting(id=1))
             identity = IdentityProfile(
                 name="测试身份",
                 profile_name="测试身份",

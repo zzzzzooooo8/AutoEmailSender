@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import tempfile
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
@@ -153,6 +153,70 @@ class BatchTaskDispatchScheduleTests(unittest.TestCase):
             self._run_async(dispatch_email_task(self.session_factory, task_id))
 
         self.assertEqual(self._run_async(self._get_task_status(task_id)), EmailTaskStatus.REVIEW_REQUIRED.value)
+        mocked_send.assert_not_awaited()
+
+    def test_dispatch_email_task_claims_task_before_sending(self) -> None:
+        task_id = self._run_async(self._create_manual_approved_task())
+
+        async def delayed_send(**_kwargs):
+            await asyncio.sleep(0.05)
+            return self._build_send_result()
+
+        async def dispatch_twice() -> None:
+            await asyncio.gather(
+                dispatch_email_task(self.session_factory, task_id),
+                dispatch_email_task(self.session_factory, task_id),
+            )
+
+        with patch(
+            "app.services.task_runtime.mail_runtime.send_email",
+            AsyncMock(side_effect=delayed_send),
+        ) as mocked_send:
+            self._run_async(dispatch_twice())
+
+        self.assertEqual(self._run_async(self._get_task_status(task_id)), EmailTaskStatus.SENT.value)
+        mocked_send.assert_awaited_once()
+
+    def test_dispatch_due_tasks_recovers_stale_sending_task(self) -> None:
+        task_id = self._run_async(self._create_manual_approved_task())
+        now = datetime(2026, 5, 4, 10, 0, tzinfo=UTC)
+        self._run_async(self._set_task_sending(task_id, now - timedelta(minutes=45)))
+
+        with patch(
+            "app.services.task_runtime.mail_runtime.send_email",
+            AsyncMock(return_value=self._build_send_result()),
+        ) as mocked_send:
+            processed = self._run_async(
+                dispatch_due_tasks_once(
+                    self.session_factory,
+                    now=now,
+                    local_timezone=UTC,
+                ),
+            )
+
+        self.assertEqual(processed, 1)
+        self.assertEqual(self._run_async(self._get_task_status(task_id)), EmailTaskStatus.SENT.value)
+        mocked_send.assert_awaited_once()
+
+    def test_dispatch_due_tasks_keeps_recent_sending_task_claimed(self) -> None:
+        task_id = self._run_async(self._create_manual_approved_task())
+        now = datetime(2026, 5, 4, 10, 0, tzinfo=UTC)
+        self._run_async(self._set_task_sending(task_id, now - timedelta(minutes=5)))
+
+        with patch(
+            "app.services.task_runtime.mail_runtime.send_email",
+            AsyncMock(return_value=self._build_send_result()),
+        ) as mocked_send:
+            processed = self._run_async(
+                dispatch_due_tasks_once(
+                    self.session_factory,
+                    now=now,
+                    local_timezone=UTC,
+                ),
+            )
+
+        self.assertEqual(processed, 0)
+        self.assertEqual(self._run_async(self._get_task_status(task_id)), EmailTaskStatus.SENDING.value)
         mocked_send.assert_not_awaited()
 
     def test_dispatch_due_tasks_does_not_let_blocked_scheduled_task_consume_limit(self) -> None:
@@ -778,6 +842,15 @@ class BatchTaskDispatchScheduleTests(unittest.TestCase):
             assert task is not None
             task.status = status
             task.updated_at = datetime.now(UTC)
+            await session.commit()
+
+    async def _set_task_sending(self, task_id: int, last_send_attempt_at: datetime) -> None:
+        async with self.session_factory() as session:
+            task = await session.get(EmailTask, task_id)
+            assert task is not None
+            task.status = EmailTaskStatus.SENDING.value
+            task.last_send_attempt_at = last_send_attempt_at
+            task.updated_at = last_send_attempt_at
             await session.commit()
 
     def _build_email_task(

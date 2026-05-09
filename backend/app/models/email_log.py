@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String, Text, text
+from sqlalchemy import JSON, DateTime, ForeignKey, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -24,6 +24,9 @@ class EmailDirection(StrEnum):
 
 class EmailLog(Base):
     __tablename__ = "email_logs"
+    __table_args__ = (
+        UniqueConstraint("rfc_message_id", name="uq_email_logs_rfc_message_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     email_task_id: Mapped[int | None] = mapped_column(
