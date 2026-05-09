@@ -39,6 +39,22 @@ class TemplateAnchorRewriteTests(unittest.TestCase):
         self.assertEqual(segment.anchors[0].text, "[[PH_1]]")
         self.assertEqual(segment.anchors[0].locked_placeholders, [{"token": "[[PH_1]]", "original": "{{name}}"}])
 
+    def test_build_anchored_document_does_not_anchor_plain_inline_style(self) -> None:
+        document = build_template_run_document(
+            '<p style="font-family:SimSun;font-size:12pt;color:#000000">'
+            '<span style="font-family:SimSun">尊敬的</span>'
+            '<span style="font-family:SimSun">{{name}}</span>'
+            '<span style="font-family:SimSun">教授：</span>'
+            "</p>",
+        )
+
+        anchored = build_anchored_template_document(document)
+        segment = anchored.segments[0]
+
+        self.assertEqual(segment.rewrite_text, "尊敬的[[A1]]教授：")
+        self.assertEqual(len(segment.anchors), 1)
+        self.assertEqual(segment.anchors[0].text, "[[PH_1]]")
+
     def test_apply_anchored_replacements_preserves_strong_anchor(self) -> None:
         document = build_template_run_document(
             "<p>我是王俊杰，<strong>以专业第一的成绩获得</strong>"
@@ -62,6 +78,59 @@ class TemplateAnchorRewriteTests(unittest.TestCase):
         self.assertIn("推免资格", rendered.html)
         self.assertIn("推免资格 。冒昧来信咨询", rendered.text)
         self.assertNotIn("推免资格冒昧", rendered.text)
+
+    def test_apply_anchored_replacements_preserves_nested_style_bold(self) -> None:
+        document = build_template_run_document(
+            "<p>我是王俊杰，<span style=\"font-weight:bold;font-family:宋体\">"
+            "<font face=\"宋体\">以专业第一的成绩获得</font></span>"
+            "<span style=\"font-weight:bold;font-family:宋体\">"
+            "<font face=\"宋体\">了</font></span>"
+            "<span style=\"font-weight:bold;font-family:宋体\">"
+            "<font face=\"宋体\">推免资格</font></span>。现在联系您。</p>",
+        )
+        anchored = build_anchored_template_document(document)
+
+        self.assertIn("strong", anchored.segments[0].anchors[0].marks)
+        self.assertIn("style", anchored.segments[0].anchors[0].marks)
+
+        rendered = apply_anchored_template_replacements(
+            document,
+            anchored,
+            [
+                {
+                    "segment_id": "seg_1",
+                    "text": "我是王俊杰，[[A1]]。冒昧来信咨询。附件中是我的简历。",
+                },
+            ],
+        )
+
+        self.assertIn("font-weight:bold", rendered.html)
+        self.assertIn("font-family:宋体", rendered.html)
+        self.assertIn("以专业第一的成绩获得", rendered.html)
+        self.assertIn("推免资格", rendered.html)
+        self.assertIn("冒昧来信咨询", rendered.text)
+
+    def test_apply_anchored_replacements_allows_plain_font_style_rewrite(self) -> None:
+        document = build_template_run_document(
+            '<p><font face="宋体" color="#333333">老师您好</font>，我是王俊杰。</p>',
+        )
+        anchored = build_anchored_template_document(document)
+
+        self.assertEqual(anchored.segments[0].rewrite_text, "老师您好，我是王俊杰。")
+        self.assertEqual(anchored.segments[0].anchors, [])
+
+        rendered = apply_anchored_template_replacements(
+            document,
+            anchored,
+            [
+                {
+                    "segment_id": "seg_1",
+                    "text": "老师您好，冒昧来信咨询。",
+                },
+            ],
+        )
+
+        self.assertEqual(rendered.text, "老师您好，冒昧来信咨询。")
 
     def test_apply_anchored_replacements_rejects_missing_anchor(self) -> None:
         document = build_template_run_document("<p>尊敬的{{name}}教授：</p>")

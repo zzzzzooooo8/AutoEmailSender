@@ -11,6 +11,7 @@ from app.services.rich_text import RichTextRenderResult, normalize_email_html
 from app.services.template_run_rewrite import TemplateRun, TemplateRunDocument, TemplateSegment
 
 
+# Plain style marks are rendering metadata, not rewrite-protection anchors.
 SIGNIFICANT_MARKS = {"strong", "emphasis", "underline", "link", "placeholder"}
 PLACEHOLDER_TOKEN_PATTERN = re.compile(r"\[\[PH_\d+\]\]")
 ANCHOR_TOKEN_PATTERN = re.compile(r"\[\[A\d+\]\]")
@@ -217,18 +218,23 @@ def _anchor_html_map(
     anchored_segment: AnchoredTemplateSegment,
 ) -> dict[str, str]:
     run_map = {run.run_id: run for run in segment.runs}
+    segment_container = _find_segment_container(document.nodes[segment.runs[0].node_index])
     html_by_anchor: dict[str, str] = {}
     for anchor in anchored_segment.anchors:
         if anchor.locked_placeholders:
             run = run_map[anchor.source_runs[0]]
-            html_by_anchor[anchor.anchor_id] = _render_placeholder_anchor_html(document, run, anchor)
+            html_by_anchor[anchor.anchor_id] = _render_placeholder_anchor_html(
+                document,
+                run,
+                anchor,
+                segment_container,
+            )
             continue
         html_parts: list[str] = []
         for run_id in anchor.source_runs:
             run = run_map[run_id]
             node = document.nodes[run.node_index]
-            parent = node.parent
-            html_parts.append(str(parent) if parent is not None else escape(str(node)))
+            html_parts.append(_serialize_text_node_html(node, segment_container))
         html_by_anchor[anchor.anchor_id] = "".join(html_parts)
     return html_by_anchor
 
@@ -240,17 +246,39 @@ def _render_placeholder_anchor_html(
     document: TemplateRunDocument,
     run: TemplateRun,
     anchor: TemplateAnchor,
+    segment_container: Tag,
 ) -> str:
     original = anchor.locked_placeholders[0]["original"]
     node = document.nodes[run.node_index]
-    parent = node.parent
-    if (
-        str(node) == original
-        and isinstance(parent, Tag)
-        and parent.name not in SEGMENT_CONTAINER_NAMES
-    ):
-        return str(parent)
+    if str(node) == original:
+        return _serialize_text_node_html(node, segment_container)
     return escape(original)
+
+def _serialize_text_node_html(node: NavigableString, segment_container: Tag) -> str:
+    html = escape(str(node))
+    parent = node.parent
+    while isinstance(parent, Tag) and parent is not segment_container:
+        html = _wrap_tag_html(parent, html)
+        parent = parent.parent
+    return html
+
+def _wrap_tag_html(tag: Tag, inner_html: str) -> str:
+    attrs = _format_tag_attributes(tag)
+    return f"<{tag.name}{attrs}>{inner_html}</{tag.name}>"
+
+def _format_tag_attributes(tag: Tag) -> str:
+    parts: list[str] = []
+    for name, value in tag.attrs.items():
+        if value is None:
+            continue
+        if isinstance(value, (list, tuple)):
+            cleaned = " ".join(str(item).strip() for item in value if str(item).strip())
+        else:
+            cleaned = str(value).strip()
+        if not cleaned:
+            continue
+        parts.append(f' {name}="{escape(cleaned, quote=True)}"')
+    return "".join(parts)
 
 
 def _render_replacement_fragment(text: str, anchor_html: dict[str, str]) -> str:
