@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { EmailTemplateEditor } from "@/components/molecules/EmailTemplateEditor";
+import { prepareTemplateEditorHtml } from "@/lib/templatePlaceholders";
 
 describe("EmailTemplateEditor", () => {
   it("renders the editor and toolbar controls", () => {
@@ -121,6 +122,44 @@ describe("EmailTemplateEditor", () => {
     expect(editor.innerHTML).toContain("font-size: 16pt");
     expect(editor.innerHTML).toContain("line-height: 1.5");
     expect(editor.innerHTML).toContain("text-indent: 2em");
+  });
+
+  it("keeps font tags as editable typography styles in the editor", () => {
+    render(
+      <EmailTemplateEditor
+        label="邮件正文"
+        html='<p><font face="宋体" color="#333333" size="3">老师您好</font></p>'
+        onChange={vi.fn()}
+      />,
+    );
+
+    const editor = screen.getByRole("textbox", { name: "邮件正文" });
+
+    expect(editor.innerHTML).toContain("font-family");
+    expect(editor.innerHTML).toContain("宋体");
+    expect(editor.innerHTML).toContain("font-size");
+    expect(editor.innerHTML).toContain("12pt");
+    expect(editor.innerHTML).toContain("color");
+    expect(editor.innerHTML).toContain("rgb(51, 51, 51)");
+  });
+
+  it("normalizes legacy relative font sizes from font tags and inline styles", () => {
+    const preparedHtml = prepareTemplateEditorHtml(
+      '<p><font face="宋体" color="#333333" size="+1">老师您好</font><span style="font-size:-1">同学你好</span></p>',
+    );
+
+    expect(preparedHtml).toContain("font-size:14pt");
+    expect(preparedHtml).toContain("font-size:10pt");
+    expect(preparedHtml).not.toContain("font-size:+1");
+    expect(preparedHtml).not.toContain("font-size:-1");
+
+    render(
+      <EmailTemplateEditor label="邮件正文" html={preparedHtml} onChange={vi.fn()} />,
+    );
+
+    const editor = screen.getByRole("textbox", { name: "邮件正文" });
+    expect(editor.innerHTML).toContain("font-size: 14pt");
+    expect(editor.innerHTML).toContain("font-size: 10pt");
   });
 
   it("inserts placeholder chips and emits template tokens", () => {

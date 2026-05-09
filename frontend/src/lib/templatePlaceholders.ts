@@ -1,3 +1,8 @@
+import {
+  normalizeFontSizeStyle,
+  normalizeFontSizeValue,
+} from "@/lib/fontSize";
+
 export type TemplatePlaceholderKey =
   | "name"
   | "email"
@@ -82,6 +87,56 @@ export const prepareTemplatePlaceholderHtml = (html: string) =>
     const option = getTemplatePlaceholder(key);
     return `<span data-template-placeholder="${key}">${option?.label ?? key}</span>`;
   });
+
+const convertFontTagsToSpanStyles = (html: string) => {
+  const container = document.createElement("div");
+  container.innerHTML = html;
+
+  container.querySelectorAll("font").forEach((fontElement) => {
+    const span = document.createElement("span");
+    const styleParts: string[] = [];
+    const face = fontElement.getAttribute("face")?.trim();
+    const size = normalizeFontSizeValue(fontElement.getAttribute("size"));
+    const color = fontElement.getAttribute("color")?.trim();
+    const existingStyle = fontElement.getAttribute("style")?.trim();
+
+    if (face) {
+      styleParts.push(`font-family:${face}`);
+    }
+    if (size) {
+      styleParts.push(`font-size:${size}`);
+    }
+    if (color) {
+      styleParts.push(`color:${color}`);
+    }
+    if (existingStyle) {
+      const normalizedStyle = normalizeFontSizeStyle(existingStyle);
+      if (normalizedStyle) {
+        styleParts.push(normalizedStyle.replace(/;+\s*$/, ""));
+      }
+    }
+    if (styleParts.length > 0) {
+      span.setAttribute("style", `${styleParts.join(";")};`);
+    }
+
+    while (fontElement.firstChild) {
+      span.appendChild(fontElement.firstChild);
+    }
+    fontElement.replaceWith(span);
+  });
+
+  container.querySelectorAll<HTMLElement>("[style]").forEach((element) => {
+    const normalizedStyle = normalizeFontSizeStyle(element.getAttribute("style"));
+    if (normalizedStyle) {
+      element.setAttribute("style", normalizedStyle);
+    }
+  });
+
+  return container.innerHTML;
+};
+
+export const prepareTemplateEditorHtml = (html: string) =>
+  prepareTemplatePlaceholderHtml(convertFontTagsToSpanStyles(html));
 
 export const serializeTemplatePlaceholderHtml = (html: string) =>
   html.replace(

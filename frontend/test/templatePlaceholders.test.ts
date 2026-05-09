@@ -8,6 +8,10 @@ import {
   prepareTemplatePlaceholderHtml,
   serializeTemplatePlaceholderHtml,
 } from "@/lib/templatePlaceholders";
+import {
+  normalizeFontSizeStyle,
+  normalizeFontSizeValue,
+} from "@/lib/fontSize";
 
 describe("templatePlaceholders", () => {
   it("finds known placeholders and ignores unknown keys", () => {
@@ -63,5 +67,12 @@ describe("templatePlaceholders", () => {
     expect(chipRule).not.toContain("font-size: 0.8125rem;");
     expect(chipRule).not.toContain("font-weight: 600;");
     expect(chipRule).not.toContain("line-height: 1.45;");
+  });
+
+  it("normalizes legacy relative font sizes to absolute sizes", () => {
+    expect(normalizeFontSizeValue("+1")).toBe("14pt");
+    expect(normalizeFontSizeValue("-1")).toBe("10pt");
+    expect(normalizeFontSizeValue("+4")).toBe("36pt");
+    expect(normalizeFontSizeStyle("font-size:+1;color:#333333")).toBe("font-size:14pt;color:#333333;");
   });
 });
