@@ -218,6 +218,38 @@ class BatchTaskDispatchScheduleTests(unittest.TestCase):
             EmailTaskCancellationReason.SCHEDULE_EXPIRED.value,
         )
 
+    def test_dispatch_due_tasks_expires_batch_without_dispatchable_items(self) -> None:
+        task_id = self._run_async(
+            self._create_batch_task_with_review_required_task(
+                scheduled_dates=["2026-05-04"],
+                emails_per_window=20,
+            ),
+        )
+
+        with patch(
+            "app.services.task_runtime.mail_runtime.send_email",
+            AsyncMock(return_value=self._build_send_result()),
+        ) as mocked_send:
+            processed = self._run_async(
+                dispatch_due_tasks_once(
+                    self.session_factory,
+                    now=datetime(2026, 5, 4, 18, 0, tzinfo=UTC),
+                    local_timezone=UTC,
+                ),
+            )
+
+        self.assertEqual(processed, 0)
+        mocked_send.assert_not_called()
+        self.assertEqual(
+            self._run_async(self._get_batch_task_status_by_email_task_id(task_id)),
+            BatchTaskStatus.EXPIRED.value,
+        )
+        self.assertEqual(self._run_async(self._get_task_status(task_id)), EmailTaskStatus.CANCELED.value)
+        self.assertEqual(
+            self._run_async(self._get_task_cancellation_reason(task_id)),
+            EmailTaskCancellationReason.SCHEDULE_EXPIRED.value,
+        )
+
     def test_dispatch_due_tasks_keeps_batch_running_when_future_window_exists(self) -> None:
         task_id = self._run_async(
             self._create_batch_task_with_approved_task(
@@ -522,6 +554,68 @@ class BatchTaskDispatchScheduleTests(unittest.TestCase):
             session.add_all([batch_task, *tasks])
             await session.commit()
             return tuple(task.id for task in tasks)
+
+    async def _create_batch_task_with_review_required_task(
+        self,
+        *,
+        scheduled_dates: list[str],
+        emails_per_window: int,
+    ) -> int:
+        async with self.session_factory() as session:
+            identity = IdentityProfile(
+                name="测试身份",
+                profile_name="测试身份",
+                sender_name="王同学",
+                email_address=f"sender-review-{datetime.now(UTC).timestamp()}@example.com",
+                smtp_host="smtp.example.com",
+                smtp_port=465,
+                smtp_username="sender@example.com",
+                smtp_password="secret",
+                default_language="zh-CN",
+                outreach_generation_mode="template",
+                outreach_template_subject="申请与{{name}}老师交流",
+                outreach_template_body_text="老师您好，我是{{sender_name}}。",
+                is_default=True,
+            )
+            llm_profile = LLMProfile(
+                name=f"默认模型-review-{datetime.now(UTC).timestamp()}",
+                provider="openai",
+                api_base_url="https://api.example.com/v1",
+                api_key="sk-test-key",
+                model_name="gpt-test",
+                is_default=True,
+            )
+            batch_task = BatchTask(
+                identity=identity,
+                llm_profile=llm_profile,
+                name="待审核定时批量任务",
+                schedule_type="scheduled",
+                window_start_time="09:00",
+                window_end_time="18:00",
+                emails_per_window=emails_per_window,
+                scheduled_dates=scheduled_dates,
+                status=BatchTaskStatus.RUNNING.value,
+                target_count=1,
+            )
+            review_required_task = self._build_email_task(
+                batch_task=batch_task,
+                identity=identity,
+                llm_profile=llm_profile,
+                professor=Professor(
+                    name="待审核导师",
+                    email=f"review-{datetime.now(UTC).timestamp()}@example.edu",
+                    title="Professor",
+                    university="Example University",
+                    school="School of AI",
+                    department="Computer Science",
+                    research_direction="Large language models",
+                    recent_papers=[],
+                ),
+                status=EmailTaskStatus.REVIEW_REQUIRED.value,
+            )
+            session.add_all([batch_task, review_required_task])
+            await session.commit()
+            return review_required_task.id
 
     async def _mark_batch_task_deleted_by_email_task_id(self, email_task_id: int) -> None:
         async with self.session_factory() as session:

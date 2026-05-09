@@ -115,6 +115,7 @@ async def dispatch_due_tasks_once(
         return 0
 
     async with session_factory() as session:
+        await _expire_overdue_scheduled_batch_tasks(session, local_now)
         sent_counts: dict[int, int] = {}
         task_ids: list[int] = []
         page_size = max(limit, 10)
@@ -163,9 +164,6 @@ async def dispatch_due_tasks_once(
                 if len(task_ids) >= limit:
                     break
                 batch_task = task.batch_task
-                if batch_task is not None and await expire_batch_task_if_needed(session, batch_task, local_now):
-                    await session.commit()
-                    continue
                 if not _batch_task_allows_dispatch(batch_task, local_now):
                     continue
                 if (
@@ -190,6 +188,32 @@ async def dispatch_due_tasks_once(
         await dispatch_email_task(session_factory, task_id)
         processed += 1
     return processed
+
+
+async def _expire_overdue_scheduled_batch_tasks(
+    session: AsyncSession,
+    local_now: datetime,
+) -> int:
+    batch_tasks = list(
+        (
+            await session.execute(
+                select(BatchTask)
+                .options(selectinload(BatchTask.email_tasks))
+                .where(
+                    BatchTask.status == BatchTaskStatus.RUNNING.value,
+                    BatchTask.schedule_type == "scheduled",
+                    BatchTask.deleted_at.is_(None),
+                ),
+            )
+        ).scalars().unique()
+    )
+    expired_count = 0
+    for batch_task in batch_tasks:
+        if await expire_batch_task_if_needed(session, batch_task, local_now):
+            expired_count += 1
+    if expired_count > 0:
+        await session.commit()
+    return expired_count
 
 
 def _resolve_dispatch_clocks(
