@@ -222,7 +222,7 @@ export type ProfessorDashboardStatus =
   | 'ready_to_send'
   | 'contacted'
   | 'replied'
-  | 'needs_attention';
+  | 'failed';
 
 export interface ProfessorDTO {
   id: number;

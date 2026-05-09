@@ -311,11 +311,11 @@ describe("HomePage onboarding", () => {
   it("renders six relationship filter options and filters the list through the UI", async () => {
     mockedListProfessors.mockResolvedValue([
       createProfessor(101, "未开始导师", "not_contacted"),
-      createProfessor(102, "待写信导师", "preparing"),
+      createProfessor(102, "准备中导师", "preparing"),
       createProfessor(103, "待发送导师", "ready_to_send"),
       createProfessor(104, "已联系导师", "contacted"),
       createProfessor(105, "已回复导师", "replied"),
-      createProfessor(106, "需处理导师", "needs_attention"),
+      createProfessor(106, "失败导师", "failed"),
     ]);
     mockedUseSelectionContext.mockReturnValue({
       selectedIdentityId: 1,
@@ -336,20 +336,20 @@ describe("HomePage onboarding", () => {
     fireEvent.click(screen.getByRole("button", { name: "状态：全部状态" }));
 
     expect(screen.getByRole("option", { name: "未开始" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "待写信" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "准备中" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "待发送" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "已联系" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "已回复" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "需处理" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "失败" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("option", { name: "已联系" }));
 
     await waitFor(() => {
       expect(screen.queryByText("未开始导师")).not.toBeInTheDocument();
-      expect(screen.queryByText("待写信导师")).not.toBeInTheDocument();
+      expect(screen.queryByText("准备中导师")).not.toBeInTheDocument();
       expect(screen.queryByText("待发送导师")).not.toBeInTheDocument();
       expect(screen.queryByText("已回复导师")).not.toBeInTheDocument();
-      expect(screen.queryByText("需处理导师")).not.toBeInTheDocument();
+      expect(screen.queryByText("失败导师")).not.toBeInTheDocument();
     });
   });
 

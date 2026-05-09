@@ -437,12 +437,15 @@ class ApiEndpointTests(unittest.TestCase):
         professor_cases = [
             ("未联系导师", "dashboard-not-contacted@example.edu", None, "not_contacted"),
             ("准备中导师", "dashboard-preparing@example.edu", "matched", "preparing"),
+            ("生成中导师", "dashboard-generating@example.edu", "generating_draft", "preparing"),
+            ("待审核导师", "dashboard-review@example.edu", "review_required", "preparing"),
             ("approved 导师", "dashboard-approved@example.edu", "approved", "ready_to_send"),
             ("待发送导师", "dashboard-ready@example.edu", "scheduled", "ready_to_send"),
+            ("草稿失败导师", "dashboard-draft-failed@example.edu", "draft_failed", "failed"),
+            ("send_failed 导师", "dashboard-send-failed@example.edu", "send_failed", "failed"),
+            ("已取消导师", "dashboard-canceled@example.edu", "canceled", "not_contacted"),
             ("已联系导师", "dashboard-contacted@example.edu", "sent", "contacted"),
             ("已回复导师", "dashboard-replied@example.edu", "reply_detected", "replied"),
-            ("send_failed 导师", "dashboard-send-failed@example.edu", "send_failed", "needs_attention"),
-            ("需处理导师", "dashboard-needs-attention@example.edu", "canceled", "needs_attention"),
         ]
 
         professor_ids: dict[str, int] = {}
@@ -512,7 +515,7 @@ class ApiEndpointTests(unittest.TestCase):
             self.assertEqual(payload["status"], expected_status)
             self.assertNotIn(
                 payload["status"],
-                {"matched", "scheduled", "sent", "skipped", "send_failed"},
+                {"matched", "scheduled", "sent", "skipped", "send_failed", "needs_attention"},
             )
 
     def test_professor_dashboard_prioritizes_existing_contact_over_follow_up_draft(self) -> None:
@@ -604,6 +607,45 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(replied_response.status_code, 200, msg=replied_response.text)
         replied_professor = next(item for item in replied_response.json() if item["id"] == professor_id)
         self.assertEqual(replied_professor["status"], "replied")
+
+    def test_professor_dashboard_keeps_contacted_when_later_task_is_canceled(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        professor_id = self._create_sent_professor_with_later_task(
+            identity_id=identity_id,
+            llm_id=llm_id,
+            email="contacted-later-canceled@example.edu",
+            later_status="canceled",
+            cancellation_reason="schedule_expired",
+        )
+
+        response = self.client.get(
+            "/api/professors",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        professor = next(item for item in response.json() if item["id"] == professor_id)
+        self.assertEqual(professor["status"], "contacted")
+
+    def test_professor_dashboard_keeps_contacted_when_later_task_fails(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        professor_id = self._create_sent_professor_with_later_task(
+            identity_id=identity_id,
+            llm_id=llm_id,
+            email="contacted-later-failed@example.edu",
+            later_status="send_failed",
+        )
+
+        response = self.client.get(
+            "/api/professors",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        professor = next(item for item in response.json() if item["id"] == professor_id)
+        self.assertEqual(professor["status"], "contacted")
 
     def test_professor_template_download_and_import_file_upserts_existing_records(self) -> None:
         csv_template = self.client.get("/api/professors/template", params={"format": "csv"})
@@ -4373,6 +4415,76 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(generated["current_task"]["status"], "review_required")
         self.assertEqual(generated["current_task"]["generated_subject"], "申请与工作区切换导师老师交流")
         self.assertIn("工作区切换导师老师您好", generated["current_task"]["generated_content_text"])
+
+    def _create_sent_professor_with_later_task(
+        self,
+        *,
+        identity_id: int,
+        llm_id: int,
+        email: str,
+        later_status: str,
+        cancellation_reason: str | None = None,
+    ) -> int:
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "已联系后新任务导师",
+                "email": email,
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of AI",
+                "department": "Computer Science",
+                "research_direction": "Large language models",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        ensure_response = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(ensure_response.status_code, 200, msg=ensure_response.text)
+        parent_task_id = ensure_response.json()["current_task"]["id"]
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            connection.execute(
+                """
+                UPDATE email_tasks
+                SET status = 'sent', sent_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (parent_task_id,),
+            )
+            connection.execute(
+                """
+                INSERT INTO email_logs (
+                    email_task_id, identity_id, llm_profile_id, professor_id,
+                    direction, subject, content, rfc_message_id
+                )
+                VALUES (?, ?, ?, ?, 'sent', 'hello', 'hello body', '<sent@example.edu>')
+                """,
+                (parent_task_id, identity_id, llm_id, professor_id),
+            )
+            connection.execute(
+                """
+                INSERT INTO email_tasks (
+                    source, parent_task_id, identity_id, llm_profile_id,
+                    professor_id, status, cancellation_reason, created_at, updated_at
+                )
+                VALUES ('manual', ?, ?, ?, ?, ?, ?, datetime('now', '+1 minute'), datetime('now', '+1 minute'))
+                """,
+                (parent_task_id, identity_id, llm_id, professor_id, later_status, cancellation_reason),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        return professor_id
 
     def _create_identity(self, *, with_imap: bool) -> int:
         response = self.client.post(

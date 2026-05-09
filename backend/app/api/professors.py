@@ -104,7 +104,10 @@ async def list_professors(
             if professor.id in latest_task_by_professor
             else None,
             sent_count=sent_count_by_professor.get(professor.id, 0),
-            status=_map_dashboard_status(tasks_by_professor.get(professor.id, [])),
+            status=_map_dashboard_status(
+                tasks_by_professor.get(professor.id, []),
+                sent_count_by_professor.get(professor.id, 0),
+            ),
         )
         for professor in professors
     ]
@@ -510,28 +513,38 @@ def _serialize_management_professor(professor: Professor) -> ProfessorManagement
     )
 
 
-def _map_dashboard_status(tasks: list[EmailTask]) -> str:
-    if not tasks:
-        return "not_contacted"
+def _map_dashboard_status(tasks: list[EmailTask], sent_count: int = 0) -> str:
     if any(
         task.is_replied or task.status == EmailTaskStatus.REPLY_DETECTED.value
         for task in tasks
     ):
         return "replied"
 
+    if sent_count > 0 or any(task.status == EmailTaskStatus.SENT.value or task.sent_at for task in tasks):
+        return "contacted"
+
+    if not tasks:
+        return "not_contacted"
+
     latest_task = tasks[0]
     if latest_task.status in {
+        EmailTaskStatus.DRAFT_FAILED.value,
         EmailTaskStatus.SEND_FAILED.value,
-        EmailTaskStatus.CANCELED.value,
     }:
-        return "needs_attention"
-
-    if any(task.status == EmailTaskStatus.SENT.value or task.sent_at for task in tasks):
-        return "contacted"
+        return "failed"
 
     if latest_task.status in {
         EmailTaskStatus.APPROVED.value,
         EmailTaskStatus.SCHEDULED.value,
     }:
         return "ready_to_send"
-    return "preparing"
+
+    if latest_task.status in {
+        EmailTaskStatus.DISCOVERED.value,
+        EmailTaskStatus.MATCHED.value,
+        EmailTaskStatus.GENERATING_DRAFT.value,
+        EmailTaskStatus.REVIEW_REQUIRED.value,
+    }:
+        return "preparing"
+
+    return "not_contacted"

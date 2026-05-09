@@ -4,11 +4,11 @@ export type ProfessorDashboardStatusFilter = "all" | ProfessorDashboardStatus;
 
 export const PROFESSOR_DASHBOARD_STATUS_LABELS: Record<ProfessorDashboardStatus, string> = {
   not_contacted: "未开始",
-  preparing: "待写信",
+  preparing: "准备中",
   ready_to_send: "待发送",
   contacted: "已联系",
   replied: "已回复",
-  needs_attention: "需处理",
+  failed: "失败",
 };
 
 export const PROFESSOR_DASHBOARD_STATUS_OPTIONS = Object.entries(

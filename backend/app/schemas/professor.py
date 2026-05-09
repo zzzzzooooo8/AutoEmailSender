@@ -14,7 +14,7 @@ ProfessorDashboardStatus = Literal[
     "ready_to_send",
     "contacted",
     "replied",
-    "needs_attention",
+    "failed",
 ]
 
 

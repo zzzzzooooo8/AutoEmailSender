@@ -51,19 +51,20 @@ describe("professor dashboard status helper", () => {
   it("exposes relationship status labels in homepage order", () => {
     expect(PROFESSOR_DASHBOARD_STATUS_LABELS).toEqual({
       not_contacted: "未开始",
-      preparing: "待写信",
+      preparing: "准备中",
       ready_to_send: "待发送",
       contacted: "已联系",
       replied: "已回复",
-      needs_attention: "需处理",
+      failed: "失败",
     });
+    expect(PROFESSOR_DASHBOARD_STATUS_LABELS).not.toHaveProperty("needs_attention");
     expect(PROFESSOR_DASHBOARD_STATUS_OPTIONS).toEqual([
       ["not_contacted", "未开始"],
-      ["preparing", "待写信"],
+      ["preparing", "准备中"],
       ["ready_to_send", "待发送"],
       ["contacted", "已联系"],
       ["replied", "已回复"],
-      ["needs_attention", "需处理"],
+      ["failed", "失败"],
     ]);
   });
 
@@ -74,14 +75,14 @@ describe("professor dashboard status helper", () => {
       createProfessor(3, "ready_to_send"),
       createProfessor(4, "contacted"),
       createProfessor(5, "replied"),
-      createProfessor(6, "needs_attention"),
+      createProfessor(6, "failed"),
     ];
 
     expect(filterProfessorsByDashboardStatus(professors, "all")).toEqual(professors);
     expect(filterProfessorsByDashboardStatus(professors, "preparing")).toEqual([
       professors[1],
     ]);
-    expect(filterProfessorsByDashboardStatus(professors, "needs_attention")).toEqual([
+    expect(filterProfessorsByDashboardStatus(professors, "failed")).toEqual([
       professors[5],
     ]);
   });
