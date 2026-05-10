@@ -11,6 +11,7 @@ from app.services.llm_runtime import (
     SYSTEM_TEMPLATE_ANCHOR_REWRITE_PROMPT,
     build_match_prompt_parts,
     build_draft_prompt,
+    build_draft_rewrite_prompt,
     build_draft_rewrite_preferences,
     build_template_run_rewrite_prompt,
     DraftRewritePreferences,
@@ -819,6 +820,62 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("保留可表达的富文本标记", prompt)
         self.assertIn("加粗", prompt)
         self.assertIn("链接", prompt)
+
+    def test_build_draft_rewrite_prompt_uses_source_blocks_and_style_spans(self) -> None:
+        from app.models import IdentityMaterial, IdentityProfile, Professor
+        from app.services.outreach_templates import build_template_context
+        from app.services.template_draft_rewrite import build_draft_rewrite_document
+
+        identity = IdentityProfile(
+            id=1,
+            name="张三",
+            profile_name="张三",
+            sender_name="张三",
+            email_address="sender@example.com",
+            smtp_host="smtp.example.com",
+            smtp_port=465,
+            smtp_username="sender@example.com",
+            smtp_password="secret",
+            default_language="zh-CN",
+            outreach_generation_mode="llm",
+        )
+        primary_material = IdentityMaterial(
+            id=12,
+            identity_id=1,
+            display_name="简历",
+            file_path="data/materials/resume.txt",
+            original_filename="resume.txt",
+            material_type="resume",
+            extracted_text="我做过信息抽取与智能体相关研究。",
+        )
+        professor = Professor(
+            id=1,
+            name="李老师",
+            email="prof@example.edu",
+            research_direction="Information Extraction",
+        )
+
+        document = build_draft_rewrite_document(
+            '<p><strong>{{name}}</strong>老师，您好，<u>欢迎</u>您。</p>'
+            '<table><tbody><tr><td>原表格</td></tr></tbody></table>',
+            build_template_context(identity, professor),
+        )
+
+        prompt = build_draft_rewrite_prompt(
+            identity=identity,
+            primary_material=primary_material,
+            professor=professor,
+            available_materials=[primary_material],
+            source_blocks=document.blocks,
+            current_match=None,
+            rewrite_preferences=DraftRewritePreferences(),
+        )
+
+        self.assertIn("source_blocks", prompt)
+        self.assertIn("加粗文本：李老师", prompt)
+        self.assertIn("下划线文本：欢迎", prompt)
+        self.assertNotIn("<table", prompt)
+        self.assertNotIn("{{name}}", prompt)
 
     def test_build_template_run_rewrite_prompt_sends_runs_without_template_html(self) -> None:
         from app.models import IdentityMaterial, IdentityProfile, Professor

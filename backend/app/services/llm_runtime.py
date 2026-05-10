@@ -27,6 +27,7 @@ from app.services.template_anchor_rewrite import (
     apply_anchored_template_replacements,
     build_anchored_template_document,
 )
+from app.services.template_draft_rewrite import DraftRewriteSourceBlock
 from app.services.template_run_rewrite import (
     TemplateRunDocument,
     apply_template_run_replacements,
@@ -324,6 +325,22 @@ class DraftGenerationResult(BaseModel):
     suggested_material_ids: list[int] = Field(default_factory=list)
 
 
+class DraftRewriteRun(BaseModel):
+    text: str
+    marks: list[str] = Field(default_factory=list)
+
+
+class DraftRewriteSegmentReplacement(BaseModel):
+    segment_id: str
+    runs: list[DraftRewriteRun] = Field(default_factory=list)
+
+
+class DraftRewriteResult(BaseModel):
+    subject: str
+    replacements: list[DraftRewriteSegmentReplacement] = Field(default_factory=list)
+    suggested_material_ids: list[int] = Field(default_factory=list)
+
+
 class TemplateRunReplacement(BaseModel):
     run_id: str
     text: str
@@ -471,6 +488,7 @@ StructuredResultT = TypeVar(
     MatchAndDraftResult,
     MatchEvaluationResult,
     DraftGenerationResult,
+    DraftRewriteResult,
     TemplateRunRewriteResult,
     TemplateAnchorRewriteResult,
 )
@@ -1309,6 +1327,137 @@ def build_draft_prompt(
         """,
         current_match=current_match,
     )
+
+
+def build_draft_rewrite_prompt(
+    *,
+    identity: IdentityProfile,
+    primary_material: IdentityMaterial | None,
+    professor: Professor,
+    available_materials: list[IdentityMaterial],
+    source_blocks: list[DraftRewriteSourceBlock],
+    current_match: MatchEvaluationResult | None,
+    rewrite_preferences: DraftRewritePreferences | None,
+) -> str:
+    primary_material_text = (primary_material.extracted_text if primary_material else "") or ""
+    if len(primary_material_text) > 5000:
+        primary_material_text = f"{primary_material_text[:5000]}\n...(已截断)"
+
+    preferences = rewrite_preferences or DraftRewritePreferences()
+    payload = {
+        "task": "rewrite_email_draft_blocks",
+        "context": {
+            "identity": {
+                "name": _format_nullable(identity.name),
+                "profile_name": _format_nullable(identity.profile_name),
+                "sender_name": _format_nullable(identity.sender_name),
+                "email_address": _format_nullable(identity.email_address),
+                "default_language": _format_nullable(identity.default_language),
+                "match_threshold": identity.match_threshold,
+            },
+            "professor": {
+                "name": _format_nullable(professor.name),
+                "email": _format_nullable(professor.email),
+                "title": _format_nullable(professor.title),
+                "university": _format_nullable(professor.university),
+                "school": _format_nullable(professor.school),
+                "department": _format_nullable(professor.department),
+                "research_direction": _format_nullable(professor.research_direction),
+                "profile_url": _format_nullable(professor.profile_url),
+                "recent_papers": professor.recent_papers or [],
+            },
+            "student": {
+                "primary_material": {
+                    "id": primary_material.id if primary_material else None,
+                    "name": _format_nullable(primary_material.display_name if primary_material else None),
+                    "type": _format_nullable(primary_material.material_type if primary_material else None),
+                    "extracted_text": primary_material_text,
+                },
+            },
+            "current_match": current_match.model_dump() if current_match is not None else None,
+            "rewrite_preferences": asdict(preferences),
+        },
+        "source_blocks": [
+            _serialize_draft_source_block(block)
+            for block in source_blocks
+        ],
+        "response_schema": {
+            "subject": "邮件主题",
+            "replacements": [
+                {
+                    "segment_id": "seg_1",
+                    "runs": [
+                        {
+                            "text": "改写后的真实文本",
+                            "marks": ["strong"],
+                        },
+                    ],
+                },
+            ],
+            "suggested_material_ids": [material.id for material in available_materials[:1]],
+        },
+        "available_materials": [
+            {
+                "id": material.id,
+                "name": _format_nullable(material.display_name),
+                "type": _format_nullable(material.material_type),
+            }
+            for material in available_materials
+        ],
+        "instructions": [
+            "只返回 JSON 对象。",
+            "只改写 source_blocks 中 type 不是 table 的块。",
+            "table 块必须原样保留，不得出现在 replacements 中。",
+            "replacements 只能引用 source_blocks 中已有的 segment_id。",
+            "每个 runs 项只允许包含 text 和 marks。",
+            "text 必须是真实最终内容，不要再输出任何占位符。",
+            "不要返回 HTML。",
+            "不要返回完整正文。",
+            "不要新增、删除、合并、拆分或重排块。",
+            "marks 只能使用 strong、underline、emphasis。",
+            "suggested_material_ids 只能选择 available_materials 中存在的 id。",
+        ],
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def _serialize_draft_source_block(block: DraftRewriteSourceBlock) -> dict[str, object]:
+    if block.type == "table":
+        return {
+            "segment_id": block.segment_id,
+            "type": block.type,
+            "text": "表格块原样保留，不参与改写。",
+        }
+
+    return {
+        "segment_id": block.segment_id,
+        "type": block.type,
+        "text": block.text,
+        "style_spans": [
+            {
+                "text": span.text,
+                "marks": span.marks,
+            }
+            for span in block.style_spans
+        ],
+        "style_evidence": [
+            evidence
+            for span in block.style_spans
+            for evidence in _describe_style_span(span.text, span.marks)
+        ],
+    }
+
+
+def _describe_style_span(text: str, marks: list[str]) -> list[str]:
+    evidence: list[str] = []
+    for mark in marks:
+        if mark == "strong":
+            evidence.append(f"加粗文本：{text}")
+        elif mark == "underline":
+            evidence.append(f"下划线文本：{text}")
+        elif mark == "emphasis":
+            evidence.append(f"斜体文本：{text}")
+    return evidence
 
 
 def build_template_run_rewrite_prompt(
