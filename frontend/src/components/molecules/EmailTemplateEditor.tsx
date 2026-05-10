@@ -134,6 +134,7 @@ export const EmailTemplateEditor = ({
   onChange,
 }: EmailTemplateEditorProps) => {
   const [openMenu, setOpenMenu] = useState<MenuKey | null>(null);
+  const lastLocalHtmlRef = useRef<string | null>(null);
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -171,6 +172,7 @@ export const EmailTemplateEditor = ({
     },
     onUpdate: ({ editor: currentEditor }) => {
       const nextHtml = serializeTemplatePlaceholderHtml(currentEditor.getHTML());
+      lastLocalHtmlRef.current = nextHtml;
       onChange({
         html: nextHtml,
         text: deriveTextFromEmailHtml(nextHtml),
@@ -180,6 +182,9 @@ export const EmailTemplateEditor = ({
 
   useEffect(() => {
     const preparedHtml = prepareTemplateEditorHtml(html);
+    if (lastLocalHtmlRef.current === html) {
+      return;
+    }
     if (editor && !areTemplatePlaceholderHtmlEquivalent(preparedHtml, editor.getHTML())) {
       editor.commands.setContent(preparedHtml, false);
     }
