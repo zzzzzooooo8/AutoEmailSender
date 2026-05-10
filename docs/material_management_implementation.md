@@ -87,8 +87,8 @@
 - `task_runtime.generate_task_draft()` 读取：
   - `task.primary_material`
   - `task.identity.materials`
-- 在真正调用 `llm_runtime.generate_match_and_draft()` 前，系统会先通过 MarkItDown 对当前默认材料做一次按需 Markdown 提取；如果文件不可提取或解析失败，则继续按“无可提取文本”处理。
-- `llm_runtime.generate_match_and_draft()` 使用默认材料的 Markdown 文本生成匹配结果和草稿。
+- 在真正调用 `llm_runtime.generate_match_evaluation()` 和 `llm_runtime.generate_draft_content()` 前，系统会先通过 MarkItDown 对当前默认材料做一次按需 Markdown 提取；如果文件不可提取或解析失败，则继续按“无可提取文本”处理。
+- `llm_runtime.generate_match_evaluation()` 负责生成匹配结果，`llm_runtime.generate_draft_content()` 使用默认材料的 Markdown 文本生成草稿。
 - 草稿生成不再由后台 worker 自动推进，而是通过 `POST /api/email-tasks/{id}/regenerate-draft` 手动触发。
 - 如果任务没有默认材料，接口返回 400，提示用户先选择用于匹配的默认材料。
 

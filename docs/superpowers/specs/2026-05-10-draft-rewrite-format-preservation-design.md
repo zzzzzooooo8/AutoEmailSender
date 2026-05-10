@@ -195,7 +195,6 @@
 本设计落地时，预期主要影响：
 
 - `backend/app/services/llm_runtime.py`
-- `backend/app/services/template_run_rewrite.py`
-- `backend/app/services/template_anchor_rewrite.py`
+- `backend/app/services/template_draft_rewrite.py`
 - `backend/app/services/rich_text.py`
 - 相关单元测试

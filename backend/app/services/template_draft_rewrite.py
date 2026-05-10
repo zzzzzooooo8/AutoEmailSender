@@ -11,6 +11,26 @@ from app.services.rich_text import RichTextRenderResult, normalize_email_html
 PLACEHOLDER_PATTERN = re.compile(r"\{\{[a-zA-Z0-9_]+\}\}")
 
 SEGMENT_TAG_NAMES = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "table"}
+CJK_FONT_HINTS = (
+    "宋",
+    "仿宋",
+    "楷",
+    "黑体",
+    "Hei",
+    "SimSun",
+    "NSimSun",
+    "Songti",
+    "STSong",
+    "MingLiU",
+    "PMingLiU",
+    "Noto Serif SC",
+    "Noto Sans CJK",
+    "Source Han Serif",
+    "Source Han Sans",
+    "PingFang",
+    "Hiragino Sans GB",
+    "Microsoft YaHei",
+)
 
 
 @dataclass(slots=True)
@@ -276,12 +296,13 @@ def _merge_font_style(style: str, dominant: DraftRewriteFontStyle) -> str:
 
 
 def _resolve_effective_font_family(text_node: NavigableString) -> str | None:
+    text = str(text_node)
     for parent in text_node.parents:
         if not isinstance(parent, Tag):
             continue
-        family = _extract_font_family(parent)
-        if family:
-            return family
+        families = _extract_font_family_candidates(parent)
+        if families:
+            return _choose_font_family_for_text(text, families)
     return None
 
 
@@ -295,19 +316,48 @@ def _resolve_effective_font_size(text_node: NavigableString) -> str | None:
     return None
 
 
-def _extract_font_family(tag: Tag) -> str | None:
+def _extract_font_family_candidates(tag: Tag) -> list[str]:
+    candidates: list[str] = []
     if tag.name == "font":
         face = str(tag.get("face", "")).strip()
         if face:
-            return face.split(",")[0].strip().strip("'\"") or None
+            candidates.extend(_split_font_family_stack(face))
 
     style = str(tag.get("style", ""))
     match = re.search(r"font-family\s*:\s*([^;]+)", style, re.I)
     if match:
-        family = match.group(1).split(",")[0].strip().strip("'\"")
+        candidates.extend(_split_font_family_stack(match.group(1)))
+
+    deduped: list[str] = []
+    for candidate in candidates:
+        if candidate and candidate not in deduped:
+            deduped.append(candidate)
+    return deduped
+
+def _split_font_family_stack(value: str) -> list[str]:
+    families: list[str] = []
+    for item in value.split(","):
+        family = item.strip().strip("'\"")
         if family:
-            return family
-    return None
+            families.append(family)
+    return families
+
+def _choose_font_family_for_text(text: str, candidates: list[str]) -> str | None:
+    if not candidates:
+        return None
+
+    if _contains_cjk_char(text):
+        for family in candidates:
+            if _looks_like_cjk_font_family(family):
+                return family
+
+    return candidates[0]
+
+def _contains_cjk_char(text: str) -> bool:
+    return bool(re.search(r"[\u4e00-\u9fff]", text))
+
+def _looks_like_cjk_font_family(font_family: str) -> bool:
+    return any(hint in font_family for hint in CJK_FONT_HINTS)
 
 
 def _extract_font_size(tag: Tag) -> str | None:

@@ -4952,49 +4952,6 @@ class ApiEndpointTests(unittest.TestCase):
             ),
         )
 
-    @staticmethod
-    def _build_match_and_draft_result(
-        *,
-        match_score: int,
-        subject: str,
-        body_text: str,
-        body_html: str,
-        prompt_tokens: int | None = None,
-        completion_tokens: int | None = None,
-    ):
-        from app.services.llm_runtime import (
-            ChatCompletionUsage,
-            GeneratedMatchAndDraft,
-            MatchAndDraftResult,
-        )
-
-        return GeneratedMatchAndDraft(
-            result=MatchAndDraftResult(
-                match_score=match_score,
-                match_reason="研究方向和材料内容高度匹配。",
-                fit_points=["研究方向一致", "材料信息完整"],
-                risk_points=["尚未展开具体合作切口"],
-                keywords=["大模型", "信息抽取"],
-                subject=subject,
-                body_text=body_text,
-                body_html=body_html,
-                suggested_material_ids=[],
-            ),
-            usage=(
-                ChatCompletionUsage(
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                    total_tokens=(
-                        (prompt_tokens or 0) + (completion_tokens or 0)
-                        if prompt_tokens is not None and completion_tokens is not None
-                        else None
-                    ),
-                )
-                if prompt_tokens is not None or completion_tokens is not None
-                else None
-            ),
-        )
-
     def _upload_material(
         self,
         identity_id: int,

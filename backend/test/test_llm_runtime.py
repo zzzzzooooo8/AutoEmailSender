@@ -9,14 +9,12 @@ from app.services.llm_runtime import (
     ChatCompletionResult,
     DEFAULT_LLM_MAX_TOKENS,
     SYSTEM_DRAFT_REWRITE_PROMPT,
-    SYSTEM_TEMPLATE_ANCHOR_REWRITE_PROMPT,
     build_match_prompt_parts,
     build_draft_prompt,
     build_draft_rewrite_prompt,
     build_draft_rewrite_preferences,
-    build_template_run_rewrite_prompt,
     DraftRewritePreferences,
-    estimate_template_run_draft_tokens,
+    estimate_draft_content_tokens,
     fetch_llm_profile_models,
     generate_draft_content,
     generate_match_evaluation,
@@ -573,7 +571,8 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(payload)
         self.assertEqual(payload["messages"][0]["content"], SYSTEM_DRAFT_REWRITE_PROMPT)
         self.assertIn("source_blocks", payload["messages"][1]["content"])
-        self.assertIn("加粗文本：Information Extraction", payload["messages"][1]["content"])
+        self.assertIn('"style_spans"', payload["messages"][1]["content"])
+        self.assertIn('"Information Extraction"', payload["messages"][1]["content"])
         self.assertNotIn("<table", payload["messages"][1]["content"])
         self.assertIn("<table", result.result.body_html)
         self.assertIn('style="font-size:11pt"', result.result.body_html)
@@ -689,7 +688,7 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(fragment=fragment):
                 self.assertIn(fragment, SYSTEM_MATCH_ONLY_PROMPT)
 
-    def test_estimate_template_run_draft_tokens_omits_full_html_snapshot(self) -> None:
+    def test_estimate_draft_content_tokens_omits_full_html_snapshot(self) -> None:
         from app.models import IdentityMaterial, IdentityProfile, Professor
 
         identity = IdentityProfile(
@@ -722,7 +721,7 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
         professor = Professor(name="李老师", research_direction="Information Extraction")
 
-        estimate = estimate_template_run_draft_tokens(
+        estimate = estimate_draft_content_tokens(
             identity=identity,
             primary_material=material,
             llm_profile=profile,
@@ -779,7 +778,7 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIn("LLM-based biomedical information extraction", parts.prompt)
-        self.assertIn("近期论文：\n- 无", parts.prompt)
+        self.assertNotIn("近期论文：", parts.prompt)
 
     def test_build_draft_prompt_requires_template_first_and_limits_changes(self) -> None:
         from app.models import IdentityMaterial, IdentityProfile, Professor
@@ -898,10 +897,93 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIn("source_blocks", prompt)
-        self.assertIn("加粗文本：李老师", prompt)
-        self.assertIn("下划线文本：欢迎", prompt)
+        payload = json.loads(prompt)
+        self.assertNotIn("task", payload)
+        self.assertNotIn("prompt_version", payload)
+        self.assertNotIn("subject", payload["response_schema"])
+        self.assertIn("不要返回 subject。", payload["instructions"])
+        self.assertLess(prompt.index('"instructions"'), prompt.index('"input"'))
+        self.assertLess(prompt.index('"response_schema"'), prompt.index('"input"'))
+        self.assertLess(prompt.index('"input"'), prompt.rindex('"source_blocks"'))
+        self.assertEqual(
+            payload["input"]["professor"],
+            {
+                "name": "李老师",
+                "research_direction": "Information Extraction",
+            },
+        )
+        self.assertEqual(payload["input"]["student_material_text"], "我做过信息抽取与智能体相关研究。")
+        self.assertNotIn("current_match", payload["input"])
+        self.assertNotIn("rewrite_preferences", payload["input"])
+        self.assertNotIn("email_address", prompt)
+        self.assertNotIn("match_threshold", prompt)
+        self.assertNotIn("profile_name", prompt)
+        self.assertNotIn("sender_name", prompt)
+        self.assertNotIn("default_language", prompt)
+        self.assertNotIn("style_evidence", prompt)
+        self.assertNotIn("subject_template", prompt)
         self.assertNotIn("<table", prompt)
         self.assertNotIn("{{name}}", prompt)
+
+    def test_build_draft_rewrite_prompt_omits_empty_professor_fields(self) -> None:
+        from app.models import IdentityMaterial, IdentityProfile, Professor
+        from app.services.template_draft_rewrite import build_draft_rewrite_document
+
+        identity = IdentityProfile(
+            id=1,
+            name="张三",
+            profile_name="张三",
+            sender_name="张三",
+            email_address="sender@example.com",
+            smtp_host="smtp.example.com",
+            smtp_port=465,
+            smtp_username="sender@example.com",
+            smtp_password="secret",
+            default_language="zh-CN",
+            outreach_generation_mode="llm",
+        )
+        primary_material = IdentityMaterial(
+            id=12,
+            identity_id=1,
+            display_name="简历",
+            file_path="data/materials/resume.txt",
+            original_filename="resume.txt",
+            material_type="resume",
+            extracted_text="我做过信息抽取与智能体相关研究。",
+        )
+        professor = Professor(
+            id=1,
+            name="李老师",
+            email="prof@example.edu",
+        )
+
+        document = build_draft_rewrite_document(
+            "<p>老师您好，我是{{sender_name}}。</p>",
+            {},
+        )
+
+        prompt = build_draft_rewrite_prompt(
+            identity=identity,
+            primary_material=primary_material,
+            professor=professor,
+            available_materials=[primary_material],
+            subject_template="申请与{{name}}老师交流",
+            source_blocks=document.blocks,
+            current_match=None,
+            rewrite_preferences=DraftRewritePreferences(),
+        )
+
+        payload = json.loads(prompt)
+        professor_context = payload["input"]["professor"]
+        self.assertIn("name", professor_context)
+        self.assertNotIn("email", professor_context)
+        self.assertNotIn("title", professor_context)
+        self.assertNotIn("university", professor_context)
+        self.assertNotIn("school", professor_context)
+        self.assertNotIn("department", professor_context)
+        self.assertNotIn("research_direction", professor_context)
+        self.assertNotIn("profile_url", professor_context)
+        self.assertNotIn("recent_papers", professor_context)
 
     async def test_generate_draft_content_uses_block_prompt_and_keeps_table_html(self) -> None:
         from app.models import IdentityMaterial, IdentityProfile, Professor
@@ -936,7 +1018,6 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
         raw = json.dumps(
             {
-                "subject": "申请与李老师交流",
                 "replacements": [
                     {
                         "segment_id": "seg_1",
@@ -981,125 +1062,10 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("source_blocks", prompt)
         self.assertNotIn("rewrite_segments", prompt)
         self.assertNotIn("<table", prompt)
+        self.assertEqual(payload["prompt_cache_key"], "draft-rewrite:v3:1:12:1:5")
+        self.assertEqual(result.result.subject, "申请与李老师老师交流")
         self.assertIn("<table", result.result.body_html)
         self.assertNotIn("{{name}}", result.result.body_html)
-
-    def test_build_template_run_rewrite_prompt_sends_runs_without_template_html(self) -> None:
-        from app.models import IdentityMaterial, IdentityProfile, Professor
-        from app.services.template_run_rewrite import build_template_run_document
-
-        identity = IdentityProfile(
-            name="张三",
-            email_address="sender@example.com",
-            smtp_host="smtp.example.com",
-            smtp_port=465,
-            smtp_username="sender@example.com",
-            smtp_password="secret",
-            default_language="zh-CN",
-            outreach_generation_mode="llm",
-        )
-        primary_material = IdentityMaterial(
-            id=12,
-            identity_id=1,
-            display_name="简历",
-            file_path="data/materials/resume.txt",
-            original_filename="resume.txt",
-            material_type="resume",
-            extracted_text="我做过信息抽取与智能体相关研究。",
-        )
-        professor = Professor(
-            name="李老师",
-            email="prof@example.edu",
-            title="Professor",
-            university="Example University",
-            school="Computer Science",
-            research_direction="Information Extraction",
-        )
-        document = build_template_run_document(
-            "<p>老师您好，我来自 <strong>Example University</strong>。</p>",
-        )
-
-        prompt = build_template_run_rewrite_prompt(
-            identity=identity,
-            primary_material=primary_material,
-            professor=professor,
-            available_materials=[primary_material],
-            subject_template="申请与{{name}}老师交流",
-            template_document=document,
-            current_match=None,
-            rewrite_preferences=None,
-        )
-
-        payload = json.loads(prompt)
-        self.assertIn("body_segments", payload)
-        self.assertEqual(payload["body_segments"][0]["segment_text"], "老师您好，我来自 Example University。")
-        self.assertEqual(payload["body_segments"][0]["runs"][1]["marks"], ["strong"])
-        self.assertEqual(
-            payload["response_schema"]["replacements"][0]["runs"][0],
-            {"run_id": "run_1", "text": "改写后的 run 文本"},
-        )
-        self.assertIn("不要返回 marks。", payload["instructions"])
-        self.assertNotIn("只改写 replacements 中已有 run 的 text", payload["instructions"])
-        self.assertNotIn("<strong>Example University</strong>", prompt)
-        self.assertNotIn("套磁信模板正文 HTML", prompt)
-
-    def test_build_template_anchor_rewrite_prompt_sends_rewrite_segments(self) -> None:
-        from app.models import IdentityMaterial, IdentityProfile, Professor
-        from app.services.llm_runtime import build_template_anchor_rewrite_prompt
-        from app.services.template_anchor_rewrite import build_anchored_template_document
-        from app.services.template_run_rewrite import build_template_run_document
-
-        identity = IdentityProfile(
-            name="张三",
-            email_address="sender@example.com",
-            smtp_host="smtp.example.com",
-            smtp_port=465,
-            smtp_username="sender@example.com",
-            smtp_password="secret",
-            default_language="zh-CN",
-            outreach_generation_mode="llm",
-        )
-        primary_material = IdentityMaterial(
-            id=12,
-            identity_id=1,
-            display_name="简历",
-            file_path="data/materials/resume.txt",
-            original_filename="resume.txt",
-            material_type="resume",
-            extracted_text="我做过信息抽取与智能体相关研究。",
-        )
-        professor = Professor(
-            name="李老师",
-            email="prof@example.edu",
-            title="Professor",
-            university="Example University",
-            school="Computer Science",
-            research_direction="Information Extraction",
-        )
-        document = build_template_run_document("<p>老师您好，我来自 <strong>Example University</strong>。</p>")
-        anchored_document = build_anchored_template_document(document)
-
-        prompt = build_template_anchor_rewrite_prompt(
-            identity=identity,
-            primary_material=primary_material,
-            professor=professor,
-            available_materials=[primary_material],
-            subject_template="申请与{{name}}老师交流",
-            anchored_document=anchored_document,
-            current_match=None,
-            rewrite_preferences=None,
-        )
-
-        payload = json.loads(prompt)
-        self.assertEqual(payload["task"], "rewrite_email_template_anchored_segments")
-        self.assertEqual(payload["rewrite_segments"][0]["rewrite_text"], "老师您好，我来自 [[A1]]。")
-        self.assertEqual(payload["rewrite_segments"][0]["anchors"][0]["text"], "Example University")
-        self.assertEqual(
-            payload["response_schema"]["replacements"][0],
-            {"segment_id": "seg_1", "text": "改写后的锚点化 segment 文本"},
-        )
-        self.assertIn("锚点 token 必须原样保留", payload["instructions"])
-        self.assertNotIn("<strong>Example University</strong>", prompt)
 
     def test_build_draft_prompt_uses_dynamic_rewrite_constraints_for_strong_preferences(self) -> None:
         from app.models import IdentityMaterial, IdentityProfile, Professor

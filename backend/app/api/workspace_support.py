@@ -87,7 +87,7 @@ async def build_workspace_thread(
             current_task_outreach.body_text_template,
             current_task_outreach.body_html_template,
         )
-        token_estimate = llm_runtime.estimate_template_run_draft_tokens(
+        token_estimate = llm_runtime.estimate_draft_content_tokens(
             identity=identity,
             primary_material=current_task.primary_material,
             llm_profile=llm_profile,

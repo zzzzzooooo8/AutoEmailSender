@@ -101,6 +101,19 @@ class TemplateDraftRewriteTests(unittest.TestCase):
         self.assertEqual(style.font_family, "Arial")
         self.assertEqual(style.font_size, "14pt")
 
+    def test_select_dominant_font_and_size_prefers_chinese_family_in_mixed_stack(self) -> None:
+        html = (
+            '<p style="font-family:\'Times New Roman\',\'宋体\',SimSun,serif;font-size:12pt">'
+            "这是一段更长的中文正文文本，用来确认中文主字体不会被误判成英文衬线字体。"
+            "</p>"
+            '<p style="font-family:Arial;font-size:14pt">Short</p>'
+        )
+
+        style = select_dominant_font_and_size(html)
+
+        self.assertEqual(style.font_family, "宋体")
+        self.assertEqual(style.font_size, "12pt")
+
     def test_apply_draft_rewrite_replacements_renders_runs_and_keeps_table(self) -> None:
         identity = IdentityProfile(
             id=1,
