@@ -924,6 +924,8 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("subject_template", prompt)
         self.assertNotIn("<table", prompt)
         self.assertNotIn("{{name}}", prompt)
+        self.assertFalse(payload["input"]["source_blocks"][0]["locked"])
+        self.assertTrue(payload["input"]["source_blocks"][1]["locked"])
 
     def test_build_draft_rewrite_prompt_omits_empty_professor_fields(self) -> None:
         from app.models import IdentityMaterial, IdentityProfile, Professor

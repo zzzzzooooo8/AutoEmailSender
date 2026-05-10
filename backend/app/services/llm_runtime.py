@@ -144,6 +144,7 @@ SYSTEM_DRAFT_PROMPT = dedent(
     - 默认应保留模板的整体结构、段落顺序和主要话术风格；具体改写幅度以用户消息中的“草稿改写偏好”和“任务要求”为准。
     - 只允许改动：称呼、匹配理由、个性化一段、结尾、主题。
     - 必须围绕导师研究方向进行个性化改写，不能只写泛泛的“我关注您的研究”。
+    - 导师研究方向只用于一次自然个性化，不要在正文里反复堆砌。
     - 不要从零重写整封邮件；即使偏好要求更强改写，也必须基于模板、导师信息和可见材料。
     - 尽量保留模板中可表达的富文本标记，例如加粗、斜体、链接和列表。
     - 如果模板包含表格，尽量保留其中的信息顺序和语义，但仍按允许的 rich_body 结构输出。
@@ -181,6 +182,8 @@ SYSTEM_DRAFT_REWRITE_PROMPT = dedent(
     - text 必须是真实最终内容。
     - marks 只能使用 strong、underline、emphasis。
     - 如果某个块不需要改写，不要返回它。
+    - locked=true 的块必须原样保留，尤其是首个称呼段和表格块。
+    - 导师研究方向只用于一次自然个性化，不要在正文里反复堆砌。
     """
 ).strip()
 
@@ -1125,7 +1128,7 @@ def build_draft_prompt(
         5. 用中文生成专业、克制、具体的套磁邮件。
         6. rich_body 必须是可渲染为邮件正文的受控富文本 JSON。
         7. suggested_material_ids 只能返回可选材料里存在的 id。
-        8. 必须围绕导师研究方向进行个性化改写，研究方向来自“导师信息 - 研究方向”。
+        8. 围绕导师研究方向做一次自然个性化，不要反复堆砌同一个方向词。
         9. 按上面的改写幅度要求控制改动大小，同时尽量保留可表达的富文本标记，例如加粗、斜体、链接和列表。
         10. 如果模板包含表格，保留表格中的信息顺序和语义，但不要输出 schema 不支持的表格节点。
         """,
@@ -1159,7 +1162,7 @@ def _build_base_generation_prompt(
             "只允许改动：称呼、匹配理由、个性化一段、结尾、主题。",
             "尽量保留可表达的富文本标记，例如加粗、斜体、链接和列表。",
             "如果模板包含表格，保留表格中的信息顺序和语义，但不要输出 schema 不支持的表格节点。",
-            "必须围绕导师研究方向进行个性化改写，研究方向来自“导师信息 - 研究方向”。",
+            "导师研究方向只用于一次自然个性化，不要在正文里反复堆砌。",
         ],
         "response_schema": {
             "subject": "邮件主题",
@@ -1222,6 +1225,7 @@ def build_draft_rewrite_prompt(
             "不要返回 subject。",
             "只改写 source_blocks 中 type 不是 table 的块。",
             "table 块必须原样保留，不得出现在 replacements 中。",
+            "locked=true 的块必须原样保留，尤其是首个称呼段。",
             "replacements 只能引用 source_blocks 中已有的 segment_id。",
             "每个 runs 项只允许包含 text 和 marks。",
             "text 必须是真实最终内容，不要再输出任何占位符。",
@@ -1230,6 +1234,7 @@ def build_draft_rewrite_prompt(
             "不要新增、删除、合并、拆分或重排块。",
             "marks 只能使用 strong、underline、emphasis。",
             "suggested_material_ids 只能选择 available_materials 中存在的 id。",
+            "导师研究方向只用于一次自然个性化，不要在正文里反复堆砌。",
         ],
         "response_schema": {
             "replacements": [
@@ -1285,12 +1290,14 @@ def _serialize_draft_source_block(block: DraftRewriteSourceBlock) -> dict[str, o
             "segment_id": block.segment_id,
             "type": block.type,
             "text": "表格块原样保留，不参与改写。",
+            "locked": True,
         }
 
     return {
         "segment_id": block.segment_id,
         "type": block.type,
         "text": block.text,
+        "locked": block.locked,
         "style_spans": [
             {
                 "text": span.text,

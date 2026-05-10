@@ -51,6 +51,7 @@ class DraftRewriteSourceBlock:
     type: str
     text: str
     style_spans: list[DraftRewriteStyleSpan] = field(default_factory=list)
+    locked: bool = False
     html_fragment: str | None = None
 
 
@@ -67,13 +68,15 @@ def build_draft_rewrite_document(html: str, context: dict[str, str]) -> DraftRew
 
     for index, element in enumerate(_iter_segment_elements(soup), start=1):
         segment_id = f"seg_{index}"
+        html_fragment = str(element)
         if element.name == "table":
             blocks.append(
                 DraftRewriteSourceBlock(
                     segment_id=segment_id,
                     type="table",
                     text=element.get_text(" ", strip=True),
-                    html_fragment=str(element),
+                    locked=True,
+                    html_fragment=html_fragment,
                 ),
             )
             continue
@@ -102,6 +105,8 @@ def build_draft_rewrite_document(html: str, context: dict[str, str]) -> DraftRew
                 type=_segment_type(element),
                 text="".join(text_parts),
                 style_spans=style_spans,
+                locked=_should_lock_segment(index, element, "".join(text_parts)),
+                html_fragment=html_fragment,
             ),
         )
 
@@ -150,6 +155,19 @@ def _collect_marks(text_node: NavigableString, container: Tag) -> list[str]:
         if parent.name in {"em", "i"} and "emphasis" not in marks:
             marks.append("emphasis")
     return marks
+
+def _should_lock_segment(index: int, element: Tag, text: str) -> bool:
+    if index != 1:
+        return False
+    if element.name not in {"p", "h1", "h2", "h3", "h4", "h5", "h6"}:
+        return False
+    normalized = re.sub(r"\s+", "", text)
+    if len(normalized) > 40:
+        return False
+    return (
+        (normalized.startswith("尊敬的") or normalized.startswith("敬爱的") or normalized.startswith("亲爱的"))
+        and (normalized.endswith("：") or normalized.endswith(":") or normalized.endswith("！") or normalized.endswith("!"))
+    )
 
 
 def select_dominant_font_and_size(html: str) -> DraftRewriteFontStyle:
@@ -200,7 +218,7 @@ def apply_draft_rewrite_replacements(
             continue
         block = block_map.get(segment_id)
         element = element_map.get(segment_id)
-        if block is None or element is None or block.type == "table":
+        if block is None or element is None or block.type == "table" or block.locked:
             continue
 
         fragment_html = "".join(_render_draft_run(run) for run in runs if isinstance(run, dict))
@@ -214,6 +232,16 @@ def apply_draft_rewrite_replacements(
         raise ValueError("模型未返回可用改写内容")
 
     dominant_style = select_dominant_font_and_size(document.html)
+    for block, element in zip(document.blocks, elements):
+        if block.type != "table" and not block.locked:
+            continue
+        if not block.html_fragment or element is None:
+            continue
+        original_fragment = BeautifulSoup(block.html_fragment, "html.parser")
+        original_root = next((node for node in original_fragment.contents if isinstance(node, Tag)), None)
+        if original_root is not None:
+            element.replace_with(original_root)
+
     if dominant_style.font_family or dominant_style.font_size:
         _apply_dominant_font_style(soup, dominant_style)
 
@@ -267,6 +295,8 @@ def _apply_dominant_font_style(soup: BeautifulSoup, style: DraftRewriteFontStyle
 
 
 def _is_within_table(tag: Tag) -> bool:
+    if tag.name == "table":
+        return True
     for parent in tag.parents:
         if isinstance(parent, Tag) and parent.name == "table":
             return True
