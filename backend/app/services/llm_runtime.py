@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from app.core.config import get_settings
 from app.models import IdentityMaterial, IdentityProfile, LLMProfile, Professor
+from app.services.outreach_templates import build_template_context
 from app.services.html_text import html_to_text
 from app.services.mail_runtime import text_to_html
 from app.services.rich_text import (
@@ -27,7 +28,12 @@ from app.services.template_anchor_rewrite import (
     apply_anchored_template_replacements,
     build_anchored_template_document,
 )
-from app.services.template_draft_rewrite import DraftRewriteSourceBlock
+from app.services.template_draft_rewrite import (
+    DraftRewriteSourceBlock,
+    apply_draft_rewrite_replacements,
+    build_draft_rewrite_document,
+    render_draft_template_text,
+)
 from app.services.template_run_rewrite import (
     TemplateRunDocument,
     apply_template_run_replacements,
@@ -204,6 +210,35 @@ SYSTEM_DRAFT_PROMPT = dedent(
     - 内联节点只允许 text、strong、emphasis、link、line_break。
     - link 的 href 只能使用 http、https、mailto。
     - 如果没有合适材料，suggested_material_ids 返回 []。
+    """
+).strip()
+
+SYSTEM_DRAFT_REWRITE_PROMPT = dedent(
+    """
+    你是研究生套磁邮件改写助理。你必须只输出 JSON，不要输出任何解释、Markdown 代码块或多余文字。
+    你要基于输入的 source_blocks 改写邮件草稿，不要从零重写整封邮件。
+    你只能改写非表格块，表格块必须原样保留。
+    你不能输出 HTML、Markdown 或完整正文。
+    你不能输出任何占位符。
+
+    JSON 字段必须包含：
+    - subject: 邮件主题
+    - replacements: 段落替换数组
+    - suggested_material_ids: 整数数组，只能从输入给出的可选材料 ID 中选择
+
+    replacements 中每个块都只能返回：
+    - segment_id
+    - runs
+    runs 中每个 run 只能包含：
+    - text
+    - marks
+
+    额外要求：
+    - 只能返回输入中存在的 segment_id。
+    - 不要新增、删除、合并、拆分或重排块。
+    - text 必须是真实最终内容。
+    - marks 只能使用 strong、underline、emphasis。
+    - 如果某个块不需要改写，不要返回它。
     """
 ).strip()
 
@@ -654,18 +689,8 @@ async def generate_draft_content(
         template_html = text_to_email_html(custom_body).html
 
     if template_html:
-        template_document = build_template_run_document(template_html)
-        anchored_document = build_anchored_template_document(template_document)
-        prompt = build_template_anchor_rewrite_prompt(
-            identity=identity,
-            primary_material=primary_material,
-            professor=professor,
-            available_materials=available_materials,
-            subject_template=custom_subject,
-            anchored_document=anchored_document,
-            current_match=current_match,
-            rewrite_preferences=rewrite_preferences,
-        )
+        template_context = build_template_context(identity, professor)
+        rewrite_document = build_draft_rewrite_document(template_html, template_context)
         completion = await request_chat_completion(
             llm_profile,
             {
@@ -673,22 +698,30 @@ async def generate_draft_content(
                 "messages": [
                     {
                         "role": "system",
-                        "content": SYSTEM_TEMPLATE_ANCHOR_REWRITE_PROMPT,
+                        "content": SYSTEM_DRAFT_REWRITE_PROMPT,
                     },
                     {
                         "role": "user",
-                        "content": prompt,
+                        "content": build_draft_rewrite_prompt(
+                            identity=identity,
+                            primary_material=primary_material,
+                            professor=professor,
+                            available_materials=available_materials,
+                            subject_template=custom_subject,
+                            source_blocks=rewrite_document.blocks,
+                            current_match=current_match,
+                            rewrite_preferences=rewrite_preferences,
+                        ),
                     },
                 ],
                 "temperature": llm_profile.temperature if llm_profile.temperature is not None else DEFAULT_LLM_TEMPERATURE,
                 "max_tokens": max_tokens or DEFAULT_LLM_MAX_TOKENS,
             },
         )
-        rewrite_result = parse_structured_result(completion.content, TemplateAnchorRewriteResult)
+        rewrite_result = parse_structured_result(completion.content, DraftRewriteResult)
         try:
-            rendered = apply_anchored_template_replacements(
-                template_document,
-                anchored_document,
+            rendered = apply_draft_rewrite_replacements(
+                rewrite_document,
                 [item.model_dump() for item in rewrite_result.replacements],
             )
         except ValueError as exc:
@@ -1140,20 +1173,22 @@ def estimate_template_run_draft_tokens(
         template_html = text_to_email_html(custom_body).html
 
     if template_html:
-        document = build_template_run_document(template_html)
-        anchored_document = build_anchored_template_document(document)
-        prompt = build_template_anchor_rewrite_prompt(
+        rewrite_document = build_draft_rewrite_document(
+            template_html,
+            build_template_context(identity, professor),
+        )
+        prompt = build_draft_rewrite_prompt(
             identity=identity,
             primary_material=primary_material,
             professor=professor,
             available_materials=available_materials,
             subject_template=custom_subject,
-            anchored_document=anchored_document,
+            source_blocks=rewrite_document.blocks,
             current_match=None,
             rewrite_preferences=DraftRewritePreferences(),
         )
         estimated_prompt_tokens = estimate_text_tokens(
-            f"{SYSTEM_TEMPLATE_ANCHOR_REWRITE_PROMPT}\n{prompt}",
+            f"{SYSTEM_DRAFT_REWRITE_PROMPT}\n{prompt}",
         )
     else:
         prompt = build_draft_prompt(
@@ -1335,6 +1370,7 @@ def build_draft_rewrite_prompt(
     primary_material: IdentityMaterial | None,
     professor: Professor,
     available_materials: list[IdentityMaterial],
+    subject_template: str | None,
     source_blocks: list[DraftRewriteSourceBlock],
     current_match: MatchEvaluationResult | None,
     rewrite_preferences: DraftRewritePreferences | None,
@@ -1344,6 +1380,10 @@ def build_draft_rewrite_prompt(
         primary_material_text = f"{primary_material_text[:5000]}\n...(已截断)"
 
     preferences = rewrite_preferences or DraftRewritePreferences()
+    rendered_subject_template = render_draft_template_text(
+        subject_template,
+        build_template_context(identity, professor),
+    )
     payload = {
         "task": "rewrite_email_draft_blocks",
         "context": {
@@ -1381,6 +1421,7 @@ def build_draft_rewrite_prompt(
             _serialize_draft_source_block(block)
             for block in source_blocks
         ],
+        "subject_template": rendered_subject_template,
         "response_schema": {
             "subject": "邮件主题",
             "replacements": [
@@ -1406,6 +1447,7 @@ def build_draft_rewrite_prompt(
         ],
         "instructions": [
             "只返回 JSON 对象。",
+            "如果提供了 subject_template，也可以改写 subject。",
             "只改写 source_blocks 中 type 不是 table 的块。",
             "table 块必须原样保留，不得出现在 replacements 中。",
             "replacements 只能引用 source_blocks 中已有的 segment_id。",

@@ -88,6 +88,10 @@ def build_draft_rewrite_document(html: str, context: dict[str, str]) -> DraftRew
     return DraftRewriteDocument(html=str(soup), blocks=blocks)
 
 
+def render_draft_template_text(value: str | None, context: dict[str, str]) -> str:
+    return _render_template_text(value or "", context)
+
+
 def _iter_segment_elements(soup: BeautifulSoup) -> list[Tag]:
     elements: list[Tag] = []
     for tag in soup.find_all(SEGMENT_TAG_NAMES):
