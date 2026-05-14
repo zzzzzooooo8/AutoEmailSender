@@ -82,6 +82,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ThinkingAdaptationCache
+from app.models import LLMProfile
+from app.services.llm_runtime import LLMRuntimeError, request_chat_completion
 
 
 async def get_cached_extra_body(
@@ -144,3 +146,93 @@ async def record_thinking_adaptation(
             dict(learned_extra_body) if learned_extra_body else None
         )
         row.probed_at = now
+
+
+class ThinkingAdaptationFailed(RuntimeError):
+    """Raised when no candidate extra_body can satisfy the model's thinking-mode protocol."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        attempted_extra_bodies: list[dict[str, object] | None],
+        last_error: LLMRuntimeError | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.attempted_extra_bodies = attempted_extra_bodies
+        self.last_error = last_error
+
+
+def _build_probe_payload(profile: LLMProfile) -> dict[str, object]:
+    """Build a 3-turn payload that triggers thinking-mode protocol errors on
+    affected models, but is harmless on regular models (they just answer "7")."""
+
+    return {
+        "model": profile.model_name,
+        "messages": [
+            {"role": "user", "content": "记住数字 7。"},
+            {"role": "assistant", "content": "好的，我已记住数字 7。"},
+            {"role": "user", "content": "我让你记的数字是几？只回复数字。"},
+        ],
+        "temperature": 0,
+        "max_tokens": 16,
+    }
+
+
+def resolve_base_url_for_cache(api_base_url: str | None) -> str:
+    """Normalize the api_base_url for use as a cache key."""
+
+    from app.services.llm_runtime import resolve_base_url
+
+    return resolve_base_url(api_base_url)
+
+
+async def probe_and_learn_extra_body(
+    session: AsyncSession,
+    profile: LLMProfile,
+) -> dict[str, object] | None:
+    """Send a multi-turn probe and learn which extra_body the model needs.
+
+    On success: writes a row into ``thinking_adaptation_cache`` and returns the
+    learned value (``None`` if the model needs no extra_body).
+
+    On thinking-mode protocol failure across all candidates: raises
+    ``ThinkingAdaptationFailed`` and writes nothing.
+
+    On other 4xx/5xx: re-raises ``LLMRuntimeError`` (caller decides what to do).
+    """
+
+    payload = _build_probe_payload(profile)
+    attempts: list[dict[str, object] | None] = [None, *THINKING_DISABLE_CANDIDATES]
+    last_error: LLMRuntimeError | None = None
+
+    for index, candidate in enumerate(attempts):
+        try:
+            await request_chat_completion(profile, payload, extra_body=candidate)
+        except LLMRuntimeError as exc:
+            last_error = exc
+            if exc.status_code != 400:
+                raise
+            if not is_thinking_mode_protocol_error(
+                exc.status_code or 0,
+                str(exc),
+            ):
+                raise
+            if index == len(attempts) - 1:
+                raise ThinkingAdaptationFailed(
+                    "已尝试全部候选 extra_body，仍无法绕开思考模式协议错。",
+                    attempted_extra_bodies=attempts,
+                    last_error=exc,
+                ) from exc
+            continue
+
+        await record_thinking_adaptation(
+            session,
+            api_base_url=resolve_base_url_for_cache(profile.api_base_url),
+            model_name=profile.model_name,
+            learned_extra_body=candidate,
+        )
+        return dict(candidate) if candidate else None
+
+    # 不可达：循环要么 return 要么 raise
+    raise AssertionError("probe_and_learn_extra_body terminated unexpectedly")
