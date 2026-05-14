@@ -449,6 +449,53 @@ class ProbeAndLearnTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(calls), 1)
 
+    async def test_thinking_model_with_empty_content_triggers_candidate_switch(self) -> None:
+        # 思考模型在第 1 次调用时返回 HTTP 200，但 content 为空（思考内容塞进了 reasoning_content）
+        # → request_chat_completion 抛 LLMRuntimeError("模型返回了空内容", status_code=200)
+        # → probe_and_learn_extra_body 应识别为思考模式信号，切候选 1 重试
+        from unittest.mock import patch
+
+        from test.test_llm_runtime import _FakeAsyncClient, _FakeResponse
+
+        from app.services.thinking_adaptation import (
+            get_cached_extra_body,
+            probe_and_learn_extra_body,
+        )
+
+        calls: list[tuple[str, dict[str, object] | None]] = []
+        responses = [
+            # 第 1 次：HTTP 200，但 content 为空字符串
+            _FakeResponse(
+                status_code=200,
+                payload={"choices": [{"message": {"content": ""}}]},
+            ),
+            # 第 2 次：带 thinking={"type":"disabled"}，正常返回
+            _FakeResponse(
+                status_code=200,
+                payload={"choices": [{"message": {"content": "7"}}]},
+            ),
+        ]
+
+        with patch(
+            "app.services.llm_runtime.httpx.AsyncClient",
+            side_effect=lambda *a, **kw: _FakeAsyncClient(responses, calls),
+        ):
+            async with self.session_factory() as session:
+                result = await probe_and_learn_extra_body(session, self._profile())
+                await session.commit()
+
+        self.assertEqual(result, {"thinking": {"type": "disabled"}})
+        self.assertEqual(len(calls), 2)
+
+        async with self.session_factory() as session:
+            hit, value = await get_cached_extra_body(
+                session,
+                api_base_url="https://api.acme.ai/v1",
+                model_name="acme-think-v1",
+            )
+        self.assertTrue(hit)
+        self.assertEqual(value, {"thinking": {"type": "disabled"}})
+
 
 class EnsureThinkingAdaptationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:

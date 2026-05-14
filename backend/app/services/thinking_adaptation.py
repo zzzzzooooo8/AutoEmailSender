@@ -211,12 +211,19 @@ async def probe_and_learn_extra_body(
             await request_chat_completion(profile, payload, extra_body=candidate)
         except LLMRuntimeError as exc:
             last_error = exc
-            if exc.status_code != 400:
-                raise
-            if not is_thinking_mode_protocol_error(
-                exc.status_code or 0,
-                str(exc),
-            ):
+            # 两种"思考模式信号"会触发候选切换：
+            #   1. HTTP 400 + 协议错关键词（典型：reasoning_content must be passed back）
+            #   2. HTTP 200 但 content 为空——思考模型把回答塞进 reasoning_content，
+            #      content 留空，request_chat_completion 因此抛 "模型返回了空内容"
+            is_protocol_400 = (
+                exc.status_code == 400
+                and is_thinking_mode_protocol_error(exc.status_code or 0, str(exc))
+            )
+            is_empty_content_200 = (
+                exc.status_code == 200
+                and "空内容" in str(exc)
+            )
+            if not (is_protocol_400 or is_empty_content_200):
                 raise
             if index == len(attempts) - 1:
                 raise ThinkingAdaptationFailed(
