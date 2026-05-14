@@ -27,6 +27,7 @@ from app.services.runtime_settings import get_runtime_settings
 from app.services.llm_runtime import LLMRuntimeError, parse_structured_result
 from app.services.thinking_adaptation import (
     ThinkingAdaptationFailed,
+    adapt_failure_message_for_thinking_error,
     ensure_thinking_adaptation,
 )
 from app.services.crawler_tools import (
@@ -382,11 +383,12 @@ async def _complete_running_job(
             job.error_message = None
         else:
             job.status = CrawlJobStatus.FAILED.value
-            job.error_message = await _derive_job_failure_message(
+            derived = await _derive_job_failure_message(
                 session,
                 job_id,
                 job.agent_trace,
             )
+            job.error_message = adapt_failure_message_for_thinking_error(derived)
         now = datetime.now(UTC)
         job.updated_at = now
         await mark_crawl_job_run_finished(
@@ -1014,15 +1016,16 @@ async def _mark_job_failed(
         if job is None or job.status != CrawlJobStatus.RUNNING.value:
             return
 
+        adapted_message = adapt_failure_message_for_thinking_error(error_message)
         job.status = CrawlJobStatus.FAILED.value
-        job.error_message = error_message
+        job.error_message = adapted_message
         now = datetime.now(UTC)
         job.updated_at = now
         await mark_crawl_job_run_finished(
             session,
             job,
             status=CrawlJobStatus.FAILED.value,
-            error_message=error_message,
+            error_message=adapted_message,
             now=now,
         )
         await session.commit()

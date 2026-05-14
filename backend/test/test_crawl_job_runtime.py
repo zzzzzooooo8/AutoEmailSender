@@ -2006,5 +2006,107 @@ class CrawlJobThinkingAdaptationIntegrationTests(unittest.IsolatedAsyncioTestCas
             self.assertIn("思考模式", job.error_message)
 
 
+async def _seed_running_crawl_job_with_default_profile(
+    session_factory: async_sessionmaker,
+    *,
+    agent_trace: list[dict[str, object]] | None = None,
+) -> int:
+    """Insert one is_default LLMProfile + one RUNNING CrawlJob; return the job_id."""
+    from app.models import CrawlJob, LLMProfile
+
+    async with session_factory() as session:
+        profile = LLMProfile(
+            name="thinking-running-profile",
+            provider="openai",
+            api_base_url="https://api.example.com/v1",
+            api_key="sk-test",
+            model_name="acme-think-v1",
+            is_default=True,
+        )
+        session.add(profile)
+        await session.flush()
+
+        job = CrawlJob(
+            llm_profile_id=profile.id,
+            entry_type="college",
+            status="running",
+            start_url="https://example.edu/faculty",
+            start_urls=["https://example.edu/faculty"],
+            university="Example U",
+            school="School of CS",
+            agent_trace=agent_trace,
+        )
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+        return job.id
+
+
+class CrawlJobErrorMessageAdaptationTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.session_factory, self.db_path = _make_thinking_test_session_factory()
+
+    async def asyncTearDown(self) -> None:
+        engine = self.session_factory.kw.get("bind")
+        if engine is not None:
+            await engine.dispose()
+        try:
+            os.unlink(self.db_path)
+        except FileNotFoundError:
+            pass
+
+    async def test_mark_job_failed_appends_thinking_hint(self) -> None:
+        from app.services.crawl_job_runtime import _mark_job_failed
+        from app.models import CrawlJob, CrawlJobStatus
+
+        job_id = await _seed_running_crawl_job_with_default_profile(self.session_factory)
+
+        await _mark_job_failed(
+            self.session_factory,
+            job_id,
+            "Error code: 400 - The reasoning_content in the thinking mode must be passed back to the API.",
+        )
+
+        async with self.session_factory() as session:
+            job = await session.get(CrawlJob, job_id)
+            assert job is not None
+            self.assertEqual(job.status, CrawlJobStatus.FAILED.value)
+            assert job.error_message is not None
+            self.assertIn("测试连接", job.error_message)
+
+    async def test_complete_running_job_appends_thinking_hint_when_no_candidates(self) -> None:
+        from app.services.crawl_job_runtime import _complete_running_job
+        from app.models import CrawlJob
+
+        # _derive_job_failure_message 优先返回 trace 中的候选保存失败摘要；
+        # 通过让 trace 为空、且不插入任何 CrawlPage 行，就会回落到查询 CrawlPage
+        # 错误信息的分支。我们直接插入一行 failed CrawlPage 携带协议错文本。
+        job_id = await _seed_running_crawl_job_with_default_profile(self.session_factory)
+        async with self.session_factory() as session:
+            from app.models import CrawlPage
+
+            session.add(
+                CrawlPage(
+                    job_id=job_id,
+                    url="https://example.edu/faculty",
+                    fetch_method="http",
+                    status="failed",
+                    error_message=(
+                        "Error code: 400 - The reasoning_content in the thinking "
+                        "mode must be passed back to the API."
+                    ),
+                )
+            )
+            await session.commit()
+
+        await _complete_running_job(self.session_factory, job_id)
+
+        async with self.session_factory() as session:
+            job = await session.get(CrawlJob, job_id)
+            assert job is not None
+            assert job.error_message is not None
+            self.assertIn("测试连接", job.error_message)
+
+
 if __name__ == "__main__":
     unittest.main()
