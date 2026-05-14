@@ -7,11 +7,14 @@ from dataclasses import asdict, dataclass, field
 from math import ceil
 from time import perf_counter
 from textwrap import dedent
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 import httpx
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field, ValidationError
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.models import IdentityMaterial, IdentityProfile, LLMProfile, Professor
@@ -753,23 +756,41 @@ async def _legacy_request_chat_completion(
     )
 
 
-async def probe_llm_profile(profile: LLMProfile) -> LLMProbeResult:
+async def probe_llm_profile(
+    profile: LLMProfile,
+    *,
+    session: "AsyncSession | None" = None,
+) -> LLMProbeResult:
+    """Test that the model is reachable. Single-turn ping only.
+
+    The ``session`` keyword is kept for backward compatibility with the route
+    layer, but it is intentionally unused: thinking-mode adaptation now happens
+    only on crawl-job startup (see :func:`ensure_thinking_adaptation`). The
+    probe path stays minimal and predictable so users don't see surprising
+    "empty content" errors when their model returns thoughts via
+    ``reasoning_content`` instead of ``content``.
+    """
+
+    _ = session  # retained for API stability; see docstring
     base_url = resolve_base_url(profile.api_base_url)
+    payload = {
+        "model": profile.model_name,
+        "messages": [
+            {
+                "role": "user",
+                "content": "只回复 OK",
+            },
+        ],
+        "temperature": 0,
+        "max_tokens": min(profile.max_tokens or DEFAULT_LLM_MAX_TOKENS, 8),
+    }
+
     try:
-        payload = {
-            "model": profile.model_name,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": "只回复 OK",
-                },
-            ],
-            "temperature": 0,
-            "max_tokens": min(profile.max_tokens or DEFAULT_LLM_MAX_TOKENS, 8),
-        }
-        if is_deepseek_profile(profile):
-            payload["thinking"] = {"type": "disabled"}
-        completion = await request_chat_completion(profile, payload)
+        completion = await request_chat_completion(
+            profile,
+            payload,
+            allow_empty_content=True,
+        )
     except LLMRuntimeError as exc:
         return LLMProbeResult(
             ok=False,
@@ -784,7 +805,7 @@ async def probe_llm_profile(profile: LLMProfile) -> LLMProbeResult:
             response_preview=None,
         )
 
-    preview = completion.content.strip().replace("\n", " ")[:200]
+    preview = (completion.content or "").strip().replace("\n", " ")[:200]
     return LLMProbeResult(
         ok=True,
         message="模型可用性测试成功",
@@ -895,7 +916,13 @@ async def fetch_llm_profile_models(profile: LLMProfile) -> LLMModelCatalogResult
 async def request_chat_completion(
     profile: LLMProfile,
     payload: dict[str, object],
+    *,
+    extra_body: dict[str, object] | None = None,
+    allow_empty_content: bool = False,
 ) -> ChatCompletionResult:
+    from app.services.thinking_adaptation import merge_extra_body
+
+    chat_payload = merge_extra_body(payload, extra_body)
     base_url = resolve_base_url(profile.api_base_url)
     timeout_seconds = get_settings().llm_request_timeout_seconds
     timeout = httpx.Timeout(timeout_seconds)
@@ -907,13 +934,13 @@ async def request_chat_completion(
         (
             "chat_completions",
             build_endpoint_url(base_url, "chat/completions"),
-            payload,
+            chat_payload,
             extract_chat_completion_content,
         ),
         (
             "responses",
             build_endpoint_url(base_url, "responses"),
-            build_responses_payload(payload),
+            build_responses_payload(chat_payload),
             extract_responses_content,
         ),
     ]
@@ -975,14 +1002,19 @@ async def request_chat_completion(
             ) from exc
 
         if not isinstance(content, str) or not content.strip():
-            raise LLMRuntimeError(
-                "模型返回了空内容",
-                request_url=url,
-                attempted_urls=attempted_urls.copy(),
-                endpoint_kind=endpoint_kind,
-                status_code=response.status_code,
-                duration_ms=duration_ms,
-            )
+            if allow_empty_content:
+                # 测活路径用：思考模型可能把回答放在 reasoning_content 字段，
+                # content 为空字符串。这种情况视为"模型可达"，不抛错。
+                content = "" if not isinstance(content, str) else content
+            else:
+                raise LLMRuntimeError(
+                    "模型返回了空内容",
+                    request_url=url,
+                    attempted_urls=attempted_urls.copy(),
+                    endpoint_kind=endpoint_kind,
+                    status_code=response.status_code,
+                    duration_ms=duration_ms,
+                )
 
         return ChatCompletionResult(
             content=content,
@@ -1575,6 +1607,9 @@ def build_responses_payload(payload: dict[str, object]) -> dict[str, object]:
         "model": payload["model"],
         "input": _build_responses_input(payload.get("messages", [])),
     }
+    for key in ("thinking", "enable_thinking", "reasoning", "thinking_budget"):
+        if key in payload:
+            request_payload[key] = payload[key]
     if payload.get("temperature") is not None:
         request_payload["temperature"] = payload["temperature"]
     if payload.get("max_tokens") is not None:

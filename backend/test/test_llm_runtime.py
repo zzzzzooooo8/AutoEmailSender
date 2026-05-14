@@ -1218,7 +1218,8 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.usage.completion_tokens, 7)
         self.assertEqual(result.usage.total_tokens, 19)
 
-    async def test_probe_llm_profile_disables_deepseek_thinking(self) -> None:
+    async def test_probe_llm_profile_no_longer_hardcodes_thinking_for_deepseek(self) -> None:
+        # Probe should not unconditionally inject `thinking` for deepseek when no session is provided.
         profile = LLMProfile(
             name="deepseek",
             provider="deepseek",
@@ -1230,15 +1231,7 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         responses = [
             _FakeResponse(
                 status_code=200,
-                payload={
-                    "choices": [
-                        {
-                            "message": {
-                                "content": "OK",
-                            },
-                        },
-                    ],
-                },
+                payload={"choices": [{"message": {"content": "OK"}}]},
             ),
         ]
 
@@ -1249,11 +1242,75 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
             result = await probe_llm_profile(profile)
 
         self.assertTrue(result.ok)
-        assert calls[0][1] is not None
-        self.assertEqual(
-            calls[0][1]["thinking"],
-            {"type": "disabled"},
+        self.assertEqual(len(calls), 1)
+        sent = calls[0][1]
+        assert sent is not None
+        # No more implicit `thinking` injection when no session is provided
+        self.assertNotIn("thinking", sent)
+
+    async def test_probe_llm_profile_treats_empty_content_as_reachable(self) -> None:
+        # 思考模型在单轮探活里返回 200 但 content 为空（回答塞在 reasoning_content）。
+        # 测活路径用 allow_empty_content=True，应判定为"模型可达"并返回 ok=True。
+        profile = LLMProfile(
+            name="thinking",
+            provider="openai",
+            api_base_url="https://api.example.com/v1",
+            api_key="test-key",
+            model_name="some-thinking-model",
         )
+        calls: list[tuple[str, dict[str, object] | None]] = []
+        responses = [
+            _FakeResponse(
+                status_code=200,
+                payload={"choices": [{"message": {"content": ""}}]},
+            ),
+        ]
+
+        with patch(
+            "app.services.llm_runtime.httpx.AsyncClient",
+            side_effect=lambda *args, **kwargs: _FakeAsyncClient(responses, calls),
+        ):
+            result = await probe_llm_profile(profile)
+
+        self.assertTrue(result.ok)
+        # 只发一次 HTTP，不做多轮探活
+        self.assertEqual(len(calls), 1)
+
+    async def test_probe_llm_profile_session_kwarg_does_not_trigger_learning(self) -> None:
+        # session 形参保留以兼容路由层，但测活路径不再触发 ensure_thinking_adaptation。
+        # 保证测试连接行为简单可预测。
+        from unittest.mock import AsyncMock
+
+        profile = LLMProfile(
+            name="acme",
+            provider="openai",
+            api_base_url="https://api.acme.ai/v1",
+            api_key="test-key",
+            model_name="acme-v1",
+        )
+        calls: list[tuple[str, dict[str, object] | None]] = []
+        responses = [
+            _FakeResponse(
+                status_code=200,
+                payload={"choices": [{"message": {"content": "OK"}}]},
+            ),
+        ]
+
+        fake_session = object()
+        with (
+            patch(
+                "app.services.llm_runtime.httpx.AsyncClient",
+                side_effect=lambda *args, **kwargs: _FakeAsyncClient(responses, calls),
+            ),
+            patch(
+                "app.services.thinking_adaptation.ensure_thinking_adaptation",
+                AsyncMock(),
+            ) as ensure_mock,
+        ):
+            result = await probe_llm_profile(profile, session=fake_session)
+
+        self.assertTrue(result.ok)
+        ensure_mock.assert_not_awaited()
 
     async def test_fetch_llm_profile_models_uses_models_endpoint(self) -> None:
         profile = LLMProfile(
@@ -1334,6 +1391,125 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 "https://ark.cn-beijing.volces.com/api/v3/responses",
             ],
         )
+
+    async def test_request_chat_completion_merges_extra_body_into_chat_payload(self) -> None:
+        profile = LLMProfile(
+            name="acme",
+            provider="openai",
+            api_base_url="https://api.acme.ai/v1",
+            api_key="sk-test",
+            model_name="acme-think-v1",
+        )
+        calls: list[tuple[str, dict[str, object] | None]] = []
+        responses = [
+            _FakeResponse(
+                status_code=200,
+                payload={
+                    "choices": [{"message": {"content": "OK"}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                },
+            ),
+        ]
+
+        with patch(
+            "app.services.llm_runtime.httpx.AsyncClient",
+            side_effect=lambda *args, **kwargs: _FakeAsyncClient(responses, calls),
+        ):
+            await request_chat_completion(
+                profile,
+                {
+                    "model": profile.model_name,
+                    "messages": [{"role": "user", "content": "ping"}],
+                    "max_tokens": 8,
+                },
+                extra_body={"thinking": {"type": "disabled"}},
+            )
+
+        sent = calls[0][1]
+        assert sent is not None
+        self.assertEqual(sent.get("thinking"), {"type": "disabled"})
+        self.assertEqual(sent.get("messages"), [{"role": "user", "content": "ping"}])
+
+    async def test_request_chat_completion_keeps_extra_body_on_responses_fallback(self) -> None:
+        profile = LLMProfile(
+            name="responses-only",
+            provider="openai",
+            api_base_url="https://api.acme.ai/v1",
+            api_key="sk-test",
+            model_name="acme-think-v1",
+        )
+        calls: list[tuple[str, dict[str, object] | None]] = []
+        responses = [
+            _FakeResponse(status_code=404, text="chat endpoint disabled"),
+            _FakeResponse(
+                status_code=200,
+                payload={
+                    "output": [
+                        {
+                            "content": [
+                                {"type": "output_text", "text": "OK"},
+                            ],
+                        },
+                    ],
+                },
+            ),
+        ]
+
+        with patch(
+            "app.services.llm_runtime.httpx.AsyncClient",
+            side_effect=lambda *args, **kwargs: _FakeAsyncClient(responses, calls),
+        ):
+            result = await request_chat_completion(
+                profile,
+                {
+                    "model": profile.model_name,
+                    "messages": [{"role": "user", "content": "ping"}],
+                    "max_tokens": 8,
+                },
+                extra_body={"reasoning": {"effort": "off"}},
+            )
+
+        self.assertEqual(result.endpoint_kind, "responses")
+        responses_payload = calls[1][1]
+        assert responses_payload is not None
+        self.assertEqual(responses_payload.get("reasoning"), {"effort": "off"})
+
+    async def test_request_chat_completion_strips_thinking_keys_when_extra_body_none(self) -> None:
+        profile = LLMProfile(
+            name="acme",
+            provider="openai",
+            api_base_url="https://api.acme.ai/v1",
+            api_key="sk-test",
+            model_name="acme-think-v1",
+        )
+        calls: list[tuple[str, dict[str, object] | None]] = []
+        responses = [
+            _FakeResponse(
+                status_code=200,
+                payload={
+                    "choices": [{"message": {"content": "OK"}}],
+                },
+            ),
+        ]
+
+        with patch(
+            "app.services.llm_runtime.httpx.AsyncClient",
+            side_effect=lambda *args, **kwargs: _FakeAsyncClient(responses, calls),
+        ):
+            await request_chat_completion(
+                profile,
+                {
+                    "model": profile.model_name,
+                    "messages": [{"role": "user", "content": "ping"}],
+                    "thinking": {"type": "enabled"},
+                    "max_tokens": 8,
+                },
+                extra_body=None,
+            )
+
+        sent = calls[0][1]
+        assert sent is not None
+        self.assertNotIn("thinking", sent)
 
 
 if __name__ == "__main__":

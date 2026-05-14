@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 from sqlalchemy import select
@@ -48,7 +48,17 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
         async with self.engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
 
+        # Stub thinking adaptation so legacy tests don't hit the network.
+        # Behaviour matches a non-thinking model (no extra_body required), preserving
+        # pre-task-8 semantics for tests written before the adaptation hook.
+        self._thinking_adaptation_patch = patch(
+            "app.services.crawl_job_runtime.ensure_thinking_adaptation",
+            AsyncMock(return_value=None),
+        )
+        self._thinking_adaptation_patch.start()
+
     async def asyncTearDown(self) -> None:
+        self._thinking_adaptation_patch.stop()
         await self.engine.dispose()
         os.environ.pop("CRAWLER_DEBUG", None)
         os.environ.pop("CRAWLER_DEBUG_DIR", None)
@@ -79,6 +89,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             ctx: CrawlToolContext,
             llm_profile: LLMProfile,
             trace_callback=None,
+            **kwargs,
         ) -> dict[str, object]:
             _ = llm_profile
             if trace_callback is not None:
@@ -136,6 +147,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             ctx: CrawlToolContext,
             llm_profile: LLMProfile,
             trace_callback=None,
+            **kwargs,
         ) -> dict[str, object]:
             _ = llm_profile, trace_callback
             calls.append(ctx.start_url)
@@ -175,6 +187,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             ctx: CrawlToolContext,
             llm_profile: LLMProfile,
             trace_callback=None,
+            **kwargs,
         ) -> dict[str, object]:
             _ = llm_profile
             if trace_callback is not None:
@@ -254,6 +267,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             ctx: CrawlToolContext,
             llm_profile: LLMProfile,
             trace_callback=None,
+            **kwargs,
         ) -> dict[str, object]:
             _ = llm_profile, trace_callback
             async with ctx.session_factory() as session:
@@ -286,6 +300,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             ctx: CrawlToolContext,
             llm_profile: LLMProfile,
             trace_callback=None,
+            **kwargs,
         ) -> dict[str, object]:
             _ = llm_profile, trace_callback
             await save_candidates(
@@ -346,6 +361,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             ctx: CrawlToolContext,
             llm_profile: LLMProfile,
             trace_callback=None,
+            **kwargs,
         ) -> dict[str, object]:
             _ = llm_profile
             if trace_callback is not None:
@@ -746,6 +762,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             ctx: CrawlToolContext,
             llm_profile: LLMProfile,
             trace_callback=None,
+            **kwargs,
         ) -> dict[str, object]:
             _ = ctx, llm_profile
             if trace_callback is not None:
@@ -787,6 +804,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             ctx: CrawlToolContext,
             llm_profile: LLMProfile,
             trace_callback=None,
+            **kwargs,
         ) -> dict[str, object]:
             _ = ctx, llm_profile, trace_callback
             raise CrawlJobSaveBudgetExceeded(
@@ -835,6 +853,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             ctx: CrawlToolContext,
             llm_profile: LLMProfile,
             trace_callback=None,
+            **kwargs,
         ) -> dict[str, object]:
             _ = llm_profile, trace_callback
             async with ctx.session_factory() as session:
@@ -879,6 +898,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             ctx: CrawlToolContext,
             llm_profile: LLMProfile,
             trace_callback=None,
+            **kwargs,
         ) -> dict[str, object]:
             _ = ctx, llm_profile
             if trace_callback is not None:
@@ -928,6 +948,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             ctx: CrawlToolContext,
             llm_profile: LLMProfile,
             trace_callback=None,
+            **kwargs,
         ) -> dict[str, object]:
             _ = llm_profile
             sequence.append("discover")
@@ -1337,6 +1358,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             ctx: CrawlToolContext,
             llm_profile: LLMProfile,
             trace_callback=None,
+            **kwargs,
         ) -> dict[str, object]:
             _ = llm_profile
             if trace_callback is not None:
@@ -1875,6 +1897,215 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
                     )
                 )
             await session.commit()
+
+
+def _make_thinking_test_session_factory() -> tuple[async_sessionmaker, Path]:
+    """Return (session_factory, db_path) bound to a fresh migrated sqlite file."""
+    from test.migrated_database import create_migrated_sqlite_database
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    tmp.close()
+    db_path = Path(tmp.name)
+    create_migrated_sqlite_database(db_path)
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path.as_posix()}")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    return session_factory, db_path
+
+
+async def _seed_queued_crawl_job_with_default_profile(session_factory: async_sessionmaker) -> int:
+    """Insert one is_default LLMProfile + one queued CrawlJob; return the job_id."""
+    async with session_factory() as session:
+        profile = LLMProfile(
+            name="thinking-test-profile",
+            provider="openai",
+            api_base_url="https://api.example.com/v1",
+            api_key="sk-test",
+            model_name="acme-think-v1",
+            is_default=True,
+        )
+        session.add(profile)
+        await session.flush()
+
+        job = CrawlJob(
+            llm_profile_id=profile.id,
+            entry_type="college",
+            status="queued",
+            start_url="https://example.edu/faculty",
+            start_urls=["https://example.edu/faculty"],
+            university="Example U",
+            school="School of CS",
+        )
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+        return job.id
+
+
+class CrawlJobThinkingAdaptationIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.session_factory, self.db_path = _make_thinking_test_session_factory()
+
+    async def asyncTearDown(self) -> None:
+        engine = self.session_factory.kw.get("bind")
+        if engine is not None:
+            await engine.dispose()
+        try:
+            os.unlink(self.db_path)
+        except FileNotFoundError:
+            pass
+
+    async def test_run_queued_crawl_jobs_calls_ensure_thinking_adaptation(self) -> None:
+        await _seed_queued_crawl_job_with_default_profile(self.session_factory)
+
+        with (
+            patch(
+                "app.services.crawl_job_runtime.ensure_thinking_adaptation",
+                AsyncMock(return_value={"thinking": {"type": "disabled"}}),
+            ) as ensure_mock,
+            patch(
+                "app.services.crawl_job_runtime.run_faculty_crawler_agent",
+                AsyncMock(return_value={"event_type": "completed"}),
+            ) as run_mock,
+        ):
+            await run_queued_crawl_jobs_once(self.session_factory)
+
+        ensure_mock.assert_awaited_once()
+        run_mock.assert_awaited_once()
+        kwargs = run_mock.call_args.kwargs
+        self.assertEqual(kwargs.get("extra_body"), {"thinking": {"type": "disabled"}})
+
+    async def test_thinking_adaptation_failure_marks_job_failed_and_skips_run(self) -> None:
+        from app.services.thinking_adaptation import ThinkingAdaptationFailed
+
+        job_id = await _seed_queued_crawl_job_with_default_profile(self.session_factory)
+
+        with (
+            patch(
+                "app.services.crawl_job_runtime.ensure_thinking_adaptation",
+                AsyncMock(
+                    side_effect=ThinkingAdaptationFailed(
+                        "已尝试全部候选 extra_body，仍无法绕开思考模式协议错。",
+                        attempted_extra_bodies=[None, {"thinking": {"type": "disabled"}}],
+                    )
+                ),
+            ),
+            patch(
+                "app.services.crawl_job_runtime.run_faculty_crawler_agent",
+                AsyncMock(),
+            ) as run_mock,
+        ):
+            await run_queued_crawl_jobs_once(self.session_factory)
+
+        run_mock.assert_not_awaited()
+
+        async with self.session_factory() as session:
+            job = await session.get(CrawlJob, job_id)
+            self.assertIsNotNone(job)
+            self.assertEqual(job.status, "failed")
+            assert job.error_message is not None
+            self.assertIn("思考模式", job.error_message)
+
+
+async def _seed_running_crawl_job_with_default_profile(
+    session_factory: async_sessionmaker,
+    *,
+    agent_trace: list[dict[str, object]] | None = None,
+) -> int:
+    """Insert one is_default LLMProfile + one RUNNING CrawlJob; return the job_id."""
+    from app.models import CrawlJob, LLMProfile
+
+    async with session_factory() as session:
+        profile = LLMProfile(
+            name="thinking-running-profile",
+            provider="openai",
+            api_base_url="https://api.example.com/v1",
+            api_key="sk-test",
+            model_name="acme-think-v1",
+            is_default=True,
+        )
+        session.add(profile)
+        await session.flush()
+
+        job = CrawlJob(
+            llm_profile_id=profile.id,
+            entry_type="college",
+            status="running",
+            start_url="https://example.edu/faculty",
+            start_urls=["https://example.edu/faculty"],
+            university="Example U",
+            school="School of CS",
+            agent_trace=agent_trace,
+        )
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+        return job.id
+
+
+class CrawlJobErrorMessageAdaptationTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.session_factory, self.db_path = _make_thinking_test_session_factory()
+
+    async def asyncTearDown(self) -> None:
+        engine = self.session_factory.kw.get("bind")
+        if engine is not None:
+            await engine.dispose()
+        try:
+            os.unlink(self.db_path)
+        except FileNotFoundError:
+            pass
+
+    async def test_mark_job_failed_appends_thinking_hint(self) -> None:
+        from app.services.crawl_job_runtime import _mark_job_failed
+        from app.models import CrawlJob, CrawlJobStatus
+
+        job_id = await _seed_running_crawl_job_with_default_profile(self.session_factory)
+
+        await _mark_job_failed(
+            self.session_factory,
+            job_id,
+            "Error code: 400 - The reasoning_content in the thinking mode must be passed back to the API.",
+        )
+
+        async with self.session_factory() as session:
+            job = await session.get(CrawlJob, job_id)
+            assert job is not None
+            self.assertEqual(job.status, CrawlJobStatus.FAILED.value)
+            assert job.error_message is not None
+            self.assertIn("测试连接", job.error_message)
+
+    async def test_complete_running_job_appends_thinking_hint_when_no_candidates(self) -> None:
+        from app.services.crawl_job_runtime import _complete_running_job
+        from app.models import CrawlJob
+
+        # _derive_job_failure_message 优先返回 trace 中的候选保存失败摘要；
+        # 通过让 trace 为空、且不插入任何 CrawlPage 行，就会回落到查询 CrawlPage
+        # 错误信息的分支。我们直接插入一行 failed CrawlPage 携带协议错文本。
+        job_id = await _seed_running_crawl_job_with_default_profile(self.session_factory)
+        async with self.session_factory() as session:
+            from app.models import CrawlPage
+
+            session.add(
+                CrawlPage(
+                    job_id=job_id,
+                    url="https://example.edu/faculty",
+                    fetch_method="http",
+                    status="failed",
+                    error_message=(
+                        "Error code: 400 - The reasoning_content in the thinking "
+                        "mode must be passed back to the API."
+                    ),
+                )
+            )
+            await session.commit()
+
+        await _complete_running_job(self.session_factory, job_id)
+
+        async with self.session_factory() as session:
+            job = await session.get(CrawlJob, job_id)
+            assert job is not None
+            assert job.error_message is not None
+            self.assertIn("测试连接", job.error_message)
 
 
 if __name__ == "__main__":

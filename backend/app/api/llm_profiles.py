@@ -206,7 +206,7 @@ async def test_llm_profile(
     session: AsyncSession = Depends(get_async_session),
 ) -> LLMProfileTestResult:
     profile = await _get_profile(session, profile_id)
-    result = await probe_llm_profile(profile)
+    result = await probe_llm_profile(profile, session=session)
     await _record_llm_profile_log(
         session,
         profile,

@@ -274,28 +274,47 @@ class FacultyCrawlerAgentMiddlewareTests(unittest.TestCase):
 
 
 class FacultyCrawlerAgentModelTests(unittest.TestCase):
-    def test_deepseek_crawler_model_disables_thinking(self) -> None:
+    def test_crawler_model_passes_extra_body_when_provided(self) -> None:
         profile = LLMProfile(
-            name="DeepSeek",
-            provider="deepseek",
-            api_base_url="https://api.deepseek.com/v1",
+            name="acme",
+            provider="openai",
+            api_base_url="https://api.acme.ai/v1",
             api_key="sk-test",
-            model_name="deepseek-chat",
+            model_name="acme-think-v1",
         )
 
         with patch("app.agents.faculty_crawler_agent.ChatOpenAI") as chat_openai:
-            build_faculty_crawler_model(profile)
+            build_faculty_crawler_model(
+                profile,
+                extra_body={"thinking": {"type": "disabled"}},
+            )
 
         kwargs = chat_openai.call_args.kwargs
         self.assertEqual(kwargs["extra_body"], {"thinking": {"type": "disabled"}})
 
-    def test_openai_crawler_model_does_not_send_deepseek_extra_body(self) -> None:
+    def test_crawler_model_omits_extra_body_when_none(self) -> None:
         profile = LLMProfile(
             name="OpenAI",
             provider="openai",
             api_base_url="https://api.openai.com/v1",
             api_key="sk-test",
             model_name="gpt-4o-mini",
+        )
+
+        with patch("app.agents.faculty_crawler_agent.ChatOpenAI") as chat_openai:
+            build_faculty_crawler_model(profile, extra_body=None)
+
+        self.assertNotIn("extra_body", chat_openai.call_args.kwargs)
+
+    def test_crawler_model_no_longer_relies_on_is_deepseek_profile(self) -> None:
+        # Even an unmistakeably DeepSeek profile must not implicitly enable any extra_body
+        # when the caller did not pass one. Adaptation now happens upstream.
+        profile = LLMProfile(
+            name="DeepSeek",
+            provider="deepseek",
+            api_base_url="https://api.deepseek.com/v1",
+            api_key="sk-test",
+            model_name="deepseek-chat",
         )
 
         with patch("app.agents.faculty_crawler_agent.ChatOpenAI") as chat_openai:

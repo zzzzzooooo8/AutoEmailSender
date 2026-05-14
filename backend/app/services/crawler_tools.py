@@ -247,6 +247,7 @@ class CrawlToolContext:
     denied_urls: dict[str, str] = field(default_factory=dict)
     save_failure_budget: SaveFailureBudgetState = field(default_factory=SaveFailureBudgetState)
     page_snapshot_cache: OrderedDict[str, PageSnapshot] = field(default_factory=OrderedDict)
+    thinking_extra_body: dict[str, object] | None = None
 
     def mark_http_blocked(self, url: str) -> None:
         host = (urlparse(url).hostname or "").lower()

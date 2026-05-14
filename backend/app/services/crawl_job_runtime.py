@@ -25,6 +25,11 @@ from app.services.crawl_job_runs import (
 )
 from app.services.runtime_settings import get_runtime_settings
 from app.services.llm_runtime import LLMRuntimeError, parse_structured_result
+from app.services.thinking_adaptation import (
+    ThinkingAdaptationFailed,
+    adapt_failure_message_for_thinking_error,
+    ensure_thinking_adaptation,
+)
 from app.services.crawler_tools import (
     CrawlJobCanceled,
     CrawlJobPaused,
@@ -155,6 +160,40 @@ async def run_queued_crawl_jobs_once(
             await session.commit()
             return 1
 
+        try:
+            thinking_extra_body = await ensure_thinking_adaptation(session, llm_profile)
+        except ThinkingAdaptationFailed as exc:
+            failed_at = datetime.now(UTC)
+            job.status = CrawlJobStatus.FAILED.value
+            job.error_message = (
+                "思考模式自适应失败：已尝试全部候选 extra_body 仍无法绕开协议错。"
+                "请在 LLM Profile 设置中确认模型是否支持，或联系开发者扩展候选列表。"
+            )
+            job.updated_at = failed_at
+            await mark_crawl_job_run_finished(
+                session,
+                job,
+                status=CrawlJobStatus.FAILED.value,
+                error_message=job.error_message,
+                now=failed_at,
+            )
+            await session.commit()
+            return 1
+        except LLMRuntimeError as exc:
+            failed_at = datetime.now(UTC)
+            job.status = CrawlJobStatus.FAILED.value
+            job.error_message = f"思考模式探活失败：{exc}"
+            job.updated_at = failed_at
+            await mark_crawl_job_run_finished(
+                session,
+                job,
+                status=CrawlJobStatus.FAILED.value,
+                error_message=job.error_message,
+                now=failed_at,
+            )
+            await session.commit()
+            return 1
+
         await session.commit()
 
         job_id = job.id
@@ -165,6 +204,7 @@ async def run_queued_crawl_jobs_once(
             university=job.university,
             school=job.school,
             session_factory=session_factory,
+            thinking_extra_body=thinking_extra_body,
         )
 
     async def trace_callback(event: Any) -> None:
@@ -187,6 +227,7 @@ async def run_queued_crawl_jobs_once(
                         entry_ctx,
                         llm_profile,
                         trace_callback=trace_callback,
+                        extra_body=entry_ctx.thinking_extra_body,
                     )
             except (CrawlJobPaused, CrawlJobCanceled, CrawlJobSaveBudgetExceeded, asyncio.CancelledError):
                 raise
@@ -342,11 +383,12 @@ async def _complete_running_job(
             job.error_message = None
         else:
             job.status = CrawlJobStatus.FAILED.value
-            job.error_message = await _derive_job_failure_message(
+            derived = await _derive_job_failure_message(
                 session,
                 job_id,
                 job.agent_trace,
             )
+            job.error_message = adapt_failure_message_for_thinking_error(derived)
         now = datetime.now(UTC)
         job.updated_at = now
         await mark_crawl_job_run_finished(
@@ -384,7 +426,10 @@ async def _invoke_direct_structured_llm(
     result_model: type[Any],
     empty_response_error: str,
 ) -> Any:
-    model = build_faculty_crawler_model(llm_profile)
+    model = build_faculty_crawler_model(
+        llm_profile,
+        extra_body=ctx.thinking_extra_body,
+    )
     current_prompt = prompt
     last_error: Exception | None = None
 
@@ -971,15 +1016,16 @@ async def _mark_job_failed(
         if job is None or job.status != CrawlJobStatus.RUNNING.value:
             return
 
+        adapted_message = adapt_failure_message_for_thinking_error(error_message)
         job.status = CrawlJobStatus.FAILED.value
-        job.error_message = error_message
+        job.error_message = adapted_message
         now = datetime.now(UTC)
         job.updated_at = now
         await mark_crawl_job_run_finished(
             session,
             job,
             status=CrawlJobStatus.FAILED.value,
-            error_message=error_message,
+            error_message=adapted_message,
             now=now,
         )
         await session.commit()
@@ -1173,17 +1219,8 @@ async def enrich_candidate_profile_with_llm(
         llm_profile=llm_profile,
         prompt=prompt,
         result_model=CandidateEnrichmentPayload,
-        empty_response_error="妯″瀷琛ュ叏杩斿洖绌哄搷搴?",
+        empty_response_error="模型补全返回空响应",
     )
-    _ = ctx
-    model = build_faculty_crawler_model(llm_profile)
-    prompt = build_candidate_enrichment_prompt(candidate, page_text)
-    response = await model.ainvoke(prompt)
-    await _accumulate_direct_llm_response_tokens(ctx.session_factory, ctx.job_id, response)
-    content = _extract_model_message_content(response)
-    if not content:
-        raise ValueError("模型补全返回空响应")
-    return CandidateEnrichmentPayload.model_validate_json(content)
 
 
 async def extract_profile_candidate_with_llm(
@@ -1204,22 +1241,6 @@ async def extract_profile_candidate_with_llm(
         result_model=ProfessorCandidatePayload,
         empty_response_error=PROFILE_EXTRACTION_FAILED_ERROR,
     )
-    if not candidate.name.strip():
-        raise ValueError(PROFILE_EXTRACTION_FAILED_ERROR)
-    return candidate
-    model = build_faculty_crawler_model(llm_profile)
-    prompt = build_profile_candidate_prompt(
-        university=ctx.university,
-        school=ctx.school,
-        profile_url=ctx.start_url,
-        page_text=page_text,
-    )
-    response = await model.ainvoke(prompt)
-    await _accumulate_direct_llm_response_tokens(ctx.session_factory, ctx.job_id, response)
-    content = _extract_model_message_content(response)
-    if not content:
-        raise ValueError(PROFILE_EXTRACTION_FAILED_ERROR)
-    candidate = ProfessorCandidatePayload.model_validate_json(content)
     if not candidate.name.strip():
         raise ValueError(PROFILE_EXTRACTION_FAILED_ERROR)
     return candidate
