@@ -28,7 +28,6 @@ from app.services.crawler_tools import (
 )
 from app.services.llm_runtime import (
     DEFAULT_LLM_TEMPERATURE,
-    is_deepseek_profile,
     resolve_base_url,
 )
 
@@ -447,11 +446,23 @@ def build_trace_event(event: Any) -> dict[str, object]:
     }
 
 
-def build_faculty_crawler_model(llm_profile: LLMProfile) -> ChatOpenAI:
-    """Build the OpenAI-compatible chat model configured by an LLM profile."""
+def build_faculty_crawler_model(
+    llm_profile: LLMProfile,
+    *,
+    extra_body: dict[str, object] | None = None,
+) -> ChatOpenAI:
+    """Build the OpenAI-compatible chat model configured by an LLM profile.
+
+    The crawler runs as a multi-turn tool-call loop. Models that default to
+    thinking mode require model-specific ``extra_body`` to be carried on every
+    turn, which LangChain's ``ChatOpenAI`` does not learn on its own. We rely
+    on the upstream caller to pass the resolved ``extra_body`` (typically from
+    ``app.services.thinking_adaptation.ensure_thinking_adaptation``).
+    """
+
     model_kwargs: dict[str, object] = {}
-    if is_deepseek_profile(llm_profile):
-        model_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+    if extra_body:
+        model_kwargs["extra_body"] = dict(extra_body)
 
     return ChatOpenAI(
         model=llm_profile.model_name,
@@ -466,7 +477,12 @@ def build_faculty_crawler_model(llm_profile: LLMProfile) -> ChatOpenAI:
     )
 
 
-def create_faculty_crawler_agent(ctx: CrawlToolContext, llm_profile: LLMProfile):
+def create_faculty_crawler_agent(
+    ctx: CrawlToolContext,
+    llm_profile: LLMProfile,
+    *,
+    extra_body: dict[str, object] | None = None,
+):
     """Create a DeepAgents graph with only the controlled crawler tools bound."""
 
     @tool
@@ -510,7 +526,7 @@ def create_faculty_crawler_agent(ctx: CrawlToolContext, llm_profile: LLMProfile)
         result = await save_candidate_batch(ctx, payloads)
         return _format_save_batch_result_for_model(result)
 
-    model = build_faculty_crawler_model(llm_profile)
+    model = build_faculty_crawler_model(llm_profile, extra_body=extra_body)
     return create_deep_agent(
         model=model,
         tools=[
@@ -532,9 +548,11 @@ async def run_faculty_crawler_agent(
     ctx: CrawlToolContext,
     llm_profile: LLMProfile,
     trace_callback: TraceCallback | None = None,
+    *,
+    extra_body: dict[str, object] | None = None,
 ) -> Any:
     """Run the faculty crawler agent and optionally forward stream events."""
-    agent = create_faculty_crawler_agent(ctx, llm_profile)
+    agent = create_faculty_crawler_agent(ctx, llm_profile, extra_body=extra_body)
     prompt = (
         f"请从入口页面开始抓取候选导师。入口 URL: {ctx.start_url}\n"
         f"学校: {ctx.university}\n"

@@ -450,5 +450,100 @@ class ProbeAndLearnTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(calls), 1)
 
 
+class EnsureThinkingAdaptationTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.session_factory, self.db_path = _make_test_session_factory()
+
+    async def asyncTearDown(self) -> None:
+        engine = self.session_factory.kw.get("bind")
+        if engine is not None:
+            await engine.dispose()
+        try:
+            os.unlink(self.db_path)
+        except FileNotFoundError:
+            pass
+
+    def _profile(self) -> "LLMProfile":  # type: ignore[name-defined]
+        from app.models import LLMProfile
+
+        return LLMProfile(
+            name="acme",
+            provider="openai",
+            api_base_url="https://api.acme.ai/v1",
+            api_key="sk-test",
+            model_name="acme-think-v1",
+        )
+
+    async def test_cache_hit_short_circuits_without_http_call(self) -> None:
+        from unittest.mock import patch
+
+        from test.test_llm_runtime import _FakeAsyncClient
+
+        from app.services.thinking_adaptation import (
+            ensure_thinking_adaptation,
+            record_thinking_adaptation,
+        )
+
+        async with self.session_factory() as session:
+            await record_thinking_adaptation(
+                session,
+                api_base_url="https://api.acme.ai/v1",
+                model_name="acme-think-v1",
+                learned_extra_body={"thinking": {"type": "disabled"}},
+            )
+            await session.commit()
+
+        calls: list[tuple[str, dict[str, object] | None]] = []
+        with patch(
+            "app.services.llm_runtime.httpx.AsyncClient",
+            side_effect=lambda *a, **kw: _FakeAsyncClient([], calls),
+        ):
+            async with self.session_factory() as session:
+                result = await ensure_thinking_adaptation(session, self._profile())
+
+        self.assertEqual(result, {"thinking": {"type": "disabled"}})
+        self.assertEqual(calls, [])
+
+    async def test_cache_miss_runs_probe_and_returns_learned_value(self) -> None:
+        from unittest.mock import patch
+
+        from test.test_llm_runtime import _FakeAsyncClient, _FakeResponse
+
+        from app.services.thinking_adaptation import (
+            ensure_thinking_adaptation,
+            get_cached_extra_body,
+        )
+
+        responses = [
+            _FakeResponse(
+                status_code=400,
+                text='{"error":{"message":"reasoning_content must be passed back"}}',
+            ),
+            _FakeResponse(
+                status_code=200,
+                payload={"choices": [{"message": {"content": "7"}}]},
+            ),
+        ]
+        calls: list[tuple[str, dict[str, object] | None]] = []
+        with patch(
+            "app.services.llm_runtime.httpx.AsyncClient",
+            side_effect=lambda *a, **kw: _FakeAsyncClient(responses, calls),
+        ):
+            async with self.session_factory() as session:
+                result = await ensure_thinking_adaptation(session, self._profile())
+                await session.commit()
+
+        self.assertEqual(result, {"thinking": {"type": "disabled"}})
+
+        async with self.session_factory() as session:
+            hit, value = await get_cached_extra_body(
+                session,
+                api_base_url="https://api.acme.ai/v1",
+                model_name="acme-think-v1",
+            )
+        self.assertTrue(hit)
+        self.assertEqual(value, {"thinking": {"type": "disabled"}})
+
+
 if __name__ == "__main__":
     unittest.main()

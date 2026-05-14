@@ -236,3 +236,25 @@ async def probe_and_learn_extra_body(
 
     # 不可达：循环要么 return 要么 raise
     raise AssertionError("probe_and_learn_extra_body terminated unexpectedly")
+
+
+async def ensure_thinking_adaptation(
+    session: AsyncSession,
+    profile: LLMProfile,
+) -> dict[str, object] | None:
+    """Return the extra_body to use for ``profile``, probing on cache miss.
+
+    - Cache hit (any value, including ``None``) → return cached value
+    - Cache miss → run :func:`probe_and_learn_extra_body`, write the row, return the result
+    - Probe-level errors propagate to the caller (``ThinkingAdaptationFailed`` or ``LLMRuntimeError``)
+    """
+
+    api_base_url = resolve_base_url_for_cache(profile.api_base_url)
+    hit, value = await get_cached_extra_body(
+        session,
+        api_base_url=api_base_url,
+        model_name=profile.model_name,
+    )
+    if hit:
+        return value
+    return await probe_and_learn_extra_body(session, profile)
