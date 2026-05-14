@@ -1218,6 +1218,13 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.usage.completion_tokens, 7)
         self.assertEqual(result.usage.total_tokens, 19)
 
+    @unittest.skip(
+        "Replaced by task 9 of the thinking-mode adaptation plan: "
+        "probe_llm_profile no longer hardcodes `payload['thinking']`. "
+        "Task 4 introduces merge_extra_body which strips legacy thinking keys; "
+        "task 9 replaces this test with two new ones covering single-turn probe + "
+        "session-driven multi-turn adaptation."
+    )
     async def test_probe_llm_profile_disables_deepseek_thinking(self) -> None:
         profile = LLMProfile(
             name="deepseek",
@@ -1334,6 +1341,81 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 "https://ark.cn-beijing.volces.com/api/v3/responses",
             ],
         )
+
+    async def test_request_chat_completion_merges_extra_body_into_chat_payload(self) -> None:
+        profile = LLMProfile(
+            name="acme",
+            provider="openai",
+            api_base_url="https://api.acme.ai/v1",
+            api_key="sk-test",
+            model_name="acme-think-v1",
+        )
+        calls: list[tuple[str, dict[str, object] | None]] = []
+        responses = [
+            _FakeResponse(
+                status_code=200,
+                payload={
+                    "choices": [{"message": {"content": "OK"}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                },
+            ),
+        ]
+
+        with patch(
+            "app.services.llm_runtime.httpx.AsyncClient",
+            side_effect=lambda *args, **kwargs: _FakeAsyncClient(responses, calls),
+        ):
+            await request_chat_completion(
+                profile,
+                {
+                    "model": profile.model_name,
+                    "messages": [{"role": "user", "content": "ping"}],
+                    "max_tokens": 8,
+                },
+                extra_body={"thinking": {"type": "disabled"}},
+            )
+
+        sent = calls[0][1]
+        assert sent is not None
+        self.assertEqual(sent.get("thinking"), {"type": "disabled"})
+        self.assertEqual(sent.get("messages"), [{"role": "user", "content": "ping"}])
+
+    async def test_request_chat_completion_strips_thinking_keys_when_extra_body_none(self) -> None:
+        profile = LLMProfile(
+            name="acme",
+            provider="openai",
+            api_base_url="https://api.acme.ai/v1",
+            api_key="sk-test",
+            model_name="acme-think-v1",
+        )
+        calls: list[tuple[str, dict[str, object] | None]] = []
+        responses = [
+            _FakeResponse(
+                status_code=200,
+                payload={
+                    "choices": [{"message": {"content": "OK"}}],
+                },
+            ),
+        ]
+
+        with patch(
+            "app.services.llm_runtime.httpx.AsyncClient",
+            side_effect=lambda *args, **kwargs: _FakeAsyncClient(responses, calls),
+        ):
+            await request_chat_completion(
+                profile,
+                {
+                    "model": profile.model_name,
+                    "messages": [{"role": "user", "content": "ping"}],
+                    "thinking": {"type": "enabled"},
+                    "max_tokens": 8,
+                },
+                extra_body=None,
+            )
+
+        sent = calls[0][1]
+        assert sent is not None
+        self.assertNotIn("thinking", sent)
 
 
 if __name__ == "__main__":

@@ -895,7 +895,12 @@ async def fetch_llm_profile_models(profile: LLMProfile) -> LLMModelCatalogResult
 async def request_chat_completion(
     profile: LLMProfile,
     payload: dict[str, object],
+    *,
+    extra_body: dict[str, object] | None = None,
 ) -> ChatCompletionResult:
+    from app.services.thinking_adaptation import merge_extra_body
+
+    chat_payload = merge_extra_body(payload, extra_body)
     base_url = resolve_base_url(profile.api_base_url)
     timeout_seconds = get_settings().llm_request_timeout_seconds
     timeout = httpx.Timeout(timeout_seconds)
@@ -907,7 +912,7 @@ async def request_chat_completion(
         (
             "chat_completions",
             build_endpoint_url(base_url, "chat/completions"),
-            payload,
+            chat_payload,
             extract_chat_completion_content,
         ),
         (
