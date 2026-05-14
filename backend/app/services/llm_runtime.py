@@ -7,11 +7,14 @@ from dataclasses import asdict, dataclass, field
 from math import ceil
 from time import perf_counter
 from textwrap import dedent
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 import httpx
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field, ValidationError
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.models import IdentityMaterial, IdentityProfile, LLMProfile, Professor
@@ -753,7 +756,16 @@ async def _legacy_request_chat_completion(
     )
 
 
-async def probe_llm_profile(profile: LLMProfile) -> LLMProbeResult:
+async def probe_llm_profile(
+    profile: LLMProfile,
+    *,
+    session: "AsyncSession | None" = None,
+) -> LLMProbeResult:
+    from app.services.thinking_adaptation import (
+        ThinkingAdaptationFailed,
+        ensure_thinking_adaptation,
+    )
+
     base_url = resolve_base_url(profile.api_base_url)
     try:
         payload = {
@@ -767,8 +779,6 @@ async def probe_llm_profile(profile: LLMProfile) -> LLMProbeResult:
             "temperature": 0,
             "max_tokens": min(profile.max_tokens or DEFAULT_LLM_MAX_TOKENS, 8),
         }
-        if is_deepseek_profile(profile):
-            payload["thinking"] = {"type": "disabled"}
         completion = await request_chat_completion(profile, payload)
     except LLMRuntimeError as exc:
         return LLMProbeResult(
@@ -785,6 +795,13 @@ async def probe_llm_profile(profile: LLMProfile) -> LLMProbeResult:
         )
 
     preview = completion.content.strip().replace("\n", " ")[:200]
+    if session is not None:
+        try:
+            await ensure_thinking_adaptation(session, profile)
+        except (ThinkingAdaptationFailed, LLMRuntimeError):
+            # 单轮已成功，多轮自适应失败不影响测活整体结论；
+            # 后续抓取启动时会再尝试探活并报错给用户。
+            pass
     return LLMProbeResult(
         ok=True,
         message="模型可用性测试成功",

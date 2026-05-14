@@ -1218,14 +1218,8 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.usage.completion_tokens, 7)
         self.assertEqual(result.usage.total_tokens, 19)
 
-    @unittest.skip(
-        "Replaced by task 9 of the thinking-mode adaptation plan: "
-        "probe_llm_profile no longer hardcodes `payload['thinking']`. "
-        "Task 4 introduces merge_extra_body which strips legacy thinking keys; "
-        "task 9 replaces this test with two new ones covering single-turn probe + "
-        "session-driven multi-turn adaptation."
-    )
-    async def test_probe_llm_profile_disables_deepseek_thinking(self) -> None:
+    async def test_probe_llm_profile_no_longer_hardcodes_thinking_for_deepseek(self) -> None:
+        # Probe should not unconditionally inject `thinking` for deepseek when no session is provided.
         profile = LLMProfile(
             name="deepseek",
             provider="deepseek",
@@ -1237,15 +1231,7 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         responses = [
             _FakeResponse(
                 status_code=200,
-                payload={
-                    "choices": [
-                        {
-                            "message": {
-                                "content": "OK",
-                            },
-                        },
-                    ],
-                },
+                payload={"choices": [{"message": {"content": "OK"}}]},
             ),
         ]
 
@@ -1256,11 +1242,49 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
             result = await probe_llm_profile(profile)
 
         self.assertTrue(result.ok)
-        assert calls[0][1] is not None
-        self.assertEqual(
-            calls[0][1]["thinking"],
-            {"type": "disabled"},
+        self.assertEqual(len(calls), 1)
+        sent = calls[0][1]
+        assert sent is not None
+        # No more implicit `thinking` injection when no session is provided
+        self.assertNotIn("thinking", sent)
+
+    async def test_probe_llm_profile_with_session_runs_thinking_adaptation(self) -> None:
+        from unittest.mock import AsyncMock
+
+        profile = LLMProfile(
+            name="acme",
+            provider="openai",
+            api_base_url="https://api.acme.ai/v1",
+            api_key="test-key",
+            model_name="acme-think-v1",
         )
+        calls: list[tuple[str, dict[str, object] | None]] = []
+        responses = [
+            _FakeResponse(
+                status_code=200,
+                payload={"choices": [{"message": {"content": "OK"}}]},
+            ),
+        ]
+
+        fake_session = object()
+        with (
+            patch(
+                "app.services.llm_runtime.httpx.AsyncClient",
+                side_effect=lambda *args, **kwargs: _FakeAsyncClient(responses, calls),
+            ),
+            patch(
+                "app.services.thinking_adaptation.ensure_thinking_adaptation",
+                AsyncMock(return_value={"thinking": {"type": "disabled"}}),
+            ) as ensure_mock,
+        ):
+            result = await probe_llm_profile(profile, session=fake_session)
+
+        self.assertTrue(result.ok)
+        ensure_mock.assert_awaited_once()
+        # 第一/二个位置参数应该是 session / profile
+        positional = ensure_mock.call_args.args
+        self.assertIs(positional[0], fake_session)
+        self.assertIs(positional[1], profile)
 
     async def test_fetch_llm_profile_models_uses_models_endpoint(self) -> None:
         profile = LLMProfile(
