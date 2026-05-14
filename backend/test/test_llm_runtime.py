@@ -1248,7 +1248,37 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         # No more implicit `thinking` injection when no session is provided
         self.assertNotIn("thinking", sent)
 
-    async def test_probe_llm_profile_with_session_runs_thinking_adaptation(self) -> None:
+    async def test_probe_llm_profile_treats_empty_content_as_reachable(self) -> None:
+        # 思考模型在单轮探活里返回 200 但 content 为空（回答塞在 reasoning_content）。
+        # 测活路径用 allow_empty_content=True，应判定为"模型可达"并返回 ok=True。
+        profile = LLMProfile(
+            name="thinking",
+            provider="openai",
+            api_base_url="https://api.example.com/v1",
+            api_key="test-key",
+            model_name="some-thinking-model",
+        )
+        calls: list[tuple[str, dict[str, object] | None]] = []
+        responses = [
+            _FakeResponse(
+                status_code=200,
+                payload={"choices": [{"message": {"content": ""}}]},
+            ),
+        ]
+
+        with patch(
+            "app.services.llm_runtime.httpx.AsyncClient",
+            side_effect=lambda *args, **kwargs: _FakeAsyncClient(responses, calls),
+        ):
+            result = await probe_llm_profile(profile)
+
+        self.assertTrue(result.ok)
+        # 只发一次 HTTP，不做多轮探活
+        self.assertEqual(len(calls), 1)
+
+    async def test_probe_llm_profile_session_kwarg_does_not_trigger_learning(self) -> None:
+        # session 形参保留以兼容路由层，但测活路径不再触发 ensure_thinking_adaptation。
+        # 保证测试连接行为简单可预测。
         from unittest.mock import AsyncMock
 
         profile = LLMProfile(
@@ -1256,7 +1286,7 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
             provider="openai",
             api_base_url="https://api.acme.ai/v1",
             api_key="test-key",
-            model_name="acme-think-v1",
+            model_name="acme-v1",
         )
         calls: list[tuple[str, dict[str, object] | None]] = []
         responses = [
@@ -1274,17 +1304,13 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch(
                 "app.services.thinking_adaptation.ensure_thinking_adaptation",
-                AsyncMock(return_value={"thinking": {"type": "disabled"}}),
+                AsyncMock(),
             ) as ensure_mock,
         ):
             result = await probe_llm_profile(profile, session=fake_session)
 
         self.assertTrue(result.ok)
-        ensure_mock.assert_awaited_once()
-        # 第一/二个位置参数应该是 session / profile
-        positional = ensure_mock.call_args.args
-        self.assertIs(positional[0], fake_session)
-        self.assertIs(positional[1], profile)
+        ensure_mock.assert_not_awaited()
 
     async def test_fetch_llm_profile_models_uses_models_endpoint(self) -> None:
         profile = LLMProfile(

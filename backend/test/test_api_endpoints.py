@@ -166,63 +166,6 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(body["models"], ["gpt-5.4", "gpt-5.4-mini"])
         self.assertTrue(body["selected_model_available"])
 
-    def test_llm_profile_test_endpoint_persists_thinking_adaptation(self) -> None:
-        from app.services.llm_runtime import ChatCompletionResult
-
-        llm_id = self._create_llm()
-
-        async def fake_ensure(session, profile):
-            from app.services.thinking_adaptation import record_thinking_adaptation
-
-            await record_thinking_adaptation(
-                session,
-                api_base_url=profile.api_base_url,
-                model_name=profile.model_name,
-                learned_extra_body={"thinking": {"type": "disabled"}},
-            )
-            return {"thinking": {"type": "disabled"}}
-
-        with (
-            patch(
-                "app.services.llm_runtime.request_chat_completion",
-                AsyncMock(
-                    return_value=ChatCompletionResult(
-                        content="OK",
-                        request_url="https://api.example.com/v1/chat/completions",
-                        attempted_urls=["https://api.example.com/v1/chat/completions"],
-                        endpoint_kind="chat_completions",
-                        status_code=200,
-                        duration_ms=1,
-                    )
-                ),
-            ),
-            patch(
-                "app.services.thinking_adaptation.ensure_thinking_adaptation",
-                fake_ensure,
-            ),
-        ):
-            response = self.client.post(f"/api/llm-profiles/{llm_id}/test")
-
-        self.assertEqual(response.status_code, 200, msg=response.text)
-        self.assertTrue(response.json()["ok"])
-
-        # 验证 DB 里写入了一行缓存
-        connection = sqlite3.connect(self.db_path)
-        try:
-            cursor = connection.execute(
-                "SELECT api_base_url, model_name, learned_extra_body "
-                "FROM thinking_adaptation_cache"
-            )
-            rows = list(cursor.fetchall())
-        finally:
-            connection.close()
-
-        self.assertEqual(len(rows), 1)
-        api_base_url, model_name, learned_blob = rows[0]
-        self.assertEqual(api_base_url, "https://api.example.com/v1")
-        self.assertEqual(model_name, "gpt-4o-mini")
-        self.assertIn("thinking", learned_blob)
-
     def test_llm_model_preview_endpoints_use_unsaved_payload(self) -> None:
         payload = self._build_llm_payload(api_base_url="https://draft.example.com/v1")
 

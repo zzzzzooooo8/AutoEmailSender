@@ -761,25 +761,36 @@ async def probe_llm_profile(
     *,
     session: "AsyncSession | None" = None,
 ) -> LLMProbeResult:
-    from app.services.thinking_adaptation import (
-        ThinkingAdaptationFailed,
-        ensure_thinking_adaptation,
-    )
+    """Test that the model is reachable. Single-turn ping only.
 
+    The ``session`` keyword is kept for backward compatibility with the route
+    layer, but it is intentionally unused: thinking-mode adaptation now happens
+    only on crawl-job startup (see :func:`ensure_thinking_adaptation`). The
+    probe path stays minimal and predictable so users don't see surprising
+    "empty content" errors when their model returns thoughts via
+    ``reasoning_content`` instead of ``content``.
+    """
+
+    _ = session  # retained for API stability; see docstring
     base_url = resolve_base_url(profile.api_base_url)
+    payload = {
+        "model": profile.model_name,
+        "messages": [
+            {
+                "role": "user",
+                "content": "只回复 OK",
+            },
+        ],
+        "temperature": 0,
+        "max_tokens": min(profile.max_tokens or DEFAULT_LLM_MAX_TOKENS, 8),
+    }
+
     try:
-        payload = {
-            "model": profile.model_name,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": "只回复 OK",
-                },
-            ],
-            "temperature": 0,
-            "max_tokens": min(profile.max_tokens or DEFAULT_LLM_MAX_TOKENS, 8),
-        }
-        completion = await request_chat_completion(profile, payload)
+        completion = await request_chat_completion(
+            profile,
+            payload,
+            allow_empty_content=True,
+        )
     except LLMRuntimeError as exc:
         return LLMProbeResult(
             ok=False,
@@ -794,14 +805,7 @@ async def probe_llm_profile(
             response_preview=None,
         )
 
-    preview = completion.content.strip().replace("\n", " ")[:200]
-    if session is not None:
-        try:
-            await ensure_thinking_adaptation(session, profile)
-        except (ThinkingAdaptationFailed, LLMRuntimeError):
-            # 单轮已成功，多轮自适应失败不影响测活整体结论；
-            # 后续抓取启动时会再尝试探活并报错给用户。
-            pass
+    preview = (completion.content or "").strip().replace("\n", " ")[:200]
     return LLMProbeResult(
         ok=True,
         message="模型可用性测试成功",
@@ -914,6 +918,7 @@ async def request_chat_completion(
     payload: dict[str, object],
     *,
     extra_body: dict[str, object] | None = None,
+    allow_empty_content: bool = False,
 ) -> ChatCompletionResult:
     from app.services.thinking_adaptation import merge_extra_body
 
@@ -997,14 +1002,19 @@ async def request_chat_completion(
             ) from exc
 
         if not isinstance(content, str) or not content.strip():
-            raise LLMRuntimeError(
-                "模型返回了空内容",
-                request_url=url,
-                attempted_urls=attempted_urls.copy(),
-                endpoint_kind=endpoint_kind,
-                status_code=response.status_code,
-                duration_ms=duration_ms,
-            )
+            if allow_empty_content:
+                # 测活路径用：思考模型可能把回答放在 reasoning_content 字段，
+                # content 为空字符串。这种情况视为"模型可达"，不抛错。
+                content = "" if not isinstance(content, str) else content
+            else:
+                raise LLMRuntimeError(
+                    "模型返回了空内容",
+                    request_url=url,
+                    attempted_urls=attempted_urls.copy(),
+                    endpoint_kind=endpoint_kind,
+                    status_code=response.status_code,
+                    duration_ms=duration_ms,
+                )
 
         return ChatCompletionResult(
             content=content,
