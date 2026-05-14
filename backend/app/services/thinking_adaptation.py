@@ -74,3 +74,73 @@ def merge_extra_body(
     if extra_body:
         merged.update(extra_body)
     return merged
+
+
+from datetime import UTC, datetime
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import ThinkingAdaptationCache
+
+
+async def get_cached_extra_body(
+    session: AsyncSession,
+    *,
+    api_base_url: str,
+    model_name: str,
+) -> tuple[bool, dict[str, object] | None]:
+    """Look up the cached extra_body for a (base_url, model_name) pair.
+
+    Returns ``(hit, value)`` where ``hit`` is True if a row exists (even if the
+    stored value is ``None``, which positively means "we tried and the model
+    needs no extra_body").
+    """
+
+    row = await session.scalar(
+        select(ThinkingAdaptationCache).where(
+            ThinkingAdaptationCache.api_base_url == api_base_url,
+            ThinkingAdaptationCache.model_name == model_name,
+        )
+    )
+    if row is None:
+        return False, None
+    value = row.learned_extra_body
+    return True, dict(value) if isinstance(value, dict) else None
+
+
+async def record_thinking_adaptation(
+    session: AsyncSession,
+    *,
+    api_base_url: str,
+    model_name: str,
+    learned_extra_body: dict[str, object] | None,
+) -> None:
+    """Insert or update the cache row for ``(api_base_url, model_name)``.
+
+    The caller is responsible for committing the surrounding session.
+    """
+
+    row = await session.scalar(
+        select(ThinkingAdaptationCache).where(
+            ThinkingAdaptationCache.api_base_url == api_base_url,
+            ThinkingAdaptationCache.model_name == model_name,
+        )
+    )
+    now = datetime.now(UTC)
+    if row is None:
+        session.add(
+            ThinkingAdaptationCache(
+                api_base_url=api_base_url,
+                model_name=model_name,
+                learned_extra_body=(
+                    dict(learned_extra_body) if learned_extra_body else None
+                ),
+                probed_at=now,
+            )
+        )
+    else:
+        row.learned_extra_body = (
+            dict(learned_extra_body) if learned_extra_body else None
+        )
+        row.probed_at = now
