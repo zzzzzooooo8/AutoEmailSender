@@ -25,6 +25,10 @@ from app.services.crawl_job_runs import (
 )
 from app.services.runtime_settings import get_runtime_settings
 from app.services.llm_runtime import LLMRuntimeError, parse_structured_result
+from app.services.thinking_adaptation import (
+    ThinkingAdaptationFailed,
+    ensure_thinking_adaptation,
+)
 from app.services.crawler_tools import (
     CrawlJobCanceled,
     CrawlJobPaused,
@@ -155,6 +159,40 @@ async def run_queued_crawl_jobs_once(
             await session.commit()
             return 1
 
+        try:
+            thinking_extra_body = await ensure_thinking_adaptation(session, llm_profile)
+        except ThinkingAdaptationFailed as exc:
+            failed_at = datetime.now(UTC)
+            job.status = CrawlJobStatus.FAILED.value
+            job.error_message = (
+                "思考模式自适应失败：已尝试全部候选 extra_body 仍无法绕开协议错。"
+                "请在 LLM Profile 设置中确认模型是否支持，或联系开发者扩展候选列表。"
+            )
+            job.updated_at = failed_at
+            await mark_crawl_job_run_finished(
+                session,
+                job,
+                status=CrawlJobStatus.FAILED.value,
+                error_message=job.error_message,
+                now=failed_at,
+            )
+            await session.commit()
+            return 1
+        except LLMRuntimeError as exc:
+            failed_at = datetime.now(UTC)
+            job.status = CrawlJobStatus.FAILED.value
+            job.error_message = f"思考模式探活失败：{exc}"
+            job.updated_at = failed_at
+            await mark_crawl_job_run_finished(
+                session,
+                job,
+                status=CrawlJobStatus.FAILED.value,
+                error_message=job.error_message,
+                now=failed_at,
+            )
+            await session.commit()
+            return 1
+
         await session.commit()
 
         job_id = job.id
@@ -165,6 +203,7 @@ async def run_queued_crawl_jobs_once(
             university=job.university,
             school=job.school,
             session_factory=session_factory,
+            thinking_extra_body=thinking_extra_body,
         )
 
     async def trace_callback(event: Any) -> None:
@@ -187,6 +226,7 @@ async def run_queued_crawl_jobs_once(
                         entry_ctx,
                         llm_profile,
                         trace_callback=trace_callback,
+                        extra_body=entry_ctx.thinking_extra_body,
                     )
             except (CrawlJobPaused, CrawlJobCanceled, CrawlJobSaveBudgetExceeded, asyncio.CancelledError):
                 raise
@@ -384,7 +424,10 @@ async def _invoke_direct_structured_llm(
     result_model: type[Any],
     empty_response_error: str,
 ) -> Any:
-    model = build_faculty_crawler_model(llm_profile)
+    model = build_faculty_crawler_model(
+        llm_profile,
+        extra_body=ctx.thinking_extra_body,
+    )
     current_prompt = prompt
     last_error: Exception | None = None
 
