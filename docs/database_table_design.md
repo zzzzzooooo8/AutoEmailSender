@@ -256,3 +256,32 @@ LLM 配置表。
   - 邮箱格式错误或必填缺失记为失败，但不影响整批导入
   - 数据库已有同邮箱导师时执行覆盖更新，不跳过
   - 如果旧导师处于归档状态，会在导入后自动恢复
+
+## 14. `thinking_adaptation_cache`
+
+思考模式 LLM 协议自适应缓存表。按 `(api_base_url, model_name)` 维度记录每个具体模型一次性"学到"的请求方式，避免每次抓取都被「思考模式协议错」（`reasoning_content must be passed back`）打断。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | INTEGER PK | 自增主键 |
+| `api_base_url` | VARCHAR(500) NOT NULL | 模型 API 入口（已 strip 末尾 `/`） |
+| `model_name` | VARCHAR(255) NOT NULL | 模型 ID（如 `deepseek-chat`、`qwen3-32b`） |
+| `learned_extra_body` | JSON NULL | 探活成功时使用的 `extra_body` 字典；NULL 表示该模型无需 `extra_body`（已确认） |
+| `probed_at` | DATETIME NOT NULL | 上次探活完成的时间 |
+| `created_at` | DATETIME NOT NULL | 行创建时间 |
+| `updated_at` | DATETIME NOT NULL | 最后一次更新时间，行更新时由 ORM 自动写 |
+
+唯一约束：`(api_base_url, model_name)`，索引：`model_name`。
+
+### 维护策略
+
+- 缓存由后端自动维护，不暴露给前端。
+- 学习成果按"模型本身"持久化，与具体的 `LLMProfile` 行解耦：
+  - 用户在同一 `LLMProfile` 里改 `model_name` 到新模型 → 老模型缓存保留，新模型独立探活。
+  - 用户改回老 `model_name` → 直接命中老缓存，零成本。
+  - 多个 `LLMProfile` 用同一个模型 → 共享同一行缓存。
+- 抓取启动前会调用 `app.services.thinking_adaptation.ensure_thinking_adaptation`：缓存命中直接返回，未命中则触发一次"3 轮多轮探活 + 候选 `extra_body` 切换"，找到的值随当前 session 的 commit 一起落库。
+- 测活路径 `POST /api/llm-profiles/{id}/test` 在单轮探活成功后也会触发 `ensure_thinking_adaptation`，让用户在保存模型后第一次点测试时就能完成学习；预览测活 `POST /api/llm-profiles/preview/test` 不传 session，不会写缓存。
+- 候选 `extra_body` 列表见 `app/services/thinking_adaptation.py` 的 `THINKING_DISABLE_CANDIDATES`（当前覆盖 `thinking={"type":"disabled"}` / `enable_thinking=False` / `reasoning={"effort":"off"}` / `thinking_budget=0`）。
+- 如果候选列表全部用尽仍失败，会抛 `ThinkingAdaptationFailed`，抓取任务被标 FAILED，并在 `error_message` 中提示用户在 GitHub 上报。
+- 抓取过程中如果 LangChain 内部仍然吐出协议错（极端边角场景），`_mark_job_failed` 与 `_complete_running_job` 两条路径都会调用 `adapt_failure_message_for_thinking_error`，给用户拼一段引导提示。
