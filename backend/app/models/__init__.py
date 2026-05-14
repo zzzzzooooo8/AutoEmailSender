@@ -31,6 +31,7 @@ from app.models.operation_log import OperationLog
 from app.models.professor import Professor
 from app.models.test_compose_message import TestComposeMessage
 from app.models.test_compose_session import TestComposeSession
+from app.models.thinking_adaptation_cache import ThinkingAdaptationCache
 
 __all__ = [
     "AppSetting",
@@ -63,4 +64,5 @@ __all__ = [
     "Professor",
     "TestComposeMessage",
     "TestComposeSession",
+    "ThinkingAdaptationCache",
 ]
