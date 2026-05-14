@@ -1219,17 +1219,8 @@ async def enrich_candidate_profile_with_llm(
         llm_profile=llm_profile,
         prompt=prompt,
         result_model=CandidateEnrichmentPayload,
-        empty_response_error="妯″瀷琛ュ叏杩斿洖绌哄搷搴?",
+        empty_response_error="模型补全返回空响应",
     )
-    _ = ctx
-    model = build_faculty_crawler_model(llm_profile)
-    prompt = build_candidate_enrichment_prompt(candidate, page_text)
-    response = await model.ainvoke(prompt)
-    await _accumulate_direct_llm_response_tokens(ctx.session_factory, ctx.job_id, response)
-    content = _extract_model_message_content(response)
-    if not content:
-        raise ValueError("模型补全返回空响应")
-    return CandidateEnrichmentPayload.model_validate_json(content)
 
 
 async def extract_profile_candidate_with_llm(
@@ -1250,22 +1241,6 @@ async def extract_profile_candidate_with_llm(
         result_model=ProfessorCandidatePayload,
         empty_response_error=PROFILE_EXTRACTION_FAILED_ERROR,
     )
-    if not candidate.name.strip():
-        raise ValueError(PROFILE_EXTRACTION_FAILED_ERROR)
-    return candidate
-    model = build_faculty_crawler_model(llm_profile)
-    prompt = build_profile_candidate_prompt(
-        university=ctx.university,
-        school=ctx.school,
-        profile_url=ctx.start_url,
-        page_text=page_text,
-    )
-    response = await model.ainvoke(prompt)
-    await _accumulate_direct_llm_response_tokens(ctx.session_factory, ctx.job_id, response)
-    content = _extract_model_message_content(response)
-    if not content:
-        raise ValueError(PROFILE_EXTRACTION_FAILED_ERROR)
-    candidate = ProfessorCandidatePayload.model_validate_json(content)
     if not candidate.name.strip():
         raise ValueError(PROFILE_EXTRACTION_FAILED_ERROR)
     return candidate

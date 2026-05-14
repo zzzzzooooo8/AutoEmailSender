@@ -1430,6 +1430,50 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent.get("thinking"), {"type": "disabled"})
         self.assertEqual(sent.get("messages"), [{"role": "user", "content": "ping"}])
 
+    async def test_request_chat_completion_keeps_extra_body_on_responses_fallback(self) -> None:
+        profile = LLMProfile(
+            name="responses-only",
+            provider="openai",
+            api_base_url="https://api.acme.ai/v1",
+            api_key="sk-test",
+            model_name="acme-think-v1",
+        )
+        calls: list[tuple[str, dict[str, object] | None]] = []
+        responses = [
+            _FakeResponse(status_code=404, text="chat endpoint disabled"),
+            _FakeResponse(
+                status_code=200,
+                payload={
+                    "output": [
+                        {
+                            "content": [
+                                {"type": "output_text", "text": "OK"},
+                            ],
+                        },
+                    ],
+                },
+            ),
+        ]
+
+        with patch(
+            "app.services.llm_runtime.httpx.AsyncClient",
+            side_effect=lambda *args, **kwargs: _FakeAsyncClient(responses, calls),
+        ):
+            result = await request_chat_completion(
+                profile,
+                {
+                    "model": profile.model_name,
+                    "messages": [{"role": "user", "content": "ping"}],
+                    "max_tokens": 8,
+                },
+                extra_body={"reasoning": {"effort": "off"}},
+            )
+
+        self.assertEqual(result.endpoint_kind, "responses")
+        responses_payload = calls[1][1]
+        assert responses_payload is not None
+        self.assertEqual(responses_payload.get("reasoning"), {"effort": "off"})
+
     async def test_request_chat_completion_strips_thinking_keys_when_extra_body_none(self) -> None:
         profile = LLMProfile(
             name="acme",

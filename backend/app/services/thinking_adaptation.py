@@ -79,6 +79,7 @@ def merge_extra_body(
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ThinkingAdaptationCache
@@ -264,7 +265,18 @@ async def ensure_thinking_adaptation(
     )
     if hit:
         return value
-    return await probe_and_learn_extra_body(session, profile)
+    try:
+        return await probe_and_learn_extra_body(session, profile)
+    except IntegrityError:
+        await session.rollback()
+        hit, value = await get_cached_extra_body(
+            session,
+            api_base_url=api_base_url,
+            model_name=profile.model_name,
+        )
+        if hit:
+            return value
+        raise
 
 
 

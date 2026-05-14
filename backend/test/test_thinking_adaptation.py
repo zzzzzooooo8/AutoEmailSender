@@ -591,6 +591,52 @@ class EnsureThinkingAdaptationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(hit)
         self.assertEqual(value, {"thinking": {"type": "disabled"}})
 
+    async def test_cache_write_conflict_returns_existing_value(self) -> None:
+        from unittest.mock import AsyncMock, patch
+
+        from sqlalchemy.exc import IntegrityError
+
+        from app.services.thinking_adaptation import ensure_thinking_adaptation
+
+        from app.models import LLMProfile
+
+        profile = LLMProfile(
+            name="acme",
+            provider="openai",
+            api_base_url="https://api.acme.ai/v1",
+            api_key="sk-test",
+            model_name="acme-think-v1",
+        )
+        cached_value = {"thinking": {"type": "disabled"}}
+        calls = {"count": 0}
+
+        async def fake_get_cached_extra_body(*args, **kwargs):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return False, None
+            return True, cached_value
+
+        with (
+            patch(
+                "app.services.thinking_adaptation.get_cached_extra_body",
+                side_effect=fake_get_cached_extra_body,
+            ),
+            patch(
+                "app.services.thinking_adaptation.probe_and_learn_extra_body",
+                AsyncMock(
+                    side_effect=IntegrityError(
+                        "insert",
+                        {},
+                        Exception("UNIQUE constraint failed"),
+                    ),
+                ),
+            ),
+        ):
+            async with self.session_factory() as session:
+                result = await ensure_thinking_adaptation(session, profile)
+
+        self.assertEqual(result, cached_value)
+
 
 class AdaptFailureMessageTests(unittest.TestCase):
     def test_appends_hint_for_thinking_protocol_error(self) -> None:

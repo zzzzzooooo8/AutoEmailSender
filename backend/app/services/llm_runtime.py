@@ -940,7 +940,7 @@ async def request_chat_completion(
         (
             "responses",
             build_endpoint_url(base_url, "responses"),
-            build_responses_payload(payload),
+            build_responses_payload(chat_payload),
             extract_responses_content,
         ),
     ]
@@ -1607,6 +1607,9 @@ def build_responses_payload(payload: dict[str, object]) -> dict[str, object]:
         "model": payload["model"],
         "input": _build_responses_input(payload.get("messages", [])),
     }
+    for key in ("thinking", "enable_thinking", "reasoning", "thinking_budget"):
+        if key in payload:
+            request_payload[key] = payload[key]
     if payload.get("temperature") is not None:
         request_payload["temperature"] = payload["temperature"]
     if payload.get("max_tokens") is not None:
