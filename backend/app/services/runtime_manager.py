@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -23,6 +25,22 @@ from app.services.task_runtime import (
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True, slots=True)
+class RuntimeWorkerStartupSettings:
+    crawler_worker_count: int
+    match_analysis_job_worker_count: int
+    match_analysis_job_interval_seconds: int
+
+
+def _positive_int(value: Any, fallback: int) -> int:
+    if isinstance(value, bool):
+        return max(1, fallback)
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return max(1, fallback)
+
+
 class RuntimeManager:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
@@ -30,11 +48,57 @@ class RuntimeManager:
         self._stopped = asyncio.Event()
         self._batch_draft_coordinator = BatchDraftGenerationCoordinator()
 
+    async def _resolve_worker_startup_settings(
+        self,
+        settings: object,
+    ) -> RuntimeWorkerStartupSettings:
+        fallback = RuntimeWorkerStartupSettings(
+            crawler_worker_count=_positive_int(
+                getattr(settings, "crawler_worker_count", 2),
+                2,
+            ),
+            match_analysis_job_worker_count=_positive_int(
+                getattr(settings, "match_analysis_job_worker_count", 1),
+                1,
+            ),
+            match_analysis_job_interval_seconds=_positive_int(
+                getattr(settings, "match_analysis_job_interval_seconds", 10),
+                10,
+            ),
+        )
+
+        try:
+            async with self._session_factory() as session:
+                runtime_settings = await get_runtime_settings(session)
+        except Exception:
+            logger.exception("读取运行时 worker 设置失败，已回退到环境配置")
+            return fallback
+
+        try:
+            return RuntimeWorkerStartupSettings(
+                crawler_worker_count=_positive_int(
+                    runtime_settings.crawler_worker_count,
+                    fallback.crawler_worker_count,
+                ),
+                match_analysis_job_worker_count=_positive_int(
+                    runtime_settings.match_analysis_job_worker_count,
+                    fallback.match_analysis_job_worker_count,
+                ),
+                match_analysis_job_interval_seconds=_positive_int(
+                    runtime_settings.match_analysis_job_interval_seconds,
+                    fallback.match_analysis_job_interval_seconds,
+                ),
+            )
+        except Exception:
+            logger.exception("运行时 worker 设置字段不完整，已回退到环境配置")
+            return fallback
+
     async def start(self) -> None:
         if self._tasks:
             return
         self._stopped.clear()
         settings = get_settings()
+        worker_settings = await self._resolve_worker_startup_settings(settings)
         crawler_tasks = [
             asyncio.create_task(
                 self._loop(
@@ -43,17 +107,17 @@ class RuntimeManager:
                     run_queued_crawl_jobs_once,
                 ),
             )
-            for index in range(1, settings.crawler_worker_count + 1)
+            for index in range(1, worker_settings.crawler_worker_count + 1)
         ]
         match_analysis_tasks = [
             asyncio.create_task(
                 self._loop(
                     f"match-analysis-worker-{index}",
-                    settings.match_analysis_job_interval_seconds,
+                    worker_settings.match_analysis_job_interval_seconds,
                     _run_match_analysis_worker_once,
                 ),
             )
-            for index in range(1, settings.match_analysis_job_worker_count + 1)
+            for index in range(1, worker_settings.match_analysis_job_worker_count + 1)
         ]
 
         async def run_batch_draft_worker(session_factory: async_sessionmaker[AsyncSession]) -> int:

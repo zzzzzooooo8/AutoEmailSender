@@ -10,7 +10,11 @@ from app.services.runtime_manager import RuntimeManager
 
 class RuntimeManagerTests(unittest.IsolatedAsyncioTestCase):
     async def test_start_creates_multiple_crawler_workers_from_settings(self) -> None:
-        session_factory = AsyncMock()
+        session = object()
+        session_context = MagicMock()
+        session_context.__aenter__ = AsyncMock(return_value=session)
+        session_context.__aexit__ = AsyncMock(return_value=None)
+        session_factory = Mock(return_value=session_context)
         manager = RuntimeManager(session_factory)
 
         async def idle_loop() -> None:
@@ -19,6 +23,14 @@ class RuntimeManagerTests(unittest.IsolatedAsyncioTestCase):
         def build_idle_loop(*args: object, **kwargs: object):
             _ = args, kwargs
             return idle_loop()
+
+        async def fake_get_runtime_settings(session_arg: object) -> SimpleNamespace:
+            self.assertIs(session_arg, session)
+            return SimpleNamespace(
+                crawler_worker_count=2,
+                match_analysis_job_worker_count=1,
+                match_analysis_job_interval_seconds=10,
+            )
 
         with patch("app.services.runtime_manager.get_settings") as mocked_get_settings:
             mocked_get_settings.return_value = type(
@@ -32,7 +44,10 @@ class RuntimeManagerTests(unittest.IsolatedAsyncioTestCase):
                     "match_analysis_job_interval_seconds": 10,
                 },
             )()
-            with patch.object(
+            with patch(
+                "app.services.runtime_manager.get_runtime_settings",
+                new=fake_get_runtime_settings,
+            ), patch.object(
                 manager,
                 "_loop",
                 new=Mock(side_effect=build_idle_loop),
