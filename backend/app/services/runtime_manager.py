@@ -6,9 +6,11 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import get_settings
+from app.models import AppSetting
 from app.services.batch_draft_generation_runtime import (
     BatchDraftGenerationCoordinator,
     run_queued_batch_drafts_once,
@@ -41,6 +43,10 @@ def _positive_int(value: Any, fallback: int) -> int:
         return max(1, fallback)
 
 
+async def _load_worker_runtime_settings(session: AsyncSession) -> AppSetting | None:
+    return await session.scalar(select(AppSetting).where(AppSetting.id == 1))
+
+
 class RuntimeManager:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
@@ -69,9 +75,12 @@ class RuntimeManager:
 
         try:
             async with self._session_factory() as session:
-                runtime_settings = await get_runtime_settings(session)
+                runtime_settings = await _load_worker_runtime_settings(session)
         except Exception:
             logger.exception("读取运行时 worker 设置失败，已回退到环境配置")
+            return fallback
+
+        if runtime_settings is None:
             return fallback
 
         try:

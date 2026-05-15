@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from app.models import AppSetting, Base
 from app.services.runtime_manager import RuntimeManager
 
 
@@ -24,7 +30,7 @@ class RuntimeManagerTests(unittest.IsolatedAsyncioTestCase):
             _ = args, kwargs
             return idle_loop()
 
-        async def fake_get_runtime_settings(session_arg: object) -> SimpleNamespace:
+        async def fake_load_worker_runtime_settings(session_arg: object) -> SimpleNamespace:
             self.assertIs(session_arg, session)
             return SimpleNamespace(
                 crawler_worker_count=2,
@@ -45,8 +51,8 @@ class RuntimeManagerTests(unittest.IsolatedAsyncioTestCase):
                 },
             )()
             with patch(
-                "app.services.runtime_manager.get_runtime_settings",
-                new=fake_get_runtime_settings,
+                "app.services.runtime_manager._load_worker_runtime_settings",
+                new=fake_load_worker_runtime_settings,
             ), patch.object(
                 manager,
                 "_loop",
@@ -77,7 +83,7 @@ class RuntimeManagerTests(unittest.IsolatedAsyncioTestCase):
             _ = args, kwargs
             return idle_loop()
 
-        async def fake_get_runtime_settings(session_arg: object) -> SimpleNamespace:
+        async def fake_load_worker_runtime_settings(session_arg: object) -> SimpleNamespace:
             self.assertIs(session_arg, session)
             return SimpleNamespace(
                 crawler_worker_count=3,
@@ -98,8 +104,8 @@ class RuntimeManagerTests(unittest.IsolatedAsyncioTestCase):
                 },
             )()
             with patch(
-                "app.services.runtime_manager.get_runtime_settings",
-                new=fake_get_runtime_settings,
+                "app.services.runtime_manager._load_worker_runtime_settings",
+                new=fake_load_worker_runtime_settings,
             ), patch.object(
                 manager,
                 "_loop",
@@ -133,7 +139,7 @@ class RuntimeManagerTests(unittest.IsolatedAsyncioTestCase):
             _ = args, kwargs
             return idle_loop()
 
-        async def fail_get_runtime_settings(session_arg: object) -> SimpleNamespace:
+        async def fail_load_worker_runtime_settings(session_arg: object) -> SimpleNamespace:
             self.assertIs(session_arg, session)
             raise RuntimeError("database unavailable")
 
@@ -150,8 +156,8 @@ class RuntimeManagerTests(unittest.IsolatedAsyncioTestCase):
                 },
             )()
             with patch(
-                "app.services.runtime_manager.get_runtime_settings",
-                new=fail_get_runtime_settings,
+                "app.services.runtime_manager._load_worker_runtime_settings",
+                new=fail_load_worker_runtime_settings,
             ), patch.object(
                 manager,
                 "_loop",
@@ -171,6 +177,39 @@ class RuntimeManagerTests(unittest.IsolatedAsyncioTestCase):
         )
 
         await manager.stop()
+
+    async def test_worker_startup_settings_use_environment_when_app_settings_row_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "runtime-manager.db"
+            engine = create_async_engine(f"sqlite+aiosqlite:///{db_path.as_posix()}")
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+
+            session_factory = async_sessionmaker(engine, expire_on_commit=False)
+            manager = RuntimeManager(session_factory)
+            settings_stub = type(
+                "SettingsStub",
+                (),
+                {
+                    "crawler_worker_count": 9,
+                    "match_analysis_job_worker_count": 8,
+                    "match_analysis_job_interval_seconds": 7,
+                },
+            )()
+
+            try:
+                resolved = await manager._resolve_worker_startup_settings(settings_stub)
+                async with session_factory() as session:
+                    app_settings_count = len(
+                        list((await session.execute(select(AppSetting))).scalars()),
+                    )
+            finally:
+                await engine.dispose()
+
+        self.assertEqual(resolved.crawler_worker_count, 9)
+        self.assertEqual(resolved.match_analysis_job_worker_count, 8)
+        self.assertEqual(resolved.match_analysis_job_interval_seconds, 7)
+        self.assertEqual(app_settings_count, 0)
 
     async def test_match_analysis_worker_uses_runtime_item_concurrency(self) -> None:
         session = object()
