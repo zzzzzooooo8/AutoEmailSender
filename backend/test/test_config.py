@@ -30,7 +30,10 @@ class SettingsTests(unittest.TestCase):
         settings = get_settings()
 
         self.assertTrue(settings.crawler_debug_enabled)
-        self.assertEqual(settings.crawler_debug_dir, Path(self.temp_dir.name) / "logs" / "crawler")
+        self.assertEqual(
+            settings.crawler_debug_dir,
+            (Path(self.temp_dir.name) / "logs" / "crawler").resolve(),
+        )
 
 
 if __name__ == "__main__":
