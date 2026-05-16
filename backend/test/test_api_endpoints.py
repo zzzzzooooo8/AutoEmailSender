@@ -845,6 +845,164 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(payload["current_task"]["match_keywords"], [])
         self.assertEqual(payload["messages"], [])
 
+    def test_workspace_communication_history_follows_identity_not_llm_profile(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        first_llm_id = self._create_llm()
+        second_llm_response = self.client.post(
+            "/api/llm-profiles",
+            json={
+                "name": "切换后模型",
+                "provider": "openai",
+                "api_base_url": "https://api.example.com/v1",
+                "api_key": "sk-test-key",
+                "model_name": "gpt-switch",
+                "matcher_prompt_template": "matcher",
+                "writer_prompt_template": "writer",
+                "temperature": 0.2,
+                "max_tokens": 2048,
+                "is_default": False,
+            },
+        )
+        self.assertEqual(second_llm_response.status_code, 201, msg=second_llm_response.text)
+        second_llm_id = second_llm_response.json()["id"]
+
+        other_identity_payload = self._build_identity_payload(with_imap=False)
+        other_identity_payload["name"] = "另一个身份"
+        other_identity_payload["email_address"] = "other-sender@example.com"
+        other_identity_payload["smtp_username"] = "other-sender@example.com"
+        other_identity_response = self.client.post("/api/identities", json=other_identity_payload)
+        self.assertEqual(other_identity_response.status_code, 201, msg=other_identity_response.text)
+        other_identity_id = other_identity_response.json()["id"]
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "模型切换历史导师",
+                "email": "history-switch@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Agent systems",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        ensure_response = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": first_llm_id},
+        )
+        self.assertEqual(ensure_response.status_code, 200, msg=ensure_response.text)
+        task_id = ensure_response.json()["current_task"]["id"]
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            connection.execute(
+                """
+                UPDATE email_tasks
+                SET status = 'reply_detected',
+                    match_score = 88,
+                    match_reason = '身份材料与导师方向高度匹配',
+                    fit_points = '["研究方向一致"]',
+                    risk_points = '["需要补充项目细节"]',
+                    match_keywords = '["agent", "workflow"]',
+                    sent_at = CURRENT_TIMESTAMP,
+                    is_replied = 1
+                WHERE id = ?
+                """,
+                (task_id,),
+            )
+            connection.execute(
+                """
+                INSERT INTO email_logs (
+                    email_task_id, identity_id, llm_profile_id, professor_id,
+                    direction, subject, content, rfc_message_id
+                )
+                VALUES (?, ?, ?, ?, 'sent', '首封联系', '老师您好', '<sent-switch@example.edu>')
+                """,
+                (task_id, identity_id, first_llm_id, professor_id),
+            )
+            connection.execute(
+                """
+                INSERT INTO email_logs (
+                    email_task_id, identity_id, llm_profile_id, professor_id,
+                    direction, subject, content, rfc_message_id
+                )
+                VALUES (?, ?, ?, ?, 'received', 'Re: 首封联系', '欢迎继续交流', '<reply-switch@example.edu>')
+                """,
+                (task_id, identity_id, first_llm_id, professor_id),
+            )
+            connection.execute(
+                """
+                INSERT INTO email_logs (
+                    email_task_id, identity_id, llm_profile_id, professor_id,
+                    direction, subject, content, rfc_message_id
+                )
+                VALUES (?, ?, ?, ?, 'draft', '模型 A 草稿', '不应带到模型 B', NULL)
+                """,
+                (task_id, identity_id, first_llm_id, professor_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        switched_model_response = self.client.get(
+            f"/api/workspaces/{professor_id}",
+            params={"identity_id": identity_id, "llm_profile_id": second_llm_id},
+        )
+        self.assertEqual(switched_model_response.status_code, 200, msg=switched_model_response.text)
+        switched_messages = switched_model_response.json()["messages"]
+        self.assertEqual([message["direction"] for message in switched_messages], ["sent", "received"])
+        self.assertEqual([message["subject"] for message in switched_messages], ["首封联系", "Re: 首封联系"])
+
+        switched_ensure_response = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": second_llm_id},
+        )
+        self.assertEqual(switched_ensure_response.status_code, 200, msg=switched_ensure_response.text)
+        switched_task = switched_ensure_response.json()["current_task"]
+        self.assertEqual(switched_task["status"], "matched")
+        self.assertEqual(switched_task["match_score"], 88)
+        self.assertEqual(switched_task["match_reason"], "身份材料与导师方向高度匹配")
+        self.assertEqual(switched_task["fit_points"], ["研究方向一致"])
+        self.assertEqual(switched_task["risk_points"], ["需要补充项目细节"])
+        self.assertEqual(switched_task["match_keywords"], ["agent", "workflow"])
+
+        dashboard_response = self.client.get(
+            "/api/professors",
+            params={"identity_id": identity_id, "llm_profile_id": second_llm_id},
+        )
+        self.assertEqual(dashboard_response.status_code, 200, msg=dashboard_response.text)
+        dashboard_professor = next(
+            item for item in dashboard_response.json() if item["id"] == professor_id
+        )
+        self.assertEqual(dashboard_professor["match_score"], 88)
+        self.assertEqual(dashboard_professor["sent_count"], 1)
+        self.assertEqual(dashboard_professor["status"], "replied")
+
+        other_identity_response = self.client.get(
+            f"/api/workspaces/{professor_id}",
+            params={"identity_id": other_identity_id, "llm_profile_id": second_llm_id},
+        )
+        self.assertEqual(other_identity_response.status_code, 200, msg=other_identity_response.text)
+        self.assertEqual(other_identity_response.json()["messages"], [])
+
+        other_dashboard_response = self.client.get(
+            "/api/professors",
+            params={"identity_id": other_identity_id, "llm_profile_id": second_llm_id},
+        )
+        self.assertEqual(other_dashboard_response.status_code, 200, msg=other_dashboard_response.text)
+        other_dashboard_professor = next(
+            item for item in other_dashboard_response.json() if item["id"] == professor_id
+        )
+        self.assertIsNone(other_dashboard_professor["match_score"])
+        self.assertEqual(other_dashboard_professor["sent_count"], 0)
+        self.assertEqual(other_dashboard_professor["status"], "not_contacted")
+
     def test_workspace_ensure_task_creates_and_reuses_personal_task(self) -> None:
         identity_id = self._create_identity(with_imap=False)
         llm_id = self._create_llm()
