@@ -6,6 +6,7 @@ from time import perf_counter
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -30,6 +31,7 @@ from app.services.outreach_templates import (
 
 
 router = APIRouter(prefix="/api/identities", tags=["identities"])
+DUPLICATE_EMAIL_DETAIL = "该发件邮箱已存在，请改用编辑已有身份或更换邮箱"
 
 
 @router.get("", response_model=list[IdentityProfileRead])
@@ -53,16 +55,22 @@ async def create_identity(
 ) -> IdentityProfileRead:
     existing_count = await session.scalar(select(func.count(IdentityProfile.id)))
     data = _normalize_identity_payload(payload)
+    await _ensure_identity_email_available(session, str(data["email_address"]))
     identity = IdentityProfile(**data)
     if not existing_count:
         identity.is_default = True
     elif payload.is_default:
         await _clear_default_identities(session)
 
-    session.add(identity)
-    await session.flush()
-    await _record_identity_log(session, identity, "identity.created")
-    await session.commit()
+    try:
+        session.add(identity)
+        await session.flush()
+        await _record_identity_log(session, identity, "identity.created")
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        _raise_email_conflict_if_needed(exc)
+        raise
     saved = await _get_identity(session, identity.id)
     return serialize_identity(saved)
 
@@ -75,6 +83,11 @@ async def update_identity(
 ) -> IdentityProfileRead:
     identity = await _get_identity(session, identity_id)
     data = _normalize_identity_payload(payload)
+    await _ensure_identity_email_available(
+        session,
+        str(data["email_address"]),
+        exclude_id=identity_id,
+    )
     if data["is_default"]:
         await _clear_default_identities(session, exclude_id=identity_id)
 
@@ -82,8 +95,13 @@ async def update_identity(
         setattr(identity, key, value)
     identity.updated_at = datetime.now(UTC)
 
-    await _record_identity_log(session, identity, "identity.updated")
-    await session.commit()
+    try:
+        await _record_identity_log(session, identity, "identity.updated")
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        _raise_email_conflict_if_needed(exc)
+        raise
     saved = await _get_identity(session, identity_id)
     return serialize_identity(saved)
 
@@ -248,6 +266,37 @@ async def _clear_default_identities(
         identity.updated_at = datetime.now(UTC)
 
 
+async def _ensure_identity_email_available(
+    session: AsyncSession,
+    email_address: str,
+    *,
+    exclude_id: int | None = None,
+) -> None:
+    statement = select(IdentityProfile.id).where(
+        IdentityProfile.email_address == email_address,
+    )
+    if exclude_id is not None:
+        statement = statement.where(IdentityProfile.id != exclude_id)
+    existing_id = await session.scalar(statement.limit(1))
+    if existing_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=DUPLICATE_EMAIL_DETAIL,
+        )
+
+
+def _raise_email_conflict_if_needed(exc: IntegrityError) -> None:
+    message = str(exc.orig or exc)
+    if (
+        "identity_profiles.email_address" in message
+        or "uq_identity_profiles_email_address" in message
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=DUPLICATE_EMAIL_DETAIL,
+        ) from exc
+
+
 async def _record_identity_log(
     session: AsyncSession,
     identity: IdentityProfile,
@@ -302,6 +351,7 @@ def _normalize_identity_payload(
     data["name"] = profile_name
     data["profile_name"] = profile_name
     data["sender_name"] = sender_name
+    data["email_address"] = email_address
     data["smtp_username"] = email_address
     data["imap_host"] = imap_host or _infer_imap_host(smtp_host)
     data["imap_port"] = data.get("imap_port") or 993

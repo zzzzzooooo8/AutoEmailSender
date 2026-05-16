@@ -138,6 +138,58 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(body["profile_name"], "旧身份名称")
         self.assertEqual(body["sender_name"], "旧身份名称")
 
+    def test_identity_create_rejects_duplicate_email_address(self) -> None:
+        payload = self._build_identity_payload(
+            with_imap=False,
+            outreach_template_subject="申请与{{name}}老师交流",
+            outreach_template_body_text="老师您好，我是{{sender_name}}。",
+        )
+        first_response = self.client.post("/api/identities", json=payload)
+        self.assertEqual(first_response.status_code, 201, msg=first_response.text)
+
+        duplicate_response = self.client.post("/api/identities", json=payload)
+
+        self.assertEqual(duplicate_response.status_code, 409, msg=duplicate_response.text)
+        self.assertEqual(
+            duplicate_response.json()["detail"],
+            "该发件邮箱已存在，请改用编辑已有身份或更换邮箱",
+        )
+
+    def test_identity_update_rejects_duplicate_email_address(self) -> None:
+        first_payload = self._build_identity_payload(
+            with_imap=False,
+            outreach_template_subject="申请与{{name}}老师交流",
+            outreach_template_body_text="老师您好，我是{{sender_name}}。",
+        )
+        first_payload["email_address"] = "first-identity@example.com"
+        first_payload["smtp_username"] = "first-identity@example.com"
+        first_response = self.client.post("/api/identities", json=first_payload)
+        self.assertEqual(first_response.status_code, 201, msg=first_response.text)
+
+        second_payload = self._build_identity_payload(
+            with_imap=False,
+            outreach_template_subject="申请与{{name}}老师交流",
+            outreach_template_body_text="老师您好，我是{{sender_name}}。",
+        )
+        second_payload["email_address"] = "second-identity@example.com"
+        second_payload["smtp_username"] = "second-identity@example.com"
+        second_response = self.client.post("/api/identities", json=second_payload)
+        self.assertEqual(second_response.status_code, 201, msg=second_response.text)
+
+        update_payload = dict(second_payload)
+        update_payload["email_address"] = "first-identity@example.com"
+        update_payload["smtp_username"] = "first-identity@example.com"
+        conflict_response = self.client.put(
+            f"/api/identities/{second_response.json()['id']}",
+            json=update_payload,
+        )
+
+        self.assertEqual(conflict_response.status_code, 409, msg=conflict_response.text)
+        self.assertEqual(
+            conflict_response.json()["detail"],
+            "该发件邮箱已存在，请改用编辑已有身份或更换邮箱",
+        )
+
     def test_system_settings_endpoint_is_removed(self) -> None:
         response = self.client.get("/api/system-settings")
 
