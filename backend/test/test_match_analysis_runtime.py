@@ -18,8 +18,12 @@ from app.models import (
     MatchAnalysisRun,
     Professor,
 )
-from app.services import llm_runtime
-from app.services.task_runtime import MatchAnalysisAlreadyRunningError, calculate_task_match_once
+from app.services import llm_runtime, task_runtime
+from app.services.task_runtime import (
+    MatchAnalysisAlreadyRunningError,
+    calculate_task_match_once,
+    recover_interrupted_match_analysis_runs,
+)
 
 
 class MatchAnalysisRuntimeTests(unittest.TestCase):
@@ -187,6 +191,20 @@ class MatchAnalysisRuntimeTests(unittest.TestCase):
 
         with self.assertRaisesRegex(MatchAnalysisAlreadyRunningError, "该任务正在分析中"):
             self._run_async(calculate_task_match_once(self.session_factory, self.email_task_id))
+
+    def test_recover_interrupted_match_analysis_runs_marks_running_run_failed(self) -> None:
+        self._run_async(self._insert_running_run())
+
+        recovered = self._run_async(recover_interrupted_match_analysis_runs(self.session_factory))
+
+        self.assertEqual(recovered, 1)
+        runs = self._run_async(self._list_runs())
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(runs[0].status, "failed")
+        self.assertFalse(runs[0].success)
+        self.assertEqual(runs[0].error_kind, "interrupted")
+        self.assertEqual(runs[0].error_message, task_runtime.INTERRUPTED_MATCH_ANALYSIS_RUN_ERROR)
+        self.assertIsNotNone(runs[0].finished_at)
 
     def test_calculate_match_rejects_when_primary_material_has_no_extracted_text(self) -> None:
         self._run_async(self._clear_primary_material_text())

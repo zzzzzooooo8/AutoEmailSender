@@ -66,6 +66,7 @@ DISPATCHABLE_EMAIL_TASK_STATUSES = (
 )
 
 STALE_SENDING_TASK_AFTER = timedelta(minutes=30)
+INTERRUPTED_MATCH_ANALYSIS_RUN_ERROR = "匹配分析因桌面端进程中断而停止"
 
 MANUAL_DRAFT_CLAIMABLE_STATUSES = {
     EmailTaskStatus.DISCOVERED.value,
@@ -393,6 +394,28 @@ async def recover_stale_sending_tasks(
             task.updated_at = resolved_now
         await session.commit()
         return len(tasks)
+
+
+async def recover_interrupted_match_analysis_runs(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    now: datetime | None = None,
+) -> int:
+    resolved_now = now or datetime.now(UTC)
+    async with session_factory() as session:
+        runs = list(
+            await session.scalars(
+                select(MatchAnalysisRun).where(MatchAnalysisRun.status == "running"),
+            ),
+        )
+        for run in runs:
+            run.status = "failed"
+            run.success = False
+            run.error_kind = "interrupted"
+            run.error_message = INTERRUPTED_MATCH_ANALYSIS_RUN_ERROR
+            run.finished_at = resolved_now
+        await session.commit()
+        return len(runs)
 
 
 async def generate_task_draft(
