@@ -47,6 +47,7 @@ from app.services.crawler_tools import (
 
 NO_LLM_PROFILE_ERROR = "请先配置可用的 LLM Profile"
 WORKER_CANCELLED_ERROR = "抓取任务被后台 worker 取消"
+INTERRUPTED_JOB_ERROR = "抓取任务因桌面端进程中断而停止"
 NO_CANDIDATES_SAVED_ERROR = "抓取结束但未成功保存任何候选导师"
 PROFILE_EXTRACTION_FAILED_ERROR = "未能从详情页识别导师信息"
 INVALID_SAVE_TOOL_CALL_ERROR = (
@@ -57,6 +58,7 @@ TRUNCATED_SAVE_TOOL_CALL_ERROR = (
 )
 MAX_AGENT_TRACE_EVENTS = 100
 DIRECT_LLM_STRUCTURED_MAX_ATTEMPTS = 2
+_ACTIVE_CRAWL_JOB_IDS: set[int] = set()
 
 
 @dataclass(slots=True)
@@ -133,6 +135,7 @@ async def run_queued_crawl_jobs_once(
         if claim_result.rowcount != 1:
             await session.rollback()
             return 0
+        _ACTIVE_CRAWL_JOB_IDS.add(job_id)
 
         job = await session.scalar(
             select(CrawlJob)
@@ -140,6 +143,7 @@ async def run_queued_crawl_jobs_once(
             .limit(1),
         )
         if job is None:
+            _ACTIVE_CRAWL_JOB_IDS.discard(job_id)
             await session.rollback()
             return 0
 
@@ -158,6 +162,7 @@ async def run_queued_crawl_jobs_once(
                 now=failed_at,
             )
             await session.commit()
+            _ACTIVE_CRAWL_JOB_IDS.discard(job_id)
             return 1
 
         try:
@@ -285,8 +290,73 @@ async def run_queued_crawl_jobs_once(
         raise
     except Exception as exc:
         await _mark_job_failed(session_factory, job_id, str(exc))
+    finally:
+        _ACTIVE_CRAWL_JOB_IDS.discard(job_id)
 
     return 1
+
+
+async def recover_interrupted_crawl_jobs(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory() as session:
+        running_job_ids = list(
+            await session.scalars(
+                select(CrawlJob.id)
+                .where(
+                    CrawlJob.status == CrawlJobStatus.RUNNING.value,
+                    CrawlJob.deleted_at.is_(None),
+                )
+                .order_by(CrawlJob.created_at.asc(), CrawlJob.id.asc()),
+            )
+        )
+
+    for job_id in running_job_ids:
+        if job_id in _ACTIVE_CRAWL_JOB_IDS:
+            continue
+        await _recover_interrupted_crawl_job(session_factory, job_id)
+
+
+async def _recover_interrupted_crawl_job(
+    session_factory: async_sessionmaker[AsyncSession],
+    job_id: int,
+) -> None:
+    async with session_factory() as session:
+        job = await session.get(CrawlJob, job_id)
+        if job is None or job.status != CrawlJobStatus.RUNNING.value:
+            return
+
+        candidate_count = await session.scalar(
+            select(func.count()).select_from(CrawlCandidate).where(CrawlCandidate.job_id == job_id)
+        )
+        now = datetime.now(UTC)
+        if int(candidate_count or 0) > 0:
+            job.status = CrawlJobStatus.NEEDS_REVIEW.value
+            job.error_message = None
+            error_message = None
+        else:
+            job.status = CrawlJobStatus.FAILED.value
+            job.error_message = INTERRUPTED_JOB_ERROR
+            error_message = INTERRUPTED_JOB_ERROR
+
+        trace = list(_normalize_trace(job.agent_trace))
+        trace.append(
+            {
+                "event_type": "job_recovered",
+                "message": INTERRUPTED_JOB_ERROR,
+                "created_at": now.isoformat(),
+            }
+        )
+        job.agent_trace = trace[-MAX_AGENT_TRACE_EVENTS:]
+        job.updated_at = now
+        await mark_crawl_job_run_finished(
+            session,
+            job,
+            status=job.status,
+            error_message=error_message,
+            now=now,
+        )
+        await session.commit()
 
 
 def _get_crawl_job_start_urls(job: CrawlJob) -> list[str]:

@@ -12,6 +12,13 @@ from fastapi.testclient import TestClient
 
 
 class DesktopRuntimeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        os.environ["AUTO_EMAIL_SENDER_DATA_DIR"] = str(
+            Path(self.temp_dir.name) / "AutoEmailSender",
+        )
+        os.environ.pop("DATABASE_URL", None)
+
     def tearDown(self) -> None:
         from app.core.config import get_settings
         from app.core.database import dispose_engine, get_engine, get_session_factory
@@ -23,6 +30,7 @@ class DesktopRuntimeTests(unittest.TestCase):
         os.environ.pop("AUTO_EMAIL_SENDER_DATA_DIR", None)
         os.environ.pop("DATABASE_URL", None)
         os.environ.pop("ENABLE_BACKGROUND_WORKERS", None)
+        self.temp_dir.cleanup()
 
     def test_health_endpoint_returns_ok(self) -> None:
         os.environ["ENABLE_BACKGROUND_WORKERS"] = "0"
@@ -116,6 +124,56 @@ class DesktopRuntimeTests(unittest.TestCase):
         self.assertEqual(data["phase"], "ready")
         self.assertEqual(data["message"], "系统已准备就绪")
         self.assertIsNone(data["error"])
+
+    def test_runtime_initialization_recovers_interrupted_crawl_jobs_before_ready(self) -> None:
+        os.environ["ENABLE_BACKGROUND_WORKERS"] = "0"
+
+        from app.core.config import get_settings
+        import main as main_module
+
+        get_settings.cache_clear()
+
+        with patch.object(
+            main_module,
+            "recover_interrupted_crawl_jobs",
+            new_callable=AsyncMock,
+        ) as recover_interrupted:
+            with TestClient(main_module.create_app()) as client:
+                response = client.get("/startup-status")
+                for _ in range(50):
+                    if response.json()["state"] == "ready":
+                        break
+                    time.sleep(0.1)
+                    response = client.get("/startup-status")
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        self.assertEqual(response.json()["state"], "ready")
+        recover_interrupted.assert_awaited_once()
+
+    def test_runtime_initialization_recovers_interrupted_match_analysis_runs_before_ready(self) -> None:
+        os.environ["ENABLE_BACKGROUND_WORKERS"] = "0"
+
+        from app.core.config import get_settings
+        import main as main_module
+
+        get_settings.cache_clear()
+
+        with patch.object(
+            main_module,
+            "recover_interrupted_match_analysis_runs",
+            new_callable=AsyncMock,
+        ) as recover_interrupted:
+            with TestClient(main_module.create_app()) as client:
+                response = client.get("/startup-status")
+                for _ in range(50):
+                    if response.json()["state"] == "ready":
+                        break
+                    time.sleep(0.1)
+                    response = client.get("/startup-status")
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        self.assertEqual(response.json()["state"], "ready")
+        recover_interrupted.assert_awaited_once()
 
     def test_startup_status_reports_error_without_http_500(self) -> None:
         os.environ["ENABLE_BACKGROUND_WORKERS"] = "1"

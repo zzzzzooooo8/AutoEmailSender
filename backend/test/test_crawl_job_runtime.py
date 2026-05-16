@@ -20,6 +20,7 @@ from app.services.crawl_job_runtime import (
     enrich_selected_crawl_candidates,
     enrich_candidate_profile_with_llm,
     extract_profile_candidate_with_llm,
+    recover_interrupted_crawl_jobs,
     resolve_crawl_runtime_concurrency,
     run_queued_crawl_jobs_once,
 )
@@ -259,6 +260,36 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(processed, 0)
         job = await self._get_job(job_id)
         self.assertEqual(job.status, CrawlJobStatus.QUEUED.value)
+
+    async def test_running_job_without_candidates_is_marked_failed_after_worker_restart(self) -> None:
+        job_id = await self._create_default_profile_and_job()
+        await self._mark_job_running_after_interrupted_worker(job_id)
+
+        await recover_interrupted_crawl_jobs(self.session_factory)
+
+        job = await self._get_job(job_id)
+        self.assertEqual(job.status, CrawlJobStatus.FAILED.value)
+        self.assertEqual(job.error_message, crawl_job_runtime.INTERRUPTED_JOB_ERROR)
+        run = await self._get_current_run(job_id)
+        self.assertEqual(run.status, CrawlJobStatus.FAILED.value)
+        self.assertEqual(run.error_message, crawl_job_runtime.INTERRUPTED_JOB_ERROR)
+        self.assertIsNotNone(run.finished_at)
+        self.assertIsNone(run.active_started_at)
+
+    async def test_running_job_with_candidates_is_moved_to_review_after_worker_restart(self) -> None:
+        job_id = await self._create_default_profile_and_job()
+        await self._seed_candidates(job_id, count=1, host="example.edu")
+        await self._mark_job_running_after_interrupted_worker(job_id)
+
+        await recover_interrupted_crawl_jobs(self.session_factory)
+
+        job = await self._get_job(job_id)
+        self.assertEqual(job.status, CrawlJobStatus.NEEDS_REVIEW.value)
+        self.assertEqual(await self._count_candidates(job_id), 1)
+        run = await self._get_current_run(job_id)
+        self.assertEqual(run.status, CrawlJobStatus.NEEDS_REVIEW.value)
+        self.assertIsNotNone(run.finished_at)
+        self.assertIsNone(run.active_started_at)
 
     async def test_running_job_paused_by_tool_stays_paused(self) -> None:
         job_id = await self._create_default_profile_and_job()
@@ -1859,6 +1890,23 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
             if job is None:
                 raise AssertionError(f"crawl job {job_id} not found")
             job.deleted_at = datetime.now(UTC)
+            await session.commit()
+
+    async def _mark_job_running_after_interrupted_worker(self, job_id: int) -> None:
+        async with self.session_factory() as session:
+            job = await session.get(CrawlJob, job_id)
+            if job is None:
+                raise AssertionError(f"crawl job {job_id} not found")
+            run = await session.get(CrawlJobRun, job.current_run_id)
+            if run is None:
+                raise AssertionError(f"crawl job run {job.current_run_id} not found")
+            now = datetime.now(UTC)
+            job.status = CrawlJobStatus.RUNNING.value
+            job.updated_at = now
+            run.status = CrawlJobStatus.RUNNING.value
+            run.started_at = now
+            run.active_started_at = now
+            run.updated_at = now
             await session.commit()
 
     def _build_crawl_context(self, job_id: int) -> CrawlToolContext:
