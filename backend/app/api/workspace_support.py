@@ -3,13 +3,14 @@
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.identity_serializers import serialize_material
 from app.models import (
+    EmailDirection,
     EmailLog,
     EmailTask,
     EmailTaskCancellationReason,
@@ -44,22 +45,37 @@ async def build_workspace_thread(
     identity = await _get_identity(session, identity_id)
     llm_profile = await _get_llm_profile(session, llm_profile_id)
     current_task = await _get_latest_email_task(session, professor_id, identity_id, llm_profile_id)
+    match_task = (
+        current_task
+        if _task_has_match_result(current_task)
+        else await _get_latest_identity_match_task(session, professor_id, identity_id)
+    )
     current_task_outreach = (
         _resolve_task_outreach_config(identity, current_task)
         if current_task is not None
         else resolve_outreach_template_config(identity)
     )
 
+    message_filters = [
+        EmailLog.professor_id == professor_id,
+        EmailLog.identity_id == identity_id,
+    ]
+    if current_task is not None:
+        message_filters.append(
+            or_(
+                EmailLog.direction != EmailDirection.DRAFT.value,
+                EmailLog.email_task_id == current_task.id,
+            ),
+        )
+    else:
+        message_filters.append(EmailLog.direction != EmailDirection.DRAFT.value)
+
     logs = list(
         (
             await session.execute(
                 select(EmailLog)
-                .where(
-                    EmailLog.professor_id == professor_id,
-                    EmailLog.identity_id == identity_id,
-                    EmailLog.llm_profile_id == llm_profile_id,
-                )
-                .order_by(EmailLog.created_at.asc()),
+                .where(*message_filters)
+                .order_by(EmailLog.created_at.asc(), EmailLog.id.asc()),
             )
         ).scalars()
     )
@@ -139,11 +155,11 @@ async def build_workspace_thread(
             outreach_template_subject=current_task_outreach.subject_template,
             outreach_template_body_text=current_task_outreach.body_text_template,
             outreach_template_body_html=current_task_outreach.body_html_template,
-            match_score=current_task.match_score if current_task else None,
-            match_reason=current_task.match_reason if current_task else None,
-            fit_points=(current_task.fit_points or []) if current_task else [],
-            risk_points=(current_task.risk_points or []) if current_task else [],
-            match_keywords=(current_task.match_keywords or []) if current_task else [],
+            match_score=match_task.match_score if match_task else None,
+            match_reason=match_task.match_reason if match_task else None,
+            fit_points=(match_task.fit_points or []) if match_task else [],
+            risk_points=(match_task.risk_points or []) if match_task else [],
+            match_keywords=(match_task.match_keywords or []) if match_task else [],
             generated_subject=current_task.generated_subject if current_task else None,
             generated_content_text=current_task.generated_content_text if current_task else None,
             generated_content_html=current_task.generated_content_html if current_task else None,
@@ -199,9 +215,22 @@ async def ensure_workspace_task(
     if current_task is not None:
         if _should_resume_workspace_task(current_task):
             return await _create_workspace_resume_task(session, current_task)
+        if not _task_has_match_result(current_task):
+            match_task = await _get_latest_identity_match_task(
+                session,
+                professor_pk,
+                identity_pk,
+                exclude_task_id=current_task.id,
+            )
+            if match_task is not None:
+                _copy_match_snapshot(current_task, match_task)
+                current_task.updated_at = datetime.now(UTC)
+                await session.commit()
+                await session.refresh(current_task)
         return current_task
 
     snapshot = resolve_outreach_template_config(identity)
+    match_task = await _get_latest_identity_match_task(session, professor_pk, identity_pk)
     task = EmailTask(
         source="manual",
         batch_task_id=None,
@@ -213,7 +242,16 @@ async def ensure_workspace_task(
         outreach_template_subject=_normalize_nullable_text(snapshot.subject_template),
         outreach_template_body_text=_normalize_nullable_text(snapshot.body_text_template),
         outreach_template_body_html=_normalize_nullable_text(snapshot.body_html_template),
-        status=EmailTaskStatus.DISCOVERED.value,
+        status=(
+            EmailTaskStatus.MATCHED.value
+            if match_task is not None
+            else EmailTaskStatus.DISCOVERED.value
+        ),
+        match_score=match_task.match_score if match_task else None,
+        match_reason=match_task.match_reason if match_task else None,
+        fit_points=list(match_task.fit_points or []) if match_task else None,
+        risk_points=list(match_task.risk_points or []) if match_task else None,
+        match_keywords=list(match_task.match_keywords or []) if match_task else None,
         selected_material_ids=None,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
@@ -331,6 +369,41 @@ async def _get_latest_email_task(
         )
         .order_by(EmailTask.created_at.desc(), EmailTask.id.desc()),
     )
+
+
+async def _get_latest_identity_match_task(
+    session: AsyncSession,
+    professor_id: int,
+    identity_id: int,
+    *,
+    exclude_task_id: int | None = None,
+) -> EmailTask | None:
+    statement = (
+        select(EmailTask)
+        .where(
+            EmailTask.professor_id == professor_id,
+            EmailTask.identity_id == identity_id,
+            EmailTask.match_score.is_not(None),
+        )
+        .order_by(EmailTask.updated_at.desc(), EmailTask.created_at.desc(), EmailTask.id.desc())
+    )
+    if exclude_task_id is not None:
+        statement = statement.where(EmailTask.id != exclude_task_id)
+    return await session.scalar(statement)
+
+
+def _task_has_match_result(task: EmailTask | None) -> bool:
+    return task is not None and task.match_score is not None
+
+
+def _copy_match_snapshot(target: EmailTask, source: EmailTask) -> None:
+    target.match_score = source.match_score
+    target.match_reason = source.match_reason
+    target.fit_points = list(source.fit_points or [])
+    target.risk_points = list(source.risk_points or [])
+    target.match_keywords = list(source.match_keywords or [])
+    if target.status == EmailTaskStatus.DISCOVERED.value:
+        target.status = EmailTaskStatus.MATCHED.value
 
 
 def _extract_usage(provider_payload: dict[str, object] | None) -> dict[str, int | None]:

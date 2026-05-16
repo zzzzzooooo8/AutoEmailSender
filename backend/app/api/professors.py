@@ -63,10 +63,9 @@ async def list_professors(
             select(EmailTask)
             .where(
                 EmailTask.identity_id == identity_id,
-                EmailTask.llm_profile_id == llm_profile_id,
                 EmailTask.professor_id.in_(professor_ids),
             )
-            .order_by(EmailTask.created_at.desc()),
+            .order_by(EmailTask.created_at.desc(), EmailTask.id.desc()),
         )
         for task in task_result.scalars():
             tasks_by_professor[task.professor_id].append(task)
@@ -75,7 +74,6 @@ async def list_professors(
             select(EmailLog)
             .where(
                 EmailLog.identity_id == identity_id,
-                EmailLog.llm_profile_id == llm_profile_id,
                 EmailLog.professor_id.in_(professor_ids),
                 EmailLog.direction == EmailDirection.SENT.value,
             ),
@@ -83,11 +81,11 @@ async def list_professors(
         for log in log_result.scalars():
             sent_count_by_professor[log.professor_id] += 1
 
-    latest_task_by_professor = {
-        professor_id: tasks[0]
-        for professor_id, tasks in tasks_by_professor.items()
-        if tasks
-    }
+    latest_match_task_by_professor: dict[int, EmailTask] = {}
+    for professor_id, tasks in tasks_by_professor.items():
+        latest_match = next((task for task in tasks if task.match_score is not None), None)
+        if latest_match is not None:
+            latest_match_task_by_professor[professor_id] = latest_match
 
     return [
         ProfessorDashboardItemRead(
@@ -100,8 +98,8 @@ async def list_professors(
             department=professor.department,
             research_direction=professor.research_direction,
             recent_papers=professor.recent_papers or [],
-            match_score=latest_task_by_professor.get(professor.id).match_score
-            if professor.id in latest_task_by_professor
+            match_score=latest_match_task_by_professor.get(professor.id).match_score
+            if professor.id in latest_match_task_by_professor
             else None,
             sent_count=sent_count_by_professor.get(professor.id, 0),
             status=_map_dashboard_status(
