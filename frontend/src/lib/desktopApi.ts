@@ -1,7 +1,18 @@
-import type { DesktopUpdateDownloadMode, DesktopUpdateStatus } from "@/types/desktop";
+﻿import type { DesktopMaterialOpenResult, DesktopUpdateDownloadMode, DesktopUpdateStatus } from "@/types/desktop";
 
 export const isDesktopApp = () => Boolean(window.autoEmailSender);
 
+export async function openDesktopMaterial(materialId: number, originalFilename?: string): Promise<DesktopMaterialOpenResult> {
+  const api = getDesktopApi();
+  if (!api.openMaterial) {
+    return {
+      ok: false,
+      code: "MaterialOpenBackendUnavailable",
+      message: "当前桌面应用版本不支持直接打开材料",
+    };
+  }
+  return api.openMaterial({ materialId, originalFilename });
+}
 export async function getDesktopAppVersion(): Promise<string> {
   const api = getDesktopApi();
   return api.getVersion();
@@ -45,3 +56,4 @@ function getDesktopApi(): NonNullable<typeof window.autoEmailSender> {
   }
   return window.autoEmailSender;
 }
+

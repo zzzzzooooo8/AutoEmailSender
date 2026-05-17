@@ -33,6 +33,7 @@ import { OtherSettingsCard } from "@/components/molecules/OtherSettingsCard";
 import { TokenUsageCenterCard } from "@/components/molecules/TokenUsageCenterCard";
 import { DiagnosticLogPanel } from "@/components/organisms/DiagnosticLogPanel";
 import { formatApiDateTime } from "@/lib/dateTime";
+import { isDesktopApp, openDesktopMaterial } from "@/lib/desktopApi";
 import { textToEmailHtml } from "@/lib/richEmail";
 import {
   createIdentity,
@@ -46,7 +47,6 @@ import {
 import {
   deleteMaterial,
   getMaterialDownloadUrl,
-  getMaterialOpenUrl,
   setPrimaryMaterial,
   uploadIdentityMaterial,
 } from "@/lib/api/materials";
@@ -443,10 +443,6 @@ const formatFileSize = (sizeBytes: number) => {
     return `${(sizeBytes / 1024).toFixed(1)} KB`;
   }
   return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
-};
-
-const openFileInNewTab = (url: string) => {
-  window.open(url, "_blank", "noopener,noreferrer");
 };
 
 const triggerDownload = (url: string) => {
@@ -1274,6 +1270,7 @@ const MaterialLibraryModal = ({
   onChangeMaterialType,
   onChangeMaterialFilter,
   onUpload,
+  onOpen,
   onClose,
   onSetPrimary,
   onDelete,
@@ -1289,6 +1286,7 @@ const MaterialLibraryModal = ({
   onChangeMaterialType: (value: IdentityMaterialType) => void;
   onChangeMaterialFilter: (value: MaterialFilterValue) => void;
   onUpload: (file: File) => void;
+  onOpen: (material: IdentityMaterialDTO) => void;
   onClose: () => void;
   onSetPrimary: (material: IdentityMaterialDTO) => void;
   onDelete: (material: IdentityMaterialDTO) => void;
@@ -1450,9 +1448,7 @@ const MaterialLibraryModal = ({
                       <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
-                          onClick={() =>
-                            openFileInNewTab(getMaterialOpenUrl(material.id))
-                          }
+                          onClick={() => onOpen(material)}
                           className="ui-btn-secondary"
                         >
                           <ExternalLink className="h-4 w-4" />
@@ -2219,6 +2215,18 @@ export const ProfilePage = () => {
       );
     } finally {
       setSubmittingLLM(false);
+    }
+  };
+
+  const handleOpenMaterial = async (material: IdentityMaterialDTO) => {
+    if (!isDesktopApp()) {
+      notifyError("无法打开材料", "请在桌面应用中打开材料，或使用下载按钮保存后查看。");
+      return;
+    }
+
+    const result = await openDesktopMaterial(material.id, material.original_filename);
+    if (!result.ok) {
+      notifyError("无法打开材料", result.message);
     }
   };
 
@@ -3150,6 +3158,7 @@ export const ProfilePage = () => {
           onChangeMaterialType={setNewMaterialType}
           onChangeMaterialFilter={setMaterialFilter}
           onUpload={(file) => void handleMaterialUpload(file)}
+          onOpen={(material) => void handleOpenMaterial(material)}
           onClose={() => setMaterialModalOpen(false)}
           onSetPrimary={(material) => void handleSetPrimaryMaterial(material)}
           onDelete={(material) => void handleDeleteMaterial(material)}

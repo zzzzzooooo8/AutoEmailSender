@@ -1,8 +1,9 @@
-import { app, BrowserWindow, Menu, Tray, dialog, ipcMain } from "electron";
+﻿import { app, BrowserWindow, Menu, Tray, dialog, ipcMain } from "electron";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { getFrontendIndexPath, startBackend } from "./backend.js";
 import { registerFileSelectionIpc } from "./fileSelection.js";
+import { registerMaterialOpenIpc } from "./materialOpenService.js";
 import { checkForUpdatesOnStartup, registerUpdateIpc } from "./updates.js";
 import {
   restoreExistingWindow,
@@ -211,6 +212,10 @@ function createInitialBackendStatus(): BackendStatus {
 ipcMain.handle("app:get-version", () => app.getVersion());
 registerUpdateIpc(() => mainWindow);
 registerFileSelectionIpc();
+registerMaterialOpenIpc({
+  getBackendBaseUrl: () => (currentBackendStatus.state === "ready" ? currentBackendStatus.baseUrl : null),
+  userDataPath: app.getPath("userData"),
+});
 
 if (hasSingleInstanceLock) {
   app.on("second-instance", showMainWindow);
@@ -246,3 +251,4 @@ process.once("SIGINT", () => {
 process.once("SIGTERM", () => {
   stopBackendAndExit(143);
 });
+

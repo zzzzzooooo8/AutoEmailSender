@@ -1,5 +1,5 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
-import type { BackendStatus, UpdateStatus } from "./types.js";
+﻿import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
+import type { BackendStatus, MaterialOpenResult, UpdateStatus } from "./types.js";
 
 const markDesktopRuntime = (): void => {
   document.documentElement.dataset.runtime = "desktop";
@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld("autoEmailSender", {
       type: string;
       data: ArrayBuffer;
     } | null>,
+  openMaterial: (request: { materialId: number; originalFilename?: string }) =>
+    ipcRenderer.invoke("materials:open", request) as Promise<MaterialOpenResult>,
   checkForUpdate: () => ipcRenderer.invoke("update:check") as Promise<UpdateStatus>,
   downloadUpdate: (options?: { mode?: "differential" | "full" }) =>
     ipcRenderer.invoke("update:download", options) as Promise<UpdateStatus>,
@@ -63,3 +65,4 @@ contextBridge.exposeInMainWorld("autoEmailSender", {
     };
   },
 });
+
