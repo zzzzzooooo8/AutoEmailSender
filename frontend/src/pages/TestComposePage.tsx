@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, RefreshCcw, Save, Send } from "lucide-react";
+import { ArrowLeft, Loader2, RefreshCcw, Save, Send } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { useNotification } from "@/context/NotificationContext";
 import { useSelectionContext } from "@/context/SelectionContext";
 import { EmailTemplateEditor } from "@/components/molecules/EmailTemplateEditor";
@@ -14,6 +15,7 @@ import { textToEmailHtml } from "@/lib/richEmail";
 import { MATERIAL_TYPE_LABELS, type TestComposeThreadDTO } from "@/types";
 
 export const TestComposePage = () => {
+  const navigate = useNavigate();
   const { selectedIdentityId, selectedLlmProfileId } = useSelectionContext();
   const { notifyError, notifySuccess } = useNotification();
   const [thread, setThread] = useState<TestComposeThreadDTO | null>(null);
@@ -130,6 +132,14 @@ export const TestComposePage = () => {
         <>
           <header className="mb-6 flex flex-wrap items-end justify-between gap-5 border-b border-stone-200 pb-5">
             <div>
+              <button
+                type="button"
+                onClick={() => navigate(-1)}
+                className="mb-5 inline-flex items-center gap-2 text-sm font-medium text-stone-500 transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-2"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                返回
+              </button>
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
                 测试邮件工作台
               </div>
