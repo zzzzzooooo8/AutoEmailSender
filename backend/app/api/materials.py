@@ -113,6 +113,31 @@ async def delete_material(
         if material.id in (task.selected_material_ids or []):
             raise HTTPException(status_code=400, detail="当前材料仍被未完成任务选为随信材料")
 
+    referencing_tasks = list(
+        (
+            await session.execute(
+                select(EmailTask).where(
+                    EmailTask.identity_id == material.identity_id,
+                    EmailTask.status.in_(TERMINAL_MATERIAL_REFERENCING_STATUSES),
+                ),
+            )
+        ).scalars()
+    )
+    for task in referencing_tasks:
+        task_updated = False
+        if task.primary_material_id == material.id:
+            task.primary_material_id = None
+            task_updated = True
+        if material.id in (task.selected_material_ids or []):
+            task.selected_material_ids = [
+                selected_material_id
+                for selected_material_id in task.selected_material_ids or []
+                if selected_material_id != material.id
+            ]
+            task_updated = True
+        if task_updated:
+            task.updated_at = datetime.now(UTC)
+
     if is_current_primary:
         identity.current_primary_material_id = None
         identity.updated_at = datetime.now(UTC)
