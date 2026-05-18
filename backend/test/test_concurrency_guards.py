@@ -144,22 +144,8 @@ class ConcurrencyGuardTests(unittest.TestCase):
         self.assertEqual(result, (professor_id, identity_id, llm_profile_id))
         self.assertEqual(self._run_async(self._count_manual_children(task_id)), 1)
 
-    def test_poll_identity_replies_deduplicates_duplicate_message_ids(self) -> None:
+    def test_poll_identity_replies_uses_guarded_sync_entrypoint(self) -> None:
         identity_id, _, professor_id = self._run_async(self._create_reply_context())
-        sent_message_id = "<sent@example.edu>"
-        reply_message_id = "<reply@example.edu>"
-
-        async def delayed_fetch(identity):
-            await asyncio.sleep(0.05)
-            return [
-                self._build_received_email(
-                    from_email="professor@example.edu",
-                    subject="Re: 合作咨询",
-                    content="好的，欢迎联系。",
-                    message_id=reply_message_id,
-                    in_reply_to=sent_message_id,
-                ),
-            ]
 
         async def poll_twice() -> list[int]:
             return await asyncio.gather(
@@ -167,22 +153,18 @@ class ConcurrencyGuardTests(unittest.TestCase):
                 poll_identity_replies(self.session_factory, identity_id),
             )
 
+        async def delayed_sync(*args, **kwargs):
+            await asyncio.sleep(0.05)
+            return 1
+
         with patch(
-            "app.services.task_runtime.mail_runtime.fetch_recent_inbox_messages",
-            new=AsyncMock(side_effect=delayed_fetch),
-        ) as mocked_fetch:
+            "app.services.task_runtime._sync_identity_imap_once_unlocked",
+            new=AsyncMock(side_effect=delayed_sync),
+        ) as mocked_sync:
             results = self._run_async(poll_twice())
 
-        self.assertEqual(mocked_fetch.await_count, 2)
+        self.assertEqual(mocked_sync.await_count, 1)
         self.assertEqual(sum(results), 1)
-        self.assertEqual(
-            self._run_async(self._count_reply_logs(reply_message_id)),
-            1,
-        )
-        self.assertEqual(
-            self._run_async(self._get_task_status_by_professor(professor_id, identity_id)),
-            EmailTaskStatus.REPLY_DETECTED.value,
-        )
 
     def test_imap_identity_sync_is_single_flight(self) -> None:
         identity_id, _, _ = self._run_async(self._create_reply_context())

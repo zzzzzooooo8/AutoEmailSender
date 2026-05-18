@@ -197,12 +197,6 @@ async def send_email_to_recipient(
     )
 
 
-async def fetch_recent_inbox_messages(identity: IdentityProfile) -> list[ReceivedEmail]:
-    if not identity.imap_host or not identity.imap_username or not identity.imap_password:
-        return []
-    return await asyncio.to_thread(_fetch_recent_inbox_messages_sync, identity)
-
-
 async def fetch_incremental_inbox_messages(
     identity: IdentityProfile,
     last_seen_uid: int | None,
@@ -229,7 +223,8 @@ async def fetch_inbox_messages_from_sender(
         return []
     if not from_email.strip():
         return []
-    return await asyncio.to_thread(_fetch_inbox_messages_from_sender_sync, identity, from_email.strip().lower())
+    messages = await fetch_professor_history_inbox_messages(identity, from_email.strip().lower())
+    return [_imap_fetched_to_received(message) for message in messages]
 
 
 def build_email_message(
@@ -343,13 +338,6 @@ def format_imap_login_error(identity: IdentityProfile, detail: object) -> str:
     return base
 
 
-def _fetch_recent_inbox_messages_sync(identity: IdentityProfile) -> list[ReceivedEmail]:
-    since_date = (datetime.now(UTC) - timedelta(hours=get_settings().imap_lookback_hours)).strftime(
-        "%d-%b-%Y",
-    )
-    return _fetch_inbox_messages_sync(identity, f'(SINCE "{since_date}")')
-
-
 def _fetch_incremental_inbox_messages_sync(
     identity: IdentityProfile,
     last_seen_uid: int | None,
@@ -395,47 +383,19 @@ def _fetch_professor_history_inbox_messages_sync(
     return messages
 
 
-def _fetch_inbox_messages_from_sender_sync(
-    identity: IdentityProfile,
-    from_email: str,
-) -> list[ReceivedEmail]:
-    return _fetch_inbox_messages_sync(identity, f'(FROM "{_escape_imap_search_value(from_email)}")')
-
-
-def _fetch_inbox_messages_sync(identity: IdentityProfile, search_criterion: str) -> list[ReceivedEmail]:
-    client: IMAP4 | IMAP4_SSL | None = None
-    messages: list[ReceivedEmail] = []
-    try:
-        client = _open_imap_client(identity)
-        client.login(identity.imap_username or "", identity.imap_password or "")
-        _send_imap_client_id(client, identity)
-        _select_inbox_or_raise(client)
-
-        status, data = client.search(None, search_criterion)
-        if status != "OK":
-            raise MailRuntimeError("IMAP 搜索失败")
-
-        for message_id in data[0].split():
-            fetch_status, payload = client.fetch(message_id, "(RFC822 INTERNALDATE)")
-            if fetch_status != "OK" or not payload or payload[0] is None:
-                continue
-            raw_message = payload[0][1]
-            if not isinstance(raw_message, (bytes, bytearray)):
-                continue
-            message = parse_received_email(bytes(raw_message))
-            message.received_at = _extract_received_at_from_fetch_payload(payload)
-            messages.append(message)
-    except MailRuntimeError:
-        raise
-    except OSError as exc:
-        raise MailRuntimeError(f"IMAP 拉取失败: {exc}") from exc
-    finally:
-        if client is not None:
-            try:
-                client.logout()
-            except OSError:
-                pass
-    return messages
+def _imap_fetched_to_received(message: ImapFetchedMessage) -> ReceivedEmail:
+    return ReceivedEmail(
+        from_email=message.from_email,
+        subject=message.subject,
+        content=message.body_text,
+        content_html=message.body_html,
+        message_id=message.message_id,
+        in_reply_to=message.in_reply_to,
+        references=message.references,
+        sent_at=message.sent_at,
+        headers=message.headers,
+        received_at=message.received_at,
+    )
 
 
 def _open_logged_in_imap_client(identity: IdentityProfile) -> IMAP4 | IMAP4_SSL:
@@ -456,30 +416,8 @@ def _fetch_message_by_uid_sync(
     raw_headers = fetch_message_headers_by_uid(client, uid)
     if not raw_headers:
         return None
-    status, payload = client.uid("FETCH", str(uid), "(BODY.PEEK[] INTERNALDATE)")
-    if status != "OK" or not payload or payload[0] is None:
-        return _parse_fetched_headers(uid, raw_headers, None, None)
-    raw_message: bytes | None = None
-    for item in payload:
-        if isinstance(item, tuple) and len(item) >= 2 and isinstance(item[1], (bytes, bytearray)):
-            raw_message = bytes(item[1])
-            break
-    if raw_message is None:
-        return _parse_fetched_headers(uid, raw_headers, None, _extract_received_at_from_fetch_payload(payload))
-    parsed = parse_received_email(raw_message)
-    return ImapFetchedMessage(
-        uid=uid,
-        from_email=parsed.from_email,
-        subject=parsed.subject,
-        message_id=parsed.message_id,
-        in_reply_to=parsed.in_reply_to,
-        references=parsed.references,
-        sent_at=parsed.sent_at,
-        received_at=_extract_received_at_from_fetch_payload(payload),
-        headers=parsed.headers,
-        body_text=parsed.content,
-        body_html=parsed.content_html,
-    )
+    client.uid("FETCH", str(uid), "(BODYSTRUCTURE)")
+    return _parse_fetched_headers(uid, raw_headers, None, None)
 
 
 def _parse_fetched_headers(

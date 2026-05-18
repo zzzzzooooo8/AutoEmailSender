@@ -1358,13 +1358,7 @@ async def poll_identity_replies(
     session_factory: async_sessionmaker[AsyncSession],
     identity_id: int,
 ) -> int:
-    async with session_factory() as session:
-        identity = await session.get(IdentityProfile, identity_id)
-    if not identity:
-        return 0
-
-    messages = await mail_runtime.fetch_recent_inbox_messages(identity)
-    return await _process_incoming_reply_messages(session_factory, identity_id, messages)
+    return await sync_identity_imap_once(session_factory, identity_id)
 
 
 async def sync_identity_imap_once(
@@ -1498,12 +1492,10 @@ async def repair_identity_replies(
     if not identity:
         return 0
 
-    messages: list[ReceivedEmail] = []
     if professor_email and professor_email.strip():
-        messages = await mail_runtime.fetch_inbox_messages_from_sender(identity, professor_email)
-    if not messages:
-        messages = await mail_runtime.fetch_recent_inbox_messages(identity)
-    return await _process_incoming_reply_messages(session_factory, identity_id, messages)
+        messages = await mail_runtime.fetch_professor_history_inbox_messages(identity, professor_email)
+        return await process_imap_fetched_messages(session_factory, identity_id, messages)
+    return await sync_identity_imap_once(session_factory, identity_id)
 
 
 async def _process_incoming_reply_messages(
