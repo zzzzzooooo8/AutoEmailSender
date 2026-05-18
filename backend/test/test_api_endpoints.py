@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import io
@@ -1391,6 +1391,196 @@ class ApiEndpointTests(unittest.TestCase):
         )
         self.assertEqual(len(refreshed_identity["materials"]), 0)
 
+    def test_delete_material_clears_draft_failed_primary_material_reference(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        material_id = self._upload_material(
+            identity_id,
+            filename="resume.txt",
+            content=b"My research background is in information extraction.",
+            material_type="resume",
+        )
+        professor_id = self._create_professor(email="draft-failed-material-delete@example.edu")
+        task_id = self._insert_email_task_with_material(
+            identity_id=identity_id,
+            llm_id=llm_id,
+            professor_id=professor_id,
+            status="draft_failed",
+            primary_material_id=material_id,
+        )
+
+        delete_response = self.client.delete(f"/api/materials/{material_id}")
+
+        self.assertEqual(delete_response.status_code, 204, msg=delete_response.text)
+        primary_material_id, selected_material_ids = self._get_task_material_references(task_id)
+        self.assertIsNone(primary_material_id)
+        self.assertIsNone(selected_material_ids)
+
+    def test_delete_material_clears_send_failed_primary_material_reference(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        material_id = self._upload_material(
+            identity_id,
+            filename="resume.txt",
+            content=b"My research background is in information extraction.",
+            material_type="resume",
+        )
+        professor_id = self._create_professor(email="send-failed-material-delete@example.edu")
+        task_id = self._insert_email_task_with_material(
+            identity_id=identity_id,
+            llm_id=llm_id,
+            professor_id=professor_id,
+            status="send_failed",
+            primary_material_id=material_id,
+        )
+
+        delete_response = self.client.delete(f"/api/materials/{material_id}")
+
+        self.assertEqual(delete_response.status_code, 204, msg=delete_response.text)
+        primary_material_id, selected_material_ids = self._get_task_material_references(task_id)
+        self.assertIsNone(primary_material_id)
+        self.assertIsNone(selected_material_ids)
+
+    def test_delete_material_removes_failed_task_selected_material_reference(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        deleted_material_id = self._upload_material(
+            identity_id,
+            filename="portfolio.pdf",
+            content=b"Portfolio content",
+            material_type="portfolio",
+        )
+        remaining_material_id = self._upload_material(
+            identity_id,
+            filename="transcript.pdf",
+            content=b"Transcript content",
+            material_type="transcript",
+        )
+        professor_id = self._create_professor(email="failed-selected-material-delete@example.edu")
+        task_id = self._insert_email_task_with_material(
+            identity_id=identity_id,
+            llm_id=llm_id,
+            professor_id=professor_id,
+            status="draft_failed",
+            primary_material_id=None,
+            selected_material_ids=[deleted_material_id, remaining_material_id],
+        )
+
+        delete_response = self.client.delete(f"/api/materials/{deleted_material_id}")
+
+        self.assertEqual(delete_response.status_code, 204, msg=delete_response.text)
+        primary_material_id, selected_material_ids = self._get_task_material_references(task_id)
+        self.assertIsNone(primary_material_id)
+        self.assertEqual(selected_material_ids, [remaining_material_id])
+
+    def test_delete_material_clears_stopped_batch_task_material_reference(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        deleted_material_id = self._upload_material(
+            identity_id,
+            filename="resume.txt",
+            content=b"My research background is in information extraction.",
+            material_type="resume",
+        )
+        remaining_material_id = self._upload_material(
+            identity_id,
+            filename="portfolio.pdf",
+            content=b"Portfolio content",
+            material_type="portfolio",
+        )
+        batch_task_id = self._insert_batch_task_with_material(
+            identity_id=identity_id,
+            llm_id=llm_id,
+            status="stopped",
+            primary_material_id=deleted_material_id,
+            selected_material_ids=[deleted_material_id, remaining_material_id],
+        )
+
+        delete_response = self.client.delete(f"/api/materials/{deleted_material_id}")
+
+        self.assertEqual(delete_response.status_code, 204, msg=delete_response.text)
+        primary_material_id, selected_material_ids = self._get_batch_task_material_references(batch_task_id)
+        self.assertIsNone(primary_material_id)
+        self.assertEqual(selected_material_ids, [remaining_material_id])
+
+    def test_delete_material_still_blocks_running_batch_task_reference(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        material_id = self._upload_material(
+            identity_id,
+            filename="resume.txt",
+            content=b"My research background is in information extraction.",
+            material_type="resume",
+        )
+        batch_task_id = self._insert_batch_task_with_material(
+            identity_id=identity_id,
+            llm_id=llm_id,
+            status="running",
+            primary_material_id=material_id,
+            selected_material_ids=[material_id],
+        )
+
+        delete_response = self.client.delete(f"/api/materials/{material_id}")
+
+        self.assertEqual(delete_response.status_code, 400)
+        self.assertEqual(delete_response.json()["detail"], "当前材料仍被可继续批量任务使用")
+        primary_material_id, selected_material_ids = self._get_batch_task_material_references(batch_task_id)
+        self.assertEqual(primary_material_id, material_id)
+        self.assertEqual(selected_material_ids, [material_id])
+
+    def test_delete_material_still_blocks_active_primary_material_reference(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        material_id = self._upload_material(
+            identity_id,
+            filename="resume.txt",
+            content=b"My research background is in information extraction.",
+            material_type="resume",
+        )
+        professor_id = self._create_professor(email="active-primary-material-delete@example.edu")
+        task_id = self._insert_email_task_with_material(
+            identity_id=identity_id,
+            llm_id=llm_id,
+            professor_id=professor_id,
+            status="review_required",
+            primary_material_id=material_id,
+        )
+
+        delete_response = self.client.delete(f"/api/materials/{material_id}")
+
+        self.assertEqual(delete_response.status_code, 400)
+        self.assertEqual(delete_response.json()["detail"], "当前材料仍被未完成任务作为默认材料使用")
+        primary_material_id, selected_material_ids = self._get_task_material_references(task_id)
+        self.assertEqual(primary_material_id, material_id)
+        self.assertIsNone(selected_material_ids)
+
+    def test_delete_material_still_blocks_active_selected_material_reference(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        material_id = self._upload_material(
+            identity_id,
+            filename="portfolio.pdf",
+            content=b"Portfolio content",
+            material_type="portfolio",
+        )
+        professor_id = self._create_professor(email="active-selected-material-delete@example.edu")
+        task_id = self._insert_email_task_with_material(
+            identity_id=identity_id,
+            llm_id=llm_id,
+            professor_id=professor_id,
+            status="approved",
+            primary_material_id=None,
+            selected_material_ids=[material_id],
+        )
+
+        delete_response = self.client.delete(f"/api/materials/{material_id}")
+
+        self.assertEqual(delete_response.status_code, 400)
+        self.assertEqual(delete_response.json()["detail"], "当前材料仍被未完成任务选为随信材料")
+        primary_material_id, selected_material_ids = self._get_task_material_references(task_id)
+        self.assertIsNone(primary_material_id)
+        self.assertEqual(selected_material_ids, [material_id])
+
     def test_material_upload_keeps_working_when_text_extraction_fails(self) -> None:
         identity_id = self._create_identity(with_imap=False)
 
@@ -1859,6 +2049,78 @@ class ApiEndpointTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["scheduled_dates"], [tomorrow, day_after_tomorrow])
+
+    def test_create_scheduled_batch_task_assigns_jittered_scheduled_at(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_profile_id = self._create_llm()
+        self.client.post("/api/professors/import-sample")
+        professor_ids = [item["id"] for item in self.client.get("/api/professors").json()[:3]]
+        tomorrow = (datetime.now().date() + timedelta(days=1)).isoformat()
+
+        response = self.client.post(
+            "/api/batch-tasks",
+            json={
+                "identity_id": identity_id,
+                "llm_profile_id": llm_profile_id,
+                "name": "随机均匀定时发送",
+                "professor_ids": professor_ids,
+                "schedule_type": "scheduled",
+                "scheduled_dates": [tomorrow],
+                "window_start_time": "09:00",
+                "window_end_time": "18:00",
+                "emails_per_window": 20,
+                "primary_material_id": None,
+                "email_subject": "Hello {{导师姓名}}",
+                "email_body": "Body",
+                "selected_material_ids": None,
+                "outreach_generation_mode": "template",
+                "outreach_template_subject": "Hello {{导师姓名}}",
+                "outreach_template_body_text": "Body",
+                "outreach_template_body_html": None,
+            },
+        )
+
+        self.assertEqual(response.status_code, 201, msg=response.text)
+        task_id = response.json()["id"]
+        items_response = self.client.get(f"/api/batch-tasks/{task_id}/items")
+        self.assertEqual(items_response.status_code, 200)
+        scheduled_values = [item["scheduled_at"] for item in items_response.json()]
+        self.assertEqual(len(scheduled_values), len(professor_ids))
+        self.assertTrue(all(value is not None for value in scheduled_values))
+        self.assertEqual(scheduled_values, sorted(scheduled_values))
+
+    def test_create_scheduled_batch_task_rejects_insufficient_schedule_capacity(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_profile_id = self._create_llm()
+        self.client.post("/api/professors/import-sample")
+        professor_ids = [item["id"] for item in self.client.get("/api/professors").json()[:2]]
+        tomorrow = (datetime.now().date() + timedelta(days=1)).isoformat()
+
+        response = self.client.post(
+            "/api/batch-tasks",
+            json={
+                "identity_id": identity_id,
+                "llm_profile_id": llm_profile_id,
+                "name": "容量不足定时发送",
+                "professor_ids": professor_ids,
+                "schedule_type": "scheduled",
+                "scheduled_dates": [tomorrow],
+                "window_start_time": "09:00",
+                "window_end_time": "18:00",
+                "emails_per_window": 1,
+                "primary_material_id": None,
+                "email_subject": "Hello {{导师姓名}}",
+                "email_body": "Body",
+                "selected_material_ids": None,
+                "outreach_generation_mode": "template",
+                "outreach_template_subject": "Hello {{导师姓名}}",
+                "outreach_template_body_text": "Body",
+                "outreach_template_body_html": None,
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("不足以覆盖全部任务", response.json()["detail"])
 
     def test_create_scheduled_batch_task_rejects_expired_windows(self) -> None:
         identity_id = self._create_identity(with_imap=False)
@@ -5144,7 +5406,6 @@ class ApiEndpointTests(unittest.TestCase):
                 subject=subject,
                 body_text=body_text,
                 body_html=body_html,
-                suggested_material_ids=[],
             ),
             usage=(
                 ChatCompletionUsage(
@@ -5161,6 +5422,120 @@ class ApiEndpointTests(unittest.TestCase):
                 else None
             ),
         )
+
+    def _create_professor(self, *, email: str = "professor@example.edu") -> int:
+        response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "材料删除测试导师",
+                "email": email,
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Agents",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(response.status_code, 201, msg=response.text)
+        return response.json()["id"]
+
+    def _insert_email_task_with_material(
+        self,
+        *,
+        identity_id: int,
+        llm_id: int,
+        professor_id: int,
+        status: str,
+        primary_material_id: int | None,
+        selected_material_ids: list[int] | None = None,
+    ) -> int:
+        connection = sqlite3.connect(self.db_path)
+        try:
+            task_id = connection.execute(
+                """
+                INSERT INTO email_tasks (
+                    identity_id, llm_profile_id, professor_id,
+                    status, primary_material_id, selected_material_ids, last_error
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                RETURNING id
+                """,
+                (
+                    identity_id,
+                    llm_id,
+                    professor_id,
+                    status,
+                    primary_material_id,
+                    json.dumps(selected_material_ids) if selected_material_ids is not None else None,
+                    "失败任务错误" if status in {"draft_failed", "send_failed"} else None,
+                ),
+            ).fetchone()[0]
+            connection.commit()
+        finally:
+            connection.close()
+        return task_id
+
+    def _get_task_material_references(self, task_id: int) -> tuple[int | None, list[int] | None]:
+        connection = sqlite3.connect(self.db_path)
+        try:
+            row = connection.execute(
+                "SELECT primary_material_id, selected_material_ids FROM email_tasks WHERE id = ?",
+                (task_id,),
+            ).fetchone()
+        finally:
+            connection.close()
+        selected_material_ids = json.loads(row[1]) if row[1] is not None else None
+        return row[0], selected_material_ids
+
+    def _insert_batch_task_with_material(
+        self,
+        *,
+        identity_id: int,
+        llm_id: int,
+        status: str,
+        primary_material_id: int | None,
+        selected_material_ids: list[int] | None = None,
+    ) -> int:
+        connection = sqlite3.connect(self.db_path)
+        try:
+            batch_task_id = connection.execute(
+                """
+                INSERT INTO batch_tasks (
+                    identity_id, llm_profile_id, name, status,
+                    primary_material_id, selected_material_ids, target_count
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                RETURNING id
+                """,
+                (
+                    identity_id,
+                    llm_id,
+                    "材料删除测试批量任务",
+                    status,
+                    primary_material_id,
+                    json.dumps(selected_material_ids) if selected_material_ids is not None else None,
+                    1,
+                ),
+            ).fetchone()[0]
+            connection.commit()
+        finally:
+            connection.close()
+        return batch_task_id
+
+    def _get_batch_task_material_references(self, batch_task_id: int) -> tuple[int | None, list[int] | None]:
+        connection = sqlite3.connect(self.db_path)
+        try:
+            row = connection.execute(
+                "SELECT primary_material_id, selected_material_ids FROM batch_tasks WHERE id = ?",
+                (batch_task_id,),
+            ).fetchone()
+        finally:
+            connection.close()
+        selected_material_ids = json.loads(row[1]) if row[1] is not None else None
+        return row[0], selected_material_ids
 
     def _upload_material(
         self,
@@ -5308,5 +5683,3 @@ class ApiEndpointTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-

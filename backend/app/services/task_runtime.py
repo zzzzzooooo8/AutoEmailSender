@@ -39,6 +39,7 @@ from app.services.batch_schedule import (
     has_future_batch_window,
     is_batch_window_expired,
     is_datetime_in_batch_window,
+    normalize_scheduled_dates,
 )
 from app.services.mail_runtime import MailAttachment, ReceivedEmail
 from app.services.materials import (
@@ -286,7 +287,28 @@ async def expire_batch_task_if_needed(
         return False
 
     canceled_count = 0
-    now_utc = datetime.now(UTC)
+    now_utc = local_now.astimezone(UTC)
+    if any(
+        _has_future_scheduled_at(
+            email_task.scheduled_at,
+            now_utc,
+            scheduled_dates=batch_task.scheduled_dates,
+            local_timezone=local_now.tzinfo,
+        )
+        for email_task in batch_task.email_tasks
+        if email_task.status
+        in {
+            EmailTaskStatus.DISCOVERED.value,
+            EmailTaskStatus.MATCHED.value,
+            EmailTaskStatus.GENERATING_DRAFT.value,
+            EmailTaskStatus.DRAFT_FAILED.value,
+            EmailTaskStatus.REVIEW_REQUIRED.value,
+            EmailTaskStatus.APPROVED.value,
+            EmailTaskStatus.SCHEDULED.value,
+        }
+    ):
+        return False
+
     for email_task in batch_task.email_tasks:
         if email_task.status in {
             EmailTaskStatus.DISCOVERED.value,
@@ -321,6 +343,26 @@ async def expire_batch_task_if_needed(
         },
     )
     return True
+
+
+def _has_future_scheduled_at(
+    scheduled_at: datetime | None,
+    now_utc: datetime,
+    *,
+    scheduled_dates: list[str] | None,
+    local_timezone: tzinfo | None,
+) -> bool:
+    if scheduled_at is None:
+        return False
+    if scheduled_at.tzinfo is None:
+        scheduled_at_utc = scheduled_at.replace(tzinfo=UTC)
+    else:
+        scheduled_at_utc = scheduled_at.astimezone(UTC)
+    timezone = local_timezone or UTC
+    scheduled_date = scheduled_at_utc.astimezone(timezone).date().isoformat()
+    if scheduled_date not in set(normalize_scheduled_dates(scheduled_dates)):
+        return False
+    return scheduled_at_utc > now_utc
 
 
 async def _batch_task_sent_count_on_date(
@@ -506,9 +548,6 @@ async def generate_task_draft(
                 body_text = rendered.body_text
                 body_html = rendered.body_html
                 usage = None
-                suggested_material_ids = (
-                    batch_task.selected_material_ids if batch_task else None
-                )
                 provider_payload = {
                     "source": OUTREACH_GENERATION_MODE_TEMPLATE,
                     "placeholders": rendered.placeholders,
@@ -563,14 +602,9 @@ async def generate_task_draft(
                 body_text = generation.result.body_text
                 body_html = generation.result.body_html
                 usage = generation.usage
-                suggested_material_ids = (
-                    generation.result.suggested_material_ids
-                    or (batch_task.selected_material_ids if batch_task else None)
-                )
                 provider_payload = {
                     "source": "llm",
                     "primary_material_id": task.primary_material_id,
-                    "suggested_material_ids": generation.result.suggested_material_ids,
                     "usage": (
                         {
                             "prompt_tokens": usage.prompt_tokens,
@@ -630,8 +664,6 @@ async def generate_task_draft(
         task.generated_subject = subject
         task.generated_content_text = body_text
         task.generated_content_html = body_html
-        if suggested_material_ids is not None:
-            task.selected_material_ids = suggested_material_ids
         task.status = EmailTaskStatus.REVIEW_REQUIRED.value
         task.draft_generation_previous_status = None
         task.updated_at = datetime.now(UTC)
@@ -2070,3 +2102,4 @@ def normalize_subject(subject: str | None) -> str:
     normalized = re.sub(r"^(re|fw|fwd)\s*:\s*", "", normalized)
     normalized = re.sub(r"\s+", " ", normalized)
     return normalized
+

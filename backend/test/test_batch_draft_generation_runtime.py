@@ -169,6 +169,55 @@ class BatchDraftGenerationRuntimeTests(unittest.TestCase):
         self.assertEqual(processed, 0)
         mocked_generate.assert_not_awaited()
 
+
+    def test_batch_draft_generation_keeps_batch_selected_materials(self) -> None:
+        task_ids = self._run_async(
+            self._create_batch_with_tasks(
+                [EmailTaskStatus.DISCOVERED.value],
+                selected_material_ids=[101, 102],
+            ),
+        )
+
+        with patch(
+            "app.services.task_runtime.llm_runtime.generate_draft_content",
+            new=AsyncMock(return_value=self._build_draft_generation_result()),
+        ):
+            processed = self._run_async(
+                run_queued_batch_drafts_once(
+                    self.session_factory,
+                    concurrency=1,
+                    coordinator=BatchDraftGenerationCoordinator(),
+                ),
+            )
+
+        task = self._run_async(self._get_task(task_ids[0]))
+        self.assertEqual(processed, 1)
+        self.assertEqual(task.selected_material_ids, [101, 102])
+
+    def test_batch_draft_generation_keeps_empty_selected_materials(self) -> None:
+        task_ids = self._run_async(
+            self._create_batch_with_tasks(
+                [EmailTaskStatus.DISCOVERED.value],
+                selected_material_ids=None,
+            ),
+        )
+
+        with patch(
+            "app.services.task_runtime.llm_runtime.generate_draft_content",
+            new=AsyncMock(return_value=self._build_draft_generation_result()),
+        ):
+            processed = self._run_async(
+                run_queued_batch_drafts_once(
+                    self.session_factory,
+                    concurrency=1,
+                    coordinator=BatchDraftGenerationCoordinator(),
+                ),
+            )
+
+        task = self._run_async(self._get_task(task_ids[0]))
+        self.assertEqual(processed, 1)
+        self.assertIsNone(task.selected_material_ids)
+
     def test_coordinator_cancel_batch_cancels_tracked_tasks(self) -> None:
         async def scenario() -> bool:
             coordinator = BatchDraftGenerationCoordinator()
@@ -190,6 +239,7 @@ class BatchDraftGenerationRuntimeTests(unittest.TestCase):
         *,
         previous_status: str | None = None,
         updated_at: datetime | None = None,
+        selected_material_ids: list[int] | None = None,
     ) -> list[int]:
         async with self.session_factory() as session:
             session.add(AppSetting(id=1))
@@ -237,6 +287,7 @@ class BatchDraftGenerationRuntimeTests(unittest.TestCase):
                 primary_material=material,
                 email_subject="申请与{{name}}老师交流",
                 email_body="老师您好，我是{{sender_name}}。",
+                selected_material_ids=selected_material_ids,
                 target_count=len(statuses),
             )
             tasks = [
@@ -261,6 +312,7 @@ class BatchDraftGenerationRuntimeTests(unittest.TestCase):
                     outreach_generation_mode="llm",
                     outreach_template_subject="申请与{{name}}老师交流",
                     outreach_template_body_text="老师您好，我是{{sender_name}}。",
+                    selected_material_ids=selected_material_ids,
                     updated_at=updated_at or datetime.now(UTC),
                 )
                 for index, status in enumerate(statuses, start=1)
@@ -282,7 +334,6 @@ class BatchDraftGenerationRuntimeTests(unittest.TestCase):
                 subject="生成主题",
                 body_text="生成正文",
                 body_html="<p>生成正文</p>",
-                suggested_material_ids=[],
             ),
             usage=llm_runtime.ChatCompletionUsage(
                 prompt_tokens=10,
@@ -298,3 +349,5 @@ class BatchDraftGenerationRuntimeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+

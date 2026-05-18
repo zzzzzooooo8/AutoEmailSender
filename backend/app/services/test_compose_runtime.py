@@ -125,8 +125,6 @@ async def generate_test_compose_draft(
         compose_session.subject = generation.result.subject
         compose_session.body_text = generation.result.body_text
         compose_session.body_html = generation.result.body_html
-        if generation.result.suggested_material_ids is not None:
-            compose_session.selected_material_ids = generation.result.suggested_material_ids
 
     compose_session.updated_at = datetime.now(UTC)
     await _record_test_compose_log(
@@ -474,3 +472,4 @@ def _serialize_test_compose_thread(
             for message in history
         ],
     )
+

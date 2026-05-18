@@ -121,7 +121,6 @@ SYSTEM_DRAFT_PROMPT = dedent(
     JSON 字段必须包含：
     - subject: 邮件主题
     - rich_body: 受控富文本 JSON 正文
-    - suggested_material_ids: 整数数组，只能从输入给出的可选材料 ID 中选择
 
     输出示例：
     {
@@ -138,8 +137,7 @@ SYSTEM_DRAFT_PROMPT = dedent(
             "children": [{"type": "text", "text": "我是张三，正在关注您在……"}]
           }
         ]
-      },
-      "suggested_material_ids": [8, 12]
+      }
     }
 
     额外要求：
@@ -155,7 +153,6 @@ SYSTEM_DRAFT_PROMPT = dedent(
     - blocks 只允许 paragraph、bullet_list、numbered_list。
     - 内联节点只允许 text、strong、emphasis、link、line_break。
     - link 的 href 只能使用 http、https、mailto。
-    - 如果没有合适材料，suggested_material_ids 返回 []。
     """
 ).strip()
 
@@ -169,7 +166,6 @@ SYSTEM_DRAFT_REWRITE_PROMPT = dedent(
 
     JSON 字段必须包含：
     - replacements: 段落替换数组
-    - suggested_material_ids: 整数数组，只能从输入给出的可选材料 ID 中选择
     不要返回 subject，邮件主题由系统保留原模板主题。
 
     replacements 中每个块都只能返回：
@@ -259,7 +255,6 @@ class DraftGenerationResult(BaseModel):
     body_text: str | None = None
     body_html: str | None = None
     rich_body: dict[str, object] | None = None
-    suggested_material_ids: list[int] = Field(default_factory=list)
 
 
 class DraftRewriteRun(BaseModel):
@@ -275,7 +270,6 @@ class DraftRewriteSegmentReplacement(BaseModel):
 class DraftRewriteResult(BaseModel):
     subject: str | None = None
     replacements: list[DraftRewriteSegmentReplacement] = Field(default_factory=list)
-    suggested_material_ids: list[int] = Field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -551,17 +545,11 @@ async def generate_draft_content(
             )
         except ValueError as exc:
             raise LLMRuntimeError(str(exc)) from exc
-        valid_material_ids = {material.id for material in available_materials}
         return GeneratedDraftContent(
             result=DraftGenerationResult(
                 subject=rendered_subject,
                 body_text=rendered.text,
                 body_html=rendered.html,
-                suggested_material_ids=[
-                    material_id
-                    for material_id in rewrite_result.suggested_material_ids
-                    if material_id in valid_material_ids
-                ],
             ),
             usage=completion.usage,
         )
@@ -596,12 +584,6 @@ async def generate_draft_content(
         },
     )
     result = parse_structured_result(completion.content, DraftGenerationResult)
-    valid_material_ids = {material.id for material in available_materials}
-    result.suggested_material_ids = [
-        material_id
-        for material_id in result.suggested_material_ids
-        if material_id in valid_material_ids
-    ]
     return GeneratedDraftContent(result=result, usage=completion.usage)
 
 def estimate_draft_content_tokens(
@@ -1159,7 +1141,6 @@ def build_draft_prompt(
         4. 只生成邮件草稿，不要输出 match_score 等匹配字段。
         5. 用中文生成专业、克制、具体的套磁邮件。
         6. rich_body 必须是可渲染为邮件正文的受控富文本 JSON。
-        7. suggested_material_ids 只能返回可选材料里存在的 id。
         8. 围绕导师研究方向做一次自然个性化，不要反复堆砌同一个方向词。
         9. 按上面的改写幅度要求控制改动大小，同时尽量保留可表达的富文本标记，例如加粗、斜体、链接和列表。
         10. 如果模板包含表格，保留表格中的信息顺序和语义，但不要输出 schema 不支持的表格节点。
@@ -1207,7 +1188,6 @@ def _build_base_generation_prompt(
                     },
                 ],
             },
-            "suggested_material_ids": [12],
         },
         "input": {
             "套磁信模板主题": _non_empty_text(custom_subject),
@@ -1265,7 +1245,6 @@ def build_draft_rewrite_prompt(
             "不要返回完整正文。",
             "不要新增、删除、合并、拆分或重排块。",
             "marks 只能使用 strong、underline、emphasis。",
-            "suggested_material_ids 只能选择 available_materials 中存在的 id。",
             "导师研究方向只用于一次自然个性化，不要在正文里反复堆砌。",
         ],
         "response_schema": {
@@ -1280,7 +1259,6 @@ def build_draft_rewrite_prompt(
                     ],
                 },
             ],
-            "suggested_material_ids": [12],
         },
         "input": {
             "professor": _build_draft_rewrite_professor_context(professor),
@@ -1764,7 +1742,6 @@ def _normalize_draft_generation_result(result: DraftGenerationResult) -> DraftGe
         raise LLMRuntimeError("模型返回的富文本正文为空")
     result.body_text = rendered.text
     result.body_html = rendered.html
-    result.suggested_material_ids = _normalize_integer_list(result.suggested_material_ids)
     return result
 
 
@@ -1829,3 +1806,6 @@ def _coerce_token_count(value: object) -> int | None:
     if isinstance(value, float):
         return int(value)
     return None
+
+
+

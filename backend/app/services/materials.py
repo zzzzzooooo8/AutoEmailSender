@@ -10,7 +10,9 @@ from app.services.file_storage import (
 
 
 TERMINAL_MATERIAL_REFERENCING_STATUSES = {
+    EmailTaskStatus.DRAFT_FAILED.value,
     EmailTaskStatus.SENT.value,
+    EmailTaskStatus.SEND_FAILED.value,
     EmailTaskStatus.REPLY_DETECTED.value,
     EmailTaskStatus.CANCELED.value,
 }

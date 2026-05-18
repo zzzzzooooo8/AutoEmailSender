@@ -498,7 +498,6 @@ class ConcurrencyGuardTests(unittest.TestCase):
                 subject="生成主题",
                 body_text="生成正文",
                 body_html="<p>生成正文</p>",
-                suggested_material_ids=[],
             ),
             usage=llm_runtime.ChatCompletionUsage(
                 prompt_tokens=10,
@@ -544,3 +543,4 @@ class ConcurrencyGuardTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
