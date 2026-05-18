@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import unittest
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -20,6 +21,7 @@ from app.models import (
 )
 from app.services.imap_message_fetcher import ImapFetchedMessage
 from app.services.imap_sync_state import ensure_professor_scan_states
+from app.services.task_runtime import poll_for_replies_once
 from app.services.task_runtime import process_imap_fetched_messages
 
 
@@ -182,6 +184,37 @@ class ImapSyncRuntimeTestCase(unittest.TestCase):
             (EmailTaskStatus.REPLY_DETECTED.value, True),
         )
 
+    def test_claim_next_professor_scan_claims_one_pending_state(self) -> None:
+        async def scenario() -> list[str]:
+            identity_id, _, _ = await self._create_reply_task(status=EmailTaskStatus.SENT.value)
+            await self._create_professor_task(identity_id, "other@example.edu")
+            await ensure_professor_scan_states(self.session_factory)
+
+            from app.services.imap_sync_state import claim_next_professor_scan
+
+            claimed = await claim_next_professor_scan(self.session_factory, identity_id)
+            self.assertIsNotNone(claimed)
+
+            async with self.session_factory() as session:
+                states = list((await session.execute(select(ImapProfessorSyncState))).scalars())
+                return [state.historical_scan_status for state in states]
+
+        statuses = self._run_async(scenario())
+        self.assertEqual(statuses.count("running"), 1)
+
+    def test_poll_for_replies_uses_identity_sync_entrypoint(self) -> None:
+        async def scenario() -> int:
+            identity_id = await self._create_identity_with_imap()
+            with patch(
+                "app.services.task_runtime.sync_identity_imap_once",
+                new=AsyncMock(return_value=2),
+            ) as mocked:
+                result = await poll_for_replies_once(self.session_factory)
+            mocked.assert_awaited_once_with(self.session_factory, identity_id)
+            return result
+
+        self.assertEqual(self._run_async(scenario()), 2)
+
     async def _create_reply_task(self, *, status: str) -> tuple[int, int, int]:
         async with self.session_factory() as session:
             identity = self._build_identity()
@@ -214,6 +247,34 @@ class ImapSyncRuntimeTestCase(unittest.TestCase):
             )
             await session.commit()
             return identity.id, professor.id, task.id
+
+    async def _create_identity_with_imap(self) -> int:
+        async with self.session_factory() as session:
+            identity = self._build_identity()
+            session.add(identity)
+            await session.commit()
+            return identity.id
+
+    async def _create_professor_task(self, identity_id: int, email: str) -> int:
+        async with self.session_factory() as session:
+            llm = await session.scalar(select(LLMProfile))
+            if llm is None:
+                llm = self._build_llm()
+                session.add(llm)
+                await session.flush()
+            professor = Professor(name=email, email=email)
+            session.add(professor)
+            await session.flush()
+            session.add(
+                EmailTask(
+                    identity_id=identity_id,
+                    llm_profile_id=llm.id,
+                    professor_id=professor.id,
+                    status=EmailTaskStatus.SENT.value,
+                ),
+            )
+            await session.commit()
+            return professor.id
 
     @staticmethod
     def _build_fetched_message(

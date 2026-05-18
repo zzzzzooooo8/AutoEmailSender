@@ -22,12 +22,19 @@ from app.models import (
     EmailTaskStatus,
     IdentityMaterial,
     IdentityProfile,
+    ImapMailboxSyncState,
     MatchAnalysisRun,
     Professor,
 )
 from app.schemas.email_task import EmailTaskApprovalRequest, EmailTaskScheduleRequest
 from app.services import llm_runtime, mail_runtime
 from app.services.imap_message_fetcher import ImapFetchedMessage
+from app.services.imap_sync_state import (
+    claim_next_professor_scan,
+    ensure_professor_scan_states,
+    mark_professor_scan_completed,
+    mark_professor_scan_failed,
+)
 from app.services.batch_schedule import (
     has_future_batch_window,
     is_batch_window_expired,
@@ -361,7 +368,7 @@ async def poll_for_replies_once(
 
     detected = 0
     for identity_id in identity_ids:
-        detected += await poll_identity_replies(session_factory, identity_id)
+        detected += await sync_identity_imap_once(session_factory, identity_id)
     return detected
 
 async def recover_stale_sending_tasks(
@@ -1375,7 +1382,79 @@ async def _sync_identity_imap_once_unlocked(
     session_factory: async_sessionmaker[AsyncSession],
     identity_id: int,
 ) -> int:
-    return await poll_identity_replies(session_factory, identity_id)
+    await ensure_professor_scan_states(session_factory)
+    history_detected = await sync_identity_history_once(session_factory, identity_id)
+    incremental_detected = await sync_identity_incremental_once(session_factory, identity_id)
+    return history_detected + incremental_detected
+
+
+async def sync_identity_history_once(
+    session_factory: async_sessionmaker[AsyncSession],
+    identity_id: int,
+) -> int:
+    state = await claim_next_professor_scan(session_factory, identity_id)
+    if state is None:
+        return 0
+    try:
+        async with session_factory() as session:
+            identity = await session.get(IdentityProfile, identity_id)
+        if identity is None:
+            await mark_professor_scan_completed(session_factory, state.id, state.last_scanned_uid)
+            return 0
+        messages = await mail_runtime.fetch_professor_history_inbox_messages(
+            identity,
+            state.professor_email,
+        )
+        detected = await process_imap_fetched_messages(session_factory, identity_id, messages)
+        max_uid = max((message.uid for message in messages), default=state.last_scanned_uid)
+        await mark_professor_scan_completed(session_factory, state.id, max_uid)
+        return detected
+    except Exception as exc:
+        await mark_professor_scan_failed(session_factory, state.id, str(exc))
+        return 0
+
+
+async def sync_identity_incremental_once(
+    session_factory: async_sessionmaker[AsyncSession],
+    identity_id: int,
+) -> int:
+    async with session_factory() as session:
+        identity = await session.get(IdentityProfile, identity_id)
+        if identity is None:
+            return 0
+        state = await _get_or_create_mailbox_state(session, identity_id)
+        last_seen_uid = state.last_seen_uid
+        await session.commit()
+    max_seen_uid, messages = await mail_runtime.fetch_incremental_inbox_messages(
+        identity,
+        last_seen_uid,
+    )
+    detected = await process_imap_fetched_messages(session_factory, identity_id, messages)
+    async with session_factory() as session:
+        state = await _get_or_create_mailbox_state(session, identity_id)
+        state.last_seen_uid = max_seen_uid
+        state.last_sync_at = datetime.now(UTC)
+        state.last_error = None
+        await session.commit()
+    return detected
+
+
+async def _get_or_create_mailbox_state(
+    session: AsyncSession,
+    identity_id: int,
+) -> ImapMailboxSyncState:
+    state = await session.scalar(
+        select(ImapMailboxSyncState).where(
+            ImapMailboxSyncState.identity_id == identity_id,
+            ImapMailboxSyncState.folder == "INBOX",
+        ),
+    )
+    if state is not None:
+        return state
+    state = ImapMailboxSyncState(identity_id=identity_id)
+    session.add(state)
+    await session.flush()
+    return state
 
 
 async def _get_imap_identity_lock(identity_id: int) -> asyncio.Lock:
