@@ -1419,10 +1419,17 @@ async def sync_identity_incremental_once(
         state = await _get_or_create_mailbox_state(session, identity_id)
         last_seen_uid = state.last_seen_uid
         await session.commit()
-    max_seen_uid, messages = await mail_runtime.fetch_incremental_inbox_messages(
-        identity,
-        last_seen_uid,
-    )
+    try:
+        max_seen_uid, messages = await mail_runtime.fetch_incremental_inbox_messages(
+            identity,
+            last_seen_uid,
+        )
+    except Exception as exc:
+        async with session_factory() as session:
+            state = await _get_or_create_mailbox_state(session, identity_id)
+            state.last_error = str(exc)
+            await session.commit()
+        return 0
     detected = await process_imap_fetched_messages(session_factory, identity_id, messages)
     async with session_factory() as session:
         state = await _get_or_create_mailbox_state(session, identity_id)

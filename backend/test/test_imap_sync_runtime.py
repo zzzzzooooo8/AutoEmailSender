@@ -15,6 +15,7 @@ from app.models import (
     EmailTask,
     EmailTaskStatus,
     IdentityProfile,
+    ImapMailboxSyncState,
     ImapProfessorSyncState,
     LLMProfile,
     Professor,
@@ -23,6 +24,7 @@ from app.services.imap_message_fetcher import ImapFetchedMessage
 from app.services.imap_sync_state import ensure_professor_scan_states
 from app.services.task_runtime import poll_for_replies_once
 from app.services.task_runtime import process_imap_fetched_messages
+from app.services.task_runtime import sync_identity_incremental_once
 
 
 class ImapSyncRuntimeTestCase(unittest.TestCase):
@@ -214,6 +216,30 @@ class ImapSyncRuntimeTestCase(unittest.TestCase):
             return result
 
         self.assertEqual(self._run_async(scenario()), 2)
+
+    def test_incremental_sync_keeps_cursor_and_records_error_when_fetch_fails(self) -> None:
+        async def scenario() -> tuple[int | None, str | None]:
+            identity_id = await self._create_identity_with_imap()
+            async with self.session_factory() as session:
+                session.add(ImapMailboxSyncState(identity_id=identity_id, last_seen_uid=10))
+                await session.commit()
+
+            with patch(
+                "app.services.task_runtime.mail_runtime.fetch_incremental_inbox_messages",
+                new=AsyncMock(side_effect=RuntimeError("fetch failed")),
+            ):
+                result = await sync_identity_incremental_once(self.session_factory, identity_id)
+
+            self.assertEqual(result, 0)
+            async with self.session_factory() as session:
+                state = await session.scalar(
+                    select(ImapMailboxSyncState).where(
+                        ImapMailboxSyncState.identity_id == identity_id,
+                    ),
+                )
+                return state.last_seen_uid, state.last_error
+
+        self.assertEqual(self._run_async(scenario()), (10, "fetch failed"))
 
     async def _create_reply_task(self, *, status: str) -> tuple[int, int, int]:
         async with self.session_factory() as session:

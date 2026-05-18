@@ -10,6 +10,7 @@ from app.models import IdentityProfile
 from app.services.mail_runtime import (
     MailRuntimeError,
     fetch_inbox_messages_from_sender,
+    fetch_incremental_inbox_messages,
     format_imap_login_error,
     _test_imap_connection_sync,
     parse_received_email,
@@ -61,7 +62,7 @@ class _FakeImapClient:
             if "HEADER.FIELDS" in query:
                 return "OK", [
                     (
-                        b"1 (BODY[HEADER.FIELDS] {128}",
+                        b'1 (UID 1 INTERNALDATE "08-May-2026 20:30:00 +0800" BODY[HEADER.FIELDS] {128}',
                         b"From: teacher@example.com\r\n"
                         b"To: sender@example.com\r\n"
                         b"Subject: Re: hello\r\n"
@@ -69,6 +70,8 @@ class _FakeImapClient:
                         b"Date: Fri, 08 May 2026 20:00:00 +0800\r\n\r\n",
                     ),
                 ]
+            if "TEXT" in query:
+                return "OK", [(b"1 (BODY[TEXT] {12}", b"reply body")]
             return "OK", []
         return "NO", []
 
@@ -141,6 +144,22 @@ class MailRuntimeTest(unittest.TestCase):
         self.assertNotIn("RFC822", " ".join(client.commands))
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0].from_email, "teacher@example.com")
+
+    def test_incremental_fetch_reads_body_and_internaldate(self) -> None:
+        client = _FakeImapClient(search_data=b"1")
+
+        with patch("app.services.mail_runtime._open_imap_client", return_value=client):
+            max_seen_uid, messages = asyncio.run(
+                fetch_incremental_inbox_messages(_build_identity(), None),
+            )
+
+        self.assertEqual(max_seen_uid, 1)
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0].body_text, "reply body")
+        self.assertEqual(messages[0].received_at, datetime(2026, 5, 8, 12, 30, tzinfo=UTC))
+        serialized_commands = " ".join(client.commands)
+        self.assertIn("BODY.PEEK[TEXT]", serialized_commands)
+        self.assertNotIn("RFC822", serialized_commands)
 
     def test_parse_received_email_strips_quoted_original_message_from_plain_text(self) -> None:
         raw_message = (

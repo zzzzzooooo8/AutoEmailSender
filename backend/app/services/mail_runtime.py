@@ -24,7 +24,7 @@ from app.core.config import get_settings
 from app.models import IdentityProfile, Professor
 from app.services.imap_message_fetcher import (
     ImapFetchedMessage,
-    fetch_message_headers_by_uid,
+    parse_text_parts_from_message,
     search_uids_from_sender,
     search_uids_since,
 )
@@ -413,17 +413,65 @@ def _fetch_message_by_uid_sync(
     client: IMAP4 | IMAP4_SSL,
     uid: int,
 ) -> ImapFetchedMessage | None:
-    raw_headers = fetch_message_headers_by_uid(client, uid)
+    header_payload = _fetch_message_header_payload_by_uid(client, uid)
+    raw_headers = _extract_message_bytes_from_fetch_payload(header_payload)
     if not raw_headers:
         return None
     client.uid("FETCH", str(uid), "(BODYSTRUCTURE)")
-    return _parse_fetched_headers(uid, raw_headers, None, None)
+    raw_body = _fetch_message_body_by_uid(client, uid)
+    body_text, body_html = _parse_fetched_body(raw_headers, raw_body)
+    received_at = _extract_received_at_from_fetch_payload(header_payload)
+    return _parse_fetched_headers(uid, raw_headers, body_text, body_html, received_at)
+
+
+def _fetch_message_header_payload_by_uid(
+    client: IMAP4 | IMAP4_SSL,
+    uid: int,
+) -> list[object]:
+    status, payload = client.uid(
+        "FETCH",
+        str(uid),
+        "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID FROM TO CC SUBJECT DATE IN-REPLY-TO REFERENCES)] INTERNALDATE)",
+    )
+    if status != "OK" or not payload:
+        return []
+    return list(payload)
+
+
+def _extract_message_bytes_from_fetch_payload(payload: list[object]) -> bytes:
+    for item in payload:
+        if isinstance(item, tuple) and len(item) >= 2 and isinstance(item[1], (bytes, bytearray)):
+            return bytes(item[1])
+    return b""
+
+
+def _fetch_message_body_by_uid(client: IMAP4 | IMAP4_SSL, uid: int) -> bytes:
+    status, payload = client.uid("FETCH", str(uid), "(BODY.PEEK[TEXT])")
+    if status != "OK" or not payload:
+        return b""
+    return _extract_message_bytes_from_fetch_payload(list(payload))
+
+
+def _parse_fetched_body(raw_headers: bytes, raw_body: bytes) -> tuple[str | None, str | None]:
+    if not raw_body:
+        return None, None
+    parsed = BytesParser(policy=policy.default).parsebytes(raw_headers + b"\r\n" + raw_body)
+    parsed_parts = parse_text_parts_from_message(parsed)
+    body_text = strip_quoted_reply_text(parsed_parts.body_text or "")
+    body_html = strip_quoted_reply_html(parsed_parts.body_html or "") or None
+    if not body_text and body_html:
+        body_text = strip_quoted_reply_text(convert_html_to_text(body_html))
+    if not body_text:
+        fallback_charset = parsed.get_content_charset() or "utf-8"
+        body_text = strip_quoted_reply_text(raw_body.decode(fallback_charset, errors="replace"))
+    return body_text, body_html
 
 
 def _parse_fetched_headers(
     uid: int,
     raw_headers: bytes,
     body_text: str | None,
+    body_html: str | None,
     received_at: datetime | None,
 ) -> ImapFetchedMessage | None:
     parsed = BytesParser(policy=policy.default).parsebytes(raw_headers)
@@ -460,7 +508,7 @@ def _parse_fetched_headers(
         received_at=received_at,
         headers=headers,
         body_text=body_text or "",
-        body_html=None,
+        body_html=body_html,
     )
 
 
