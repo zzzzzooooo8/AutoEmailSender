@@ -809,7 +809,12 @@ async def calculate_task_match(
         task.fit_points = result.fit_points
         task.risk_points = result.risk_points
         task.match_keywords = result.keywords
-        task.status = EmailTaskStatus.MATCHED.value
+        if task.status in {
+            EmailTaskStatus.DISCOVERED.value,
+            EmailTaskStatus.MATCHED.value,
+            EmailTaskStatus.DRAFT_FAILED.value,
+        }:
+            task.status = EmailTaskStatus.MATCHED.value
         task.updated_at = datetime.now(UTC)
         task.last_error = None
         await _record_email_task_log(

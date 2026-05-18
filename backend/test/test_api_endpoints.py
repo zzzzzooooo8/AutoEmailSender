@@ -2641,6 +2641,82 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(response.json()["thread"]["current_task"]["match_score"], 18)
         self.assertEqual(response.json()["thread"]["current_task"]["status"], "matched")
 
+    def test_calculate_match_preserves_sent_task_follow_up_action(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        material_id = self._upload_material(
+            identity_id,
+            filename="resume.txt",
+            content=b"My background covers information extraction and agents.",
+            material_type="resume",
+        )
+        set_primary_response = self.client.post(f"/api/materials/{material_id}/set-primary")
+        self.assertEqual(set_primary_response.status_code, 200, msg=set_primary_response.text)
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "已发送后分析导师",
+                "email": "sent-match@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Agents",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        ensure_response = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(ensure_response.status_code, 200, msg=ensure_response.text)
+        task_id = ensure_response.json()["current_task"]["id"]
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            connection.execute(
+                """
+                UPDATE email_tasks
+                SET status = 'sent',
+                    sent_at = CURRENT_TIMESTAMP,
+                    approved_subject = '已发送主题',
+                    approved_body_text = '已发送正文',
+                    approved_body_html = '<p>已发送正文</p>',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (task_id,),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        workspace_before = self.client.get(
+            f"/api/workspaces/{professor_id}",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(workspace_before.status_code, 200, msg=workspace_before.text)
+        self.assertEqual(workspace_before.json()["current_task"]["status"], "sent")
+        self.assertTrue(workspace_before.json()["current_task"]["can_write_follow_up"])
+
+        with patch(
+            "app.services.task_runtime.llm_runtime.generate_match_evaluation",
+            AsyncMock(return_value=self._build_match_evaluation_result(match_score=92)),
+        ):
+            response = self.client.post(f"/api/email-tasks/{task_id}/calculate-match")
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        current_task = response.json()["thread"]["current_task"]
+        self.assertEqual(current_task["match_score"], 92)
+        self.assertEqual(current_task["status"], "sent")
+        self.assertTrue(current_task["can_write_follow_up"])
+
     def test_calculate_match_requires_professor_research_evidence(self) -> None:
         identity_id = self._create_identity(with_imap=False)
         llm_id = self._create_llm()
