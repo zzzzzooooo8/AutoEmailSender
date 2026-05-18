@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import unittest
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -11,12 +12,15 @@ from app.models import (
     EmailDirection,
     EmailLog,
     EmailTask,
+    EmailTaskStatus,
     IdentityProfile,
     ImapProfessorSyncState,
     LLMProfile,
     Professor,
 )
+from app.services.imap_message_fetcher import ImapFetchedMessage
 from app.services.imap_sync_state import ensure_professor_scan_states
+from app.services.task_runtime import process_imap_fetched_messages
 
 
 class ImapSyncRuntimeTestCase(unittest.TestCase):
@@ -88,6 +92,148 @@ class ImapSyncRuntimeTestCase(unittest.TestCase):
                 return [row.professor_email for row in rows]
 
         self.assertEqual(self._run_async(scenario()), ["logged@example.edu"])
+
+    def test_existing_reply_is_not_overwritten_when_content_is_present(self) -> None:
+        async def scenario() -> str:
+            identity_id, professor_id, task_id = await self._create_reply_task(
+                status=EmailTaskStatus.SENT.value,
+            )
+            async with self.session_factory() as session:
+                session.add(
+                    EmailLog(
+                        email_task_id=task_id,
+                        identity_id=identity_id,
+                        llm_profile_id=1,
+                        professor_id=professor_id,
+                        direction=EmailDirection.RECEIVED.value,
+                        subject="old subject",
+                        content="old content",
+                        rfc_message_id="<reply@example.edu>",
+                    ),
+                )
+                await session.commit()
+
+            await process_imap_fetched_messages(
+                self.session_factory,
+                identity_id,
+                [self._build_fetched_message(message_id="<reply@example.edu>", content="new content")],
+            )
+
+            async with self.session_factory() as session:
+                log = await session.scalar(
+                    select(EmailLog).where(EmailLog.rfc_message_id == "<reply@example.edu>"),
+                )
+                return log.content
+
+        self.assertEqual(self._run_async(scenario()), "old content")
+
+    def test_existing_reply_empty_content_is_backfilled(self) -> None:
+        async def scenario() -> str:
+            identity_id, professor_id, task_id = await self._create_reply_task(
+                status=EmailTaskStatus.SENT.value,
+            )
+            async with self.session_factory() as session:
+                session.add(
+                    EmailLog(
+                        email_task_id=task_id,
+                        identity_id=identity_id,
+                        llm_profile_id=1,
+                        professor_id=professor_id,
+                        direction=EmailDirection.RECEIVED.value,
+                        subject="old subject",
+                        content="",
+                        rfc_message_id="<reply@example.edu>",
+                    ),
+                )
+                await session.commit()
+
+            await process_imap_fetched_messages(
+                self.session_factory,
+                identity_id,
+                [self._build_fetched_message(message_id="<reply@example.edu>", content="new content")],
+            )
+
+            async with self.session_factory() as session:
+                log = await session.scalar(
+                    select(EmailLog).where(EmailLog.rfc_message_id == "<reply@example.edu>"),
+                )
+                return log.content
+
+        self.assertEqual(self._run_async(scenario()), "new content")
+
+    def test_canceled_task_is_marked_replied_when_reply_is_found(self) -> None:
+        async def scenario() -> tuple[str, bool]:
+            identity_id, _, task_id = await self._create_reply_task(
+                status=EmailTaskStatus.CANCELED.value,
+            )
+
+            await process_imap_fetched_messages(
+                self.session_factory,
+                identity_id,
+                [self._build_fetched_message(message_id="<new-reply@example.edu>")],
+            )
+
+            async with self.session_factory() as session:
+                task = await session.get(EmailTask, task_id)
+                return task.status, task.is_replied
+
+        self.assertEqual(
+            self._run_async(scenario()),
+            (EmailTaskStatus.REPLY_DETECTED.value, True),
+        )
+
+    async def _create_reply_task(self, *, status: str) -> tuple[int, int, int]:
+        async with self.session_factory() as session:
+            identity = self._build_identity()
+            llm = self._build_llm()
+            professor = Professor(name="Reply Professor", email="prof@example.edu")
+            session.add_all([identity, llm, professor])
+            await session.flush()
+            task = EmailTask(
+                identity_id=identity.id,
+                llm_profile_id=llm.id,
+                professor_id=professor.id,
+                status=status,
+                sent_at=datetime(2026, 5, 1, tzinfo=UTC),
+                approved_subject="Hello",
+                last_rfc_message_id="<sent@example.com>",
+            )
+            session.add(task)
+            await session.flush()
+            session.add(
+                EmailLog(
+                    email_task_id=task.id,
+                    identity_id=identity.id,
+                    llm_profile_id=llm.id,
+                    professor_id=professor.id,
+                    direction=EmailDirection.SENT.value,
+                    subject="Hello",
+                    content="sent",
+                    rfc_message_id="<sent@example.com>",
+                ),
+            )
+            await session.commit()
+            return identity.id, professor.id, task.id
+
+    @staticmethod
+    def _build_fetched_message(
+        *,
+        message_id: str,
+        content: str = "reply content",
+    ) -> ImapFetchedMessage:
+        return ImapFetchedMessage(
+            uid=1,
+            from_email="prof@example.edu",
+            subject="Re: Hello",
+            message_id=message_id,
+            in_reply_to="<sent@example.com>",
+            references="<sent@example.com>",
+            sent_at=datetime(2026, 5, 2, tzinfo=UTC),
+            received_at=datetime(2026, 5, 2, 1, tzinfo=UTC),
+            headers={"Message-ID": message_id},
+            body_text=content,
+            body_html="<p>reply</p>",
+        )
 
     @staticmethod
     def _build_identity() -> IdentityProfile:

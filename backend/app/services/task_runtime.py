@@ -27,6 +27,7 @@ from app.models import (
 )
 from app.schemas.email_task import EmailTaskApprovalRequest, EmailTaskScheduleRequest
 from app.services import llm_runtime, mail_runtime
+from app.services.imap_message_fetcher import ImapFetchedMessage
 from app.services.batch_schedule import (
     has_future_batch_window,
     is_batch_window_expired,
@@ -1390,14 +1391,11 @@ async def _process_incoming_reply_messages(
                     select(EmailLog).where(EmailLog.rfc_message_id == message.message_id),
                 )
                 if existing:
-                    if (
-                        existing.direction == EmailDirection.RECEIVED.value
-                        and not _datetimes_match(existing.created_at, reply_created_at)
-                    ):
-                        existing.created_at = reply_created_at
-                        existing.reply_headers = message.headers
-                        session.add(existing)
-                        await session.commit()
+                    if existing.direction == EmailDirection.RECEIVED.value:
+                        changed = _backfill_existing_reply(existing, message, reply_created_at)
+                        if changed:
+                            session.add(existing)
+                            await session.commit()
                     continue
 
             task = await _find_reply_target(session, identity_id, message)
@@ -1435,6 +1433,54 @@ async def _process_incoming_reply_messages(
                 continue
             detected += 1
     return detected
+
+
+async def process_imap_fetched_messages(
+    session_factory: async_sessionmaker[AsyncSession],
+    identity_id: int,
+    messages: list[ImapFetchedMessage],
+) -> int:
+    received_messages = [
+        ReceivedEmail(
+            from_email=message.from_email,
+            subject=message.subject,
+            content=message.body_text,
+            content_html=message.body_html,
+            message_id=message.message_id,
+            in_reply_to=message.in_reply_to,
+            references=message.references,
+            sent_at=message.sent_at,
+            received_at=message.received_at,
+            headers=message.headers,
+        )
+        for message in messages
+    ]
+    return await _process_incoming_reply_messages(
+        session_factory,
+        identity_id,
+        received_messages,
+    )
+
+
+def _backfill_existing_reply(
+    existing: EmailLog,
+    message: ReceivedEmail,
+    reply_created_at: datetime,
+) -> bool:
+    changed = False
+    if not existing.content and message.content:
+        existing.content = message.content
+        changed = True
+    if not existing.content_html and message.content_html:
+        existing.content_html = message.content_html
+        changed = True
+    if not existing.reply_headers and message.headers:
+        existing.reply_headers = message.headers
+        changed = True
+    if not _datetimes_match(existing.created_at, reply_created_at):
+        existing.created_at = reply_created_at
+        changed = True
+    return changed
 
 
 def _get_reply_created_at(message: mail_runtime.ReceivedEmail) -> datetime:
@@ -1574,6 +1620,7 @@ async def _find_reply_target(
                         [
                             EmailTaskStatus.SENT.value,
                             EmailTaskStatus.REPLY_DETECTED.value,
+                            EmailTaskStatus.CANCELED.value,
                         ],
                     ),
                 )
