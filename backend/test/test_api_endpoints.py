@@ -3541,6 +3541,73 @@ class ApiEndpointTests(unittest.TestCase):
             "该任务已因批量任务停止而取消，请先“作为单独联系继续”后再执行此操作",
         )
 
+    def test_workspace_recovers_legacy_matched_task_with_sent_at(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        primary_material_id = self._upload_material(
+            identity_id,
+            filename="resume.txt",
+            content=b"My background covers agent systems and information extraction.",
+            material_type="resume",
+        )
+        set_primary_response = self.client.post(f"/api/materials/{primary_material_id}/set-primary")
+        self.assertEqual(set_primary_response.status_code, 200, msg=set_primary_response.text)
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "旧状态跟进导师",
+                "email": "legacy-follow-up@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Information extraction",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        ensure_response = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(ensure_response.status_code, 200, msg=ensure_response.text)
+        task_id = ensure_response.json()["current_task"]["id"]
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            connection.execute(
+                """
+                UPDATE email_tasks
+                SET status = 'matched',
+                    sent_at = CURRENT_TIMESTAMP,
+                    approved_subject = '已发送主题',
+                    approved_body_text = '已发送正文',
+                    approved_body_html = '<p>已发送正文</p>',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (task_id,),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        workspace_response = self.client.get(
+            f"/api/workspaces/{professor_id}",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+
+        self.assertEqual(workspace_response.status_code, 200, msg=workspace_response.text)
+        current_task = workspace_response.json()["current_task"]
+        self.assertEqual(current_task["id"], task_id)
+        self.assertEqual(current_task["status"], "sent")
+        self.assertTrue(current_task["can_write_follow_up"])
+
     def test_start_follow_up_creates_manual_child_task_from_sent_task(self) -> None:
         identity_id = self._create_identity(with_imap=False)
         llm_id = self._create_llm()
