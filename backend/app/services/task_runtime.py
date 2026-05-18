@@ -1439,6 +1439,27 @@ async def sync_identity_incremental_once(
     return detected
 
 
+async def sync_workspace_professor_replies(
+    session_factory: async_sessionmaker[AsyncSession],
+    identity_id: int,
+    professor_id: int,
+) -> int:
+    lock = await _get_imap_identity_lock(identity_id)
+    if lock.locked():
+        return 0
+    async with lock:
+        async with session_factory() as session:
+            identity = await session.get(IdentityProfile, identity_id)
+            professor = await session.get(Professor, professor_id)
+        if identity is None or professor is None or not professor.email:
+            return 0
+        messages = await mail_runtime.fetch_professor_history_inbox_messages(
+            identity,
+            professor.email,
+        )
+        return await process_imap_fetched_messages(session_factory, identity_id, messages)
+
+
 async def _get_or_create_mailbox_state(
     session: AsyncSession,
     identity_id: int,
