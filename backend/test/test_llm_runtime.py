@@ -289,7 +289,7 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
                                 "content": (
                                     '{"subject":"申请交流","replacements":['
                                     '{"segment_id":"seg_1","runs":[{"text":"模板正文","marks":[]}]}'
-                                    '],"suggested_material_ids":[7]}'
+                                    ']}'
                                 ),
                             },
                         },
@@ -315,7 +315,6 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         payload = calls[0][1]
         self.assertEqual(payload["max_tokens"], 4800)
-        self.assertEqual(result.result.suggested_material_ids, [7])
 
     async def test_generate_draft_content_sends_template_runs_without_full_html(self) -> None:
         from app.models import IdentityMaterial, IdentityProfile, Professor
@@ -372,7 +371,7 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
                                     '{"text":"Information Extraction","marks":["strong"]},'
                                     '{"text":" 方向的研究。","marks":[]}'
                                     ']}'
-                                    '],"suggested_material_ids":[7]}'
+                                    ']}'
                                 ),
                             },
                         },
@@ -457,7 +456,7 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
                                 "content": (
                                     '{"subject":"申请交流","replacements":['
                                     '{"segment_id":"seg_1","runs":[{"text":"李老师，您好：","marks":[]}]}'
-                                    '],"suggested_material_ids":[]}'
+                                    ']}'
                                 ),
                             },
                         },
@@ -537,7 +536,7 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
                                     '{"text":"Information Extraction","marks":["strong"]},'
                                     '{"text":" 方向很感兴趣。","marks":[]}'
                                     ']}'
-                                    '],"suggested_material_ids":[7]}'
+                                    ']}'
                                 ),
                             },
                         },
@@ -579,7 +578,6 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Information Extraction", result.result.body_html)
         self.assertIn("<strong", result.result.body_html)
         self.assertNotIn("{{research_direction}}", result.result.body_text)
-        self.assertEqual(result.result.suggested_material_ids, [7])
 
     async def test_generate_draft_content_uses_anchored_rewrite_and_preserves_strong_anchor(self) -> None:
         from app.models import IdentityMaterial, IdentityProfile, Professor
@@ -635,7 +633,6 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
                         ],
                     },
                 ],
-                "suggested_material_ids": [12],
             },
             ensure_ascii=False,
         )
@@ -1028,7 +1025,6 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
                         ],
                     },
                 ],
-                "suggested_material_ids": [12],
             },
             ensure_ascii=False,
         )
@@ -1514,3 +1510,4 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

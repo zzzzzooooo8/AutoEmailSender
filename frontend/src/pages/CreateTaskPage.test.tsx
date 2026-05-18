@@ -30,9 +30,9 @@ const selectedIdentity: IdentityDTO = {
   imap_password: null,
   default_language: "zh-CN",
   outreach_generation_mode: "template",
-  outreach_template_subject: "",
-  outreach_template_body_text: "",
-  outreach_template_body_html: "",
+  outreach_template_subject: "\u7533\u8bf7\u4e0e{{name}}\u8001\u5e08\u4ea4\u6d41",
+  outreach_template_body_text: "{{name}}\u8001\u5e08\u60a8\u597d",
+  outreach_template_body_html: "<p>{{name}}\u8001\u5e08\u60a8\u597d</p>",
   current_primary_material_id: null,
   current_primary_material: null,
   match_threshold: null,
@@ -41,7 +41,18 @@ const selectedIdentity: IdentityDTO = {
   send_interval_max: null,
   same_domain_cooldown_minutes: null,
   is_default: true,
-  materials: [],
+  materials: [
+    {
+      id: 7,
+      display_name: "Portfolio.pdf",
+      original_filename: "portfolio.pdf",
+      mime_type: "application/pdf",
+      size_bytes: 1024,
+      material_type: "portfolio",
+      is_primary: false,
+      created_at: "2026-05-01T00:00:00",
+    },
+  ],
   created_at: "2026-05-01T00:00:00",
   updated_at: "2026-05-01T00:00:00",
 };
@@ -183,6 +194,46 @@ describe("CreateTaskPage", () => {
     );
   });
 
+
+  it("submits null selected materials by default for new batch tasks", async () => {
+    render(
+      <MemoryRouter>
+        <CreateTaskPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(selectedProfessor.name)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /\u521b\u5efa\u4efb\u52a1/ }));
+
+    await waitFor(() => expect(createBatchTaskMock).toHaveBeenCalledTimes(1));
+    expect(createBatchTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selected_material_ids: null,
+      }),
+    );
+  });
+
+  it("submits user selected materials for batch tasks", async () => {
+    render(
+      <MemoryRouter>
+        <CreateTaskPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(selectedProfessor.name)).toBeInTheDocument();
+    const materialLabel = screen.getAllByText("Portfolio.pdf")[1].closest("label");
+    expect(materialLabel).not.toBeNull();
+    fireEvent.click(materialLabel!.querySelector("input")!);
+    fireEvent.click(screen.getByRole("button", { name: /\u521b\u5efa\u4efb\u52a1/ }));
+
+    await waitFor(() => expect(createBatchTaskMock).toHaveBeenCalledTimes(1));
+    expect(createBatchTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selected_material_ids: [7],
+      }),
+    );
+  });
+
   it("explains that scheduled AI rewritten drafts still need manual review", () => {
     expect(buildBatchCreateConfirmDescription("llm", "scheduled")).toContain(
       "AI 改写完成后仍需逐封审核通过",
@@ -220,3 +271,5 @@ describe("CreateTaskPage", () => {
     expect(screen.getByText("导师13")).toBeInTheDocument();
   });
 });
+
+

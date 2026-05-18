@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from app.schemas.workspace import WorkspaceThreadRead
 
@@ -47,5 +47,5 @@ class DraftPreviewRead(BaseModel):
     body_text: str | None = None
     body_html: str | None = None
     rich_body: dict[str, object] | None = None
-    suggested_material_ids: list[int] = Field(default_factory=list)
     usage: TokenUsageRead | None = None
+
