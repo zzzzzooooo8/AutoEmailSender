@@ -302,7 +302,7 @@ def _test_imap_connection_sync(identity: IdentityProfile) -> None:
         _send_imap_client_id(client, identity)
         _select_inbox_or_raise(client)
     except OSError as exc:
-        raise MailRuntimeError(f"IMAP 连接失败: {exc}") from exc
+        raise MailRuntimeError(format_imap_login_error(identity, exc)) from exc
     finally:
         if client is not None:
             try:
@@ -325,6 +325,22 @@ def _send_email_sync(identity: IdentityProfile, message: EmailMessage) -> None:
                 server.quit()
             except OSError:
                 pass
+
+
+def format_imap_login_error(identity: IdentityProfile, detail: object) -> str:
+    host = (identity.imap_host or "").lower()
+    base = f"IMAP 登录失败: {detail}"
+    if any(
+        provider in host
+        for provider in [
+            "imap.qq.com",
+            "imap.163.com",
+            "imap.126.com",
+            "imap.yeah.net",
+        ]
+    ):
+        return f"{base}。请确认已开启 IMAP/SMTP 服务，并使用邮箱客户端授权码而不是网页登录密码。"
+    return base
 
 
 def _fetch_recent_inbox_messages_sync(identity: IdentityProfile) -> list[ReceivedEmail]:
@@ -424,7 +440,10 @@ def _fetch_inbox_messages_sync(identity: IdentityProfile, search_criterion: str)
 
 def _open_logged_in_imap_client(identity: IdentityProfile) -> IMAP4 | IMAP4_SSL:
     client = _open_imap_client(identity)
-    client.login(identity.imap_username or "", identity.imap_password or "")
+    try:
+        client.login(identity.imap_username or "", identity.imap_password or "")
+    except OSError as exc:
+        raise MailRuntimeError(format_imap_login_error(identity, exc)) from exc
     _send_imap_client_id(client, identity)
     _select_inbox_or_raise(client)
     return client

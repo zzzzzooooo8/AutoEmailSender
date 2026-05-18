@@ -10,6 +10,7 @@ from app.models import IdentityProfile
 from app.services.mail_runtime import (
     MailRuntimeError,
     fetch_inbox_messages_from_sender,
+    format_imap_login_error,
     _fetch_recent_inbox_messages_sync,
     _test_imap_connection_sync,
     parse_received_email,
@@ -76,6 +77,15 @@ def _build_identity() -> IdentityProfile:
 
 
 class MailRuntimeTest(unittest.TestCase):
+    def test_imap_login_failure_mentions_authorization_code_for_qq_or_163(self) -> None:
+        identity = _build_identity()
+        identity.imap_host = "imap.qq.com"
+
+        message = format_imap_login_error(identity, "AUTHENTICATIONFAILED")
+
+        self.assertIn("授权码", message)
+        self.assertIn("IMAP/SMTP", message)
+
     def test_imap_connection_sends_client_id_before_selecting_inbox(self) -> None:
         client = _FakeImapClient(select_status="OK")
         previous_id_command = imaplib.Commands.pop("ID", None)
