@@ -538,9 +538,6 @@ async def generate_task_draft(
                 body_text = rendered.body_text
                 body_html = rendered.body_html
                 usage = None
-                suggested_material_ids = (
-                    batch_task.selected_material_ids if batch_task else None
-                )
                 provider_payload = {
                     "source": OUTREACH_GENERATION_MODE_TEMPLATE,
                     "placeholders": rendered.placeholders,
@@ -595,14 +592,9 @@ async def generate_task_draft(
                 body_text = generation.result.body_text
                 body_html = generation.result.body_html
                 usage = generation.usage
-                suggested_material_ids = (
-                    generation.result.suggested_material_ids
-                    or (batch_task.selected_material_ids if batch_task else None)
-                )
                 provider_payload = {
                     "source": "llm",
                     "primary_material_id": task.primary_material_id,
-                    "suggested_material_ids": generation.result.suggested_material_ids,
                     "usage": (
                         {
                             "prompt_tokens": usage.prompt_tokens,
@@ -662,8 +654,6 @@ async def generate_task_draft(
         task.generated_subject = subject
         task.generated_content_text = body_text
         task.generated_content_html = body_html
-        if suggested_material_ids is not None:
-            task.selected_material_ids = suggested_material_ids
         task.status = EmailTaskStatus.REVIEW_REQUIRED.value
         task.draft_generation_previous_status = None
         task.updated_at = datetime.now(UTC)
@@ -1937,3 +1927,4 @@ def normalize_subject(subject: str | None) -> str:
     normalized = re.sub(r"^(re|fw|fwd)\s*:\s*", "", normalized)
     normalized = re.sub(r"\s+", " ", normalized)
     return normalized
+

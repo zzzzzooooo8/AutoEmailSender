@@ -5216,7 +5216,6 @@ class ApiEndpointTests(unittest.TestCase):
                 subject=subject,
                 body_text=body_text,
                 body_html=body_html,
-                suggested_material_ids=[],
             ),
             usage=(
                 ChatCompletionUsage(
@@ -5346,3 +5345,4 @@ class ApiEndpointTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -23,8 +23,7 @@ class LLMRichDraftTest(unittest.TestCase):
                     ]
                   }
                 ]
-              },
-              "suggested_material_ids": [1]
+              }
             }
             """,
             DraftGenerationResult,
@@ -35,3 +34,4 @@ class LLMRichDraftTest(unittest.TestCase):
             result.body_html,
             "<p>王老师您好，<strong>我很关注您的工作</strong></p>",
         )
+

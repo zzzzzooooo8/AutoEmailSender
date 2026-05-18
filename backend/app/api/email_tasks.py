@@ -105,7 +105,6 @@ async def draft_preview(
         body_text=generation.result.body_text,
         body_html=generation.result.body_html,
         rich_body=generation.result.rich_body,
-        suggested_material_ids=generation.result.suggested_material_ids,
         usage=TokenUsageRead(
             prompt_tokens=generation.usage.prompt_tokens if generation.usage else None,
             completion_tokens=generation.usage.completion_tokens if generation.usage else None,
@@ -240,3 +239,4 @@ async def _run_workspace_action(
         identity_id=identity_id,
         llm_profile_id=llm_profile_id,
     )
+
