@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.identity_serializers import serialize_material
 from app.core.database import get_async_session
-from app.models import EmailTask, IdentityMaterial, IdentityMaterialType, IdentityProfile
+from app.models import BatchTask, BatchTaskStatus, EmailTask, IdentityMaterial, IdentityMaterialType, IdentityProfile
 from app.schemas.identity import IdentityMaterialRead
 from app.services.file_storage import (
     build_display_name,
@@ -27,6 +27,12 @@ from app.services.operation_logs import record_operation_log
 
 
 router = APIRouter(prefix="/api", tags=["materials"])
+
+NON_CONTINUABLE_BATCH_TASK_STATUSES = {
+    BatchTaskStatus.STOPPED.value,
+    BatchTaskStatus.COMPLETED.value,
+    BatchTaskStatus.EXPIRED.value,
+}
 
 
 @router.post(
@@ -113,6 +119,20 @@ async def delete_material(
         if material.id in (task.selected_material_ids or []):
             raise HTTPException(status_code=400, detail="当前材料仍被未完成任务选为随信材料")
 
+    continuable_batch_tasks = list(
+        (
+            await session.execute(
+                select(BatchTask).where(
+                    BatchTask.identity_id == material.identity_id,
+                    BatchTask.status.not_in(NON_CONTINUABLE_BATCH_TASK_STATUSES),
+                ),
+            )
+        ).scalars()
+    )
+    for batch_task in continuable_batch_tasks:
+        if batch_task.primary_material_id == material.id or material.id in (batch_task.selected_material_ids or []):
+            raise HTTPException(status_code=400, detail="当前材料仍被可继续批量任务使用")
+
     referencing_tasks = list(
         (
             await session.execute(
@@ -137,6 +157,31 @@ async def delete_material(
             task_updated = True
         if task_updated:
             task.updated_at = datetime.now(UTC)
+
+    referencing_batch_tasks = list(
+        (
+            await session.execute(
+                select(BatchTask).where(
+                    BatchTask.identity_id == material.identity_id,
+                    BatchTask.status.in_(NON_CONTINUABLE_BATCH_TASK_STATUSES),
+                ),
+            )
+        ).scalars()
+    )
+    for batch_task in referencing_batch_tasks:
+        batch_task_updated = False
+        if batch_task.primary_material_id == material.id:
+            batch_task.primary_material_id = None
+            batch_task_updated = True
+        if material.id in (batch_task.selected_material_ids or []):
+            batch_task.selected_material_ids = [
+                selected_material_id
+                for selected_material_id in batch_task.selected_material_ids or []
+                if selected_material_id != material.id
+            ]
+            batch_task_updated = True
+        if batch_task_updated:
+            batch_task.updated_at = datetime.now(UTC)
 
     if is_current_primary:
         identity.current_primary_material_id = None
