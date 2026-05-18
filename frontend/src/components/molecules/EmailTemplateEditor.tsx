@@ -46,7 +46,9 @@ import {
 type EmailTemplateEditorProps = {
   label: string;
   html: string;
+  placeholder?: string;
   onChange: (value: { html: string; text: string }) => void;
+  onFileDrop?: (file: File) => void;
 };
 
 type MenuKey = "placeholder" | "font" | "fontSize" | "lineHeight" | "indent";
@@ -72,6 +74,24 @@ const getLineHeightLabel = (value: string | null | undefined) =>
   EMAIL_LINE_HEIGHT_OPTIONS.find(
     (option) => normalizeValue(option.value) === normalizeValue(value),
   )?.label ?? "行距";
+
+const getFirstDroppedFile = (event: Event) => {
+  if (!("dataTransfer" in event)) {
+    return null;
+  }
+  return event.dataTransfer?.files?.[0] ?? null;
+};
+
+const isFileDragEvent = (event: Event) => {
+  if (!("dataTransfer" in event)) {
+    return false;
+  }
+
+  const types = event.dataTransfer?.types
+    ? Array.from(event.dataTransfer.types)
+    : [];
+  return types.includes("Files") || Boolean(event.dataTransfer?.files?.length);
+};
 
 const ToolbarMenu = ({
   active,
@@ -131,10 +151,18 @@ const ToolbarMenu = ({
 export const EmailTemplateEditor = ({
   label,
   html,
+  placeholder,
   onChange,
+  onFileDrop,
 }: EmailTemplateEditorProps) => {
   const [openMenu, setOpenMenu] = useState<MenuKey | null>(null);
   const lastLocalHtmlRef = useRef<string | null>(null);
+  const onFileDropRef = useRef<typeof onFileDrop>(onFileDrop);
+
+  useEffect(() => {
+    onFileDropRef.current = onFileDrop;
+  }, [onFileDrop]);
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -168,6 +196,31 @@ export const EmailTemplateEditor = ({
           "email-editor-content min-h-[320px] max-h-[520px] overflow-y-auto overscroll-contain rounded-[28px] border border-stone-200 bg-white px-4 py-4 text-sm leading-7 text-stone-700 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15",
         role: "textbox",
         "aria-label": label,
+      },
+      handleDOMEvents: {
+        dragover: (_view, event) => {
+          if (!onFileDropRef.current || !isFileDragEvent(event)) {
+            return false;
+          }
+
+          event.preventDefault();
+          return true;
+        },
+        drop: (_view, event) => {
+          if (!onFileDropRef.current || !isFileDragEvent(event)) {
+            return false;
+          }
+
+          event.preventDefault();
+          event.stopPropagation();
+          const file = getFirstDroppedFile(event);
+          if (!file) {
+            return true;
+          }
+
+          onFileDropRef.current(file);
+          return true;
+        },
       },
     },
     onUpdate: ({ editor: currentEditor }) => {
@@ -205,6 +258,7 @@ export const EmailTemplateEditor = ({
   const currentLineHeight = getLineHeightLabel(paragraphAttributes.lineHeight);
   const currentIndent =
     paragraphAttributes.firstLineIndent === "2em" ? "首行缩进 2 字符" : "首行缩进";
+  const isEditorEmpty = editor.isEmpty;
   const tableActive =
     editor.isActive("table") || editor.isActive("tableCell") || editor.isActive("tableHeader");
 
@@ -437,7 +491,14 @@ export const EmailTemplateEditor = ({
         </div>
       ) : null}
 
-      <EditorContent editor={editor} />
+      <div className="relative">
+        {placeholder && isEditorEmpty ? (
+          <div className="pointer-events-none absolute left-4 top-4 z-10 text-sm leading-7 text-stone-400">
+            {placeholder}
+          </div>
+        ) : null}
+        <EditorContent editor={editor} />
+      </div>
     </div>
   );
 };
