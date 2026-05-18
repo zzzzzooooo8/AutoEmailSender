@@ -16,6 +16,7 @@ class DiagnosticsApiTests(unittest.TestCase):
         cls.temp_dir = tempfile.TemporaryDirectory()
         cls.db_path = Path(cls.temp_dir.name) / "diagnostics_api_test.db"
         cls.crawler_debug_dir = Path(cls.temp_dir.name) / "crawler-debug"
+        os.environ["AUTO_EMAIL_SENDER_DATA_DIR"] = cls.temp_dir.name
         os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{cls.db_path.as_posix()}"
         os.environ["ENABLE_BACKGROUND_WORKERS"] = "0"
         os.environ["CRAWLER_DEBUG_DIR"] = cls.crawler_debug_dir.as_posix()
@@ -54,6 +55,7 @@ class DiagnosticsApiTests(unittest.TestCase):
         from app.core.config import get_settings
 
         get_settings.cache_clear()
+        os.environ.pop("AUTO_EMAIL_SENDER_DATA_DIR", None)
         os.environ.pop("DATABASE_URL", None)
         os.environ.pop("ENABLE_BACKGROUND_WORKERS", None)
         os.environ.pop("CRAWLER_DEBUG_DIR", None)
@@ -61,6 +63,9 @@ class DiagnosticsApiTests(unittest.TestCase):
 
     def setUp(self) -> None:
         asyncio.run(self._clear_operation_logs())
+        startup_log = Path(self.temp_dir.name) / "logs" / "startup.log"
+        if startup_log.exists():
+            startup_log.unlink()
 
     async def _clear_operation_logs(self) -> None:
         from sqlalchemy import delete
@@ -255,6 +260,25 @@ class DiagnosticsApiTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in payload["items"]], [expected_id])
         self.assertEqual(payload["filters"]["start_at"], "2026-04-26T00:00:00+00:00")
         self.assertEqual(payload["filters"]["end_at"], "2026-04-27T00:00:00+00:00")
+
+    def test_export_operation_logs_includes_startup_log_file(self) -> None:
+        startup_log = Path(self.temp_dir.name) / "logs" / "startup.log"
+        startup_log.parent.mkdir(parents=True, exist_ok=True)
+        startup_log.write_text(
+            "[2026-05-18T10:00:00+00:00] 桌面后端启动初始化失败\n"
+            "error=RuntimeError: database is locked\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+
+        response = self.client.get("/api/diagnostics/export")
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        startup_logs = response.json()["startup_logs"]
+        self.assertEqual(len(startup_logs), 1)
+        self.assertEqual(startup_logs[0]["name"], "startup.log")
+        self.assertEqual(startup_logs[0]["relative_path"], "logs/startup.log")
+        self.assertIn("database is locked", startup_logs[0]["content"])
 
     def test_operation_log_metadata_field_maps_from_event_metadata(self) -> None:
         log_id = self._seed_log(

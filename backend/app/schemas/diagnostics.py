@@ -25,8 +25,15 @@ class OperationLogListResponse(BaseModel):
     offset: int = Field(ge=0)
 
 
+class DiagnosticFileRead(BaseModel):
+    name: str
+    relative_path: str
+    content: str
+
+
 class OperationLogExportResponse(BaseModel):
     exported_at: datetime
     items: list[OperationLogRead]
     total: int
     filters: dict[str, str | None]
+    startup_logs: list[DiagnosticFileRead] = Field(default_factory=list)

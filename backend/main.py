@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import traceback
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from pathlib import Path
+from typing import Awaitable, Callable
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -38,6 +41,9 @@ from app.services.task_runtime import recover_interrupted_match_analysis_runs
 
 ensure_windows_proactor_event_loop_policy()
 logger = logging.getLogger(__name__)
+
+STARTUP_DATABASE_LOCK_MAX_ATTEMPTS = 4
+STARTUP_DATABASE_LOCK_RETRY_SECONDS = 2.0
 
 
 @dataclass(slots=True)
@@ -125,13 +131,15 @@ async def lifespan(app: FastAPI):
 async def initialize_runtime(app: FastAPI) -> None:
     try:
         set_startup_status(app, state="starting", phase="migrating_database")
-        await ensure_database_schema()
+        await run_startup_step_with_database_lock_retry(
+            "migrating_database",
+            ensure_database_schema,
+        )
         set_startup_status(app, state="starting", phase="cleaning_logs")
-        async with get_session_factory()() as session:
-            await cleanup_old_operation_logs(session)
-            await session.commit()
-        await recover_interrupted_crawl_jobs(get_session_factory())
-        await recover_interrupted_match_analysis_runs(get_session_factory())
+        await run_startup_step_with_database_lock_retry(
+            "cleaning_logs",
+            cleanup_runtime_state,
+        )
         set_startup_status(app, state="starting", phase="starting_workers")
         if get_settings().enable_background_workers:
             runtime_manager = RuntimeManager(get_session_factory())
@@ -144,7 +152,78 @@ async def initialize_runtime(app: FastAPI) -> None:
     except Exception as exc:
         app.state.runtime_error = str(exc)
         set_startup_status(app, state="error", phase="error", error=str(exc))
+        write_startup_diagnostic_log("桌面后端启动初始化失败", exc=exc)
         raise
+
+
+async def cleanup_runtime_state() -> None:
+    async with get_session_factory()() as session:
+        await cleanup_old_operation_logs(session)
+        await session.commit()
+    await recover_interrupted_crawl_jobs(get_session_factory())
+    await recover_interrupted_match_analysis_runs(get_session_factory())
+
+
+async def run_startup_step_with_database_lock_retry(
+    phase: str,
+    step: Callable[[], Awaitable[None]],
+) -> None:
+    for attempt in range(1, STARTUP_DATABASE_LOCK_MAX_ATTEMPTS + 1):
+        try:
+            await step()
+            return
+        except Exception as exc:
+            if not is_sqlite_database_lock_error(exc) or attempt >= STARTUP_DATABASE_LOCK_MAX_ATTEMPTS:
+                raise
+            write_startup_diagnostic_log(
+                "启动步骤遇到 SQLite 数据库锁，准备重试",
+                phase=phase,
+                attempt=attempt,
+                max_attempts=STARTUP_DATABASE_LOCK_MAX_ATTEMPTS,
+                exc=exc,
+            )
+            await asyncio.sleep(STARTUP_DATABASE_LOCK_RETRY_SECONDS * attempt)
+
+
+def is_sqlite_database_lock_error(exc: Exception) -> bool:
+    current: BaseException | None = exc
+    while current is not None:
+        message = str(current).lower()
+        if "database is locked" in message or "database table is locked" in message:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def write_startup_diagnostic_log(
+    message: str,
+    *,
+    phase: str | None = None,
+    attempt: int | None = None,
+    max_attempts: int | None = None,
+    exc: Exception | None = None,
+) -> None:
+    try:
+        log_path = get_settings().data_dir / "logs" / "startup.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        lines = [
+            f"[{datetime.now(UTC).isoformat()}] {message}",
+        ]
+        if phase is not None:
+            lines.append(f"phase={phase}")
+        if attempt is not None and max_attempts is not None:
+            lines.append(f"attempt={attempt}/{max_attempts}")
+        if exc is not None:
+            lines.append(f"error={type(exc).__name__}: {exc}")
+            lines.append("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)).rstrip())
+        append_text(log_path, "\n".join(lines) + "\n")
+    except Exception:
+        logger.exception("写入启动诊断日志失败")
+
+
+def append_text(path: Path, content: str) -> None:
+    with path.open("a", encoding="utf-8", newline="\n") as file:
+        file.write(content)
 
 
 def log_runtime_initialization_failure(task: asyncio.Task[None]) -> None:

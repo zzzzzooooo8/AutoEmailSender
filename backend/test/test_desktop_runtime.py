@@ -184,7 +184,7 @@ class DesktopRuntimeTests(unittest.TestCase):
         get_settings.cache_clear()
 
         async def failing_schema() -> None:
-            raise RuntimeError("database is locked")
+            raise RuntimeError("migration failed")
 
         with patch.object(main_module, "ensure_database_schema", failing_schema):
             with TestClient(main_module.create_app()) as client:
@@ -196,7 +196,7 @@ class DesktopRuntimeTests(unittest.TestCase):
         self.assertEqual(data["state"], "error")
         self.assertEqual(data["phase"], "error")
         self.assertEqual(data["message"], "系统准备失败")
-        self.assertEqual(data["error"], "database is locked")
+        self.assertEqual(data["error"], "migration failed")
         self.assertEqual(ready_response.status_code, 500)
 
     def test_desktop_data_dir_controls_default_storage_paths(self) -> None:

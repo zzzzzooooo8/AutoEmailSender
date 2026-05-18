@@ -8,9 +8,11 @@ from fastapi.responses import FileResponse
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.database import get_async_session
 from app.models import OperationLog
 from app.schemas.diagnostics import (
+    DiagnosticFileRead,
     OperationLogExportResponse,
     OperationLogListResponse,
     OperationLogRead,
@@ -116,6 +118,7 @@ async def export_operation_logs(
         total=total,
         items=[_to_operation_log_read(log) for log in logs],
         filters=filter_values,
+        startup_logs=read_startup_logs(),
     )
 
 
@@ -160,6 +163,19 @@ def _build_operation_log_filters(
     if end_at is not None:
         filters.append(OperationLog.created_at < end_at)
     return filters
+
+
+def read_startup_logs() -> list[DiagnosticFileRead]:
+    startup_log = get_settings().data_dir / "logs" / "startup.log"
+    if not startup_log.is_file():
+        return []
+    return [
+        DiagnosticFileRead(
+            name=startup_log.name,
+            relative_path="logs/startup.log",
+            content=startup_log.read_text(encoding="utf-8", errors="replace"),
+        ),
+    ]
 
 
 async def _count_operation_logs(session: AsyncSession, filters: list[object]) -> int:
