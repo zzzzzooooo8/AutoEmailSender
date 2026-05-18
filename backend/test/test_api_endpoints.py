@@ -19,7 +19,7 @@ from test.migrated_database import create_migrated_sqlite_database
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "e7a1b2c3d4f5"
+HEAD_REVISION = "f8a9b0c1d2e3"
 
 
 class ApiEndpointTests(unittest.TestCase):
@@ -4159,10 +4159,10 @@ class ApiEndpointTests(unittest.TestCase):
         reply_sent_at = datetime(2026, 5, 1, 8, 0, tzinfo=UTC)
         reply_received_at = datetime(2026, 5, 1, 8, 30, tzinfo=UTC)
         with patch(
-            "app.services.task_runtime.mail_runtime.fetch_inbox_messages_from_sender",
+            "app.services.task_runtime.mail_runtime.fetch_professor_history_inbox_messages",
             AsyncMock(
                 return_value=[
-                    self._build_received_email(
+                    self._build_imap_fetched_message(
                         from_email="sample.professor@example.edu",
                         subject="Re: 套磁申请",
                         content="谢谢来信，我们可以进一步聊聊。",
@@ -4210,10 +4210,10 @@ class ApiEndpointTests(unittest.TestCase):
             connection.close()
 
         with patch(
-            "app.services.task_runtime.mail_runtime.fetch_inbox_messages_from_sender",
+            "app.services.task_runtime.mail_runtime.fetch_professor_history_inbox_messages",
             AsyncMock(
                 return_value=[
-                    self._build_received_email(
+                    self._build_imap_fetched_message(
                         from_email="sample.professor@example.edu",
                         subject="Re: 套磁申请",
                         content="谢谢来信，我们可以进一步聊聊。",
@@ -5643,10 +5643,43 @@ class ApiEndpointTests(unittest.TestCase):
         )
 
     @staticmethod
+    def _build_imap_fetched_message(
+        *,
+        from_email: str,
+        subject: str,
+        content: str,
+        message_id: str,
+        in_reply_to: str,
+        sent_at: datetime | None = None,
+        received_at: datetime | None = None,
+    ):
+        from app.services.imap_message_fetcher import ImapFetchedMessage
+
+        return ImapFetchedMessage(
+            uid=1,
+            from_email=from_email,
+            subject=subject,
+            message_id=message_id,
+            in_reply_to=in_reply_to,
+            references=in_reply_to,
+            sent_at=sent_at or datetime.now(UTC),
+            received_at=received_at,
+            headers={
+                "from": from_email,
+                "subject": subject,
+                "message_id": message_id,
+                "in_reply_to": in_reply_to,
+                "references": in_reply_to,
+                "to": "sender@example.com",
+            },
+            body_text=content,
+            body_html=None,
+        )
+
+    @staticmethod
     def _run_async(coro):
         return asyncio.run(coro)
 
 
 if __name__ == "__main__":
     unittest.main()
-

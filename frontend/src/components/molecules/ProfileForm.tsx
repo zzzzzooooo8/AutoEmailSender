@@ -187,6 +187,9 @@ export const ProfileForm: React.FC<ProfileFormProps> = ({
               />
             </label>
           </div>
+          <p className="text-xs text-stone-500">
+            QQ、163/126/yeah.net 邮箱请先开启 IMAP/SMTP，并填写客户端授权码。
+          </p>
 
           <label className="block">
             <div className="mb-2 text-sm font-medium text-stone-800">上传简历</div>

@@ -22,11 +22,19 @@ from app.models import (
     EmailTaskStatus,
     IdentityMaterial,
     IdentityProfile,
+    ImapMailboxSyncState,
     MatchAnalysisRun,
     Professor,
 )
 from app.schemas.email_task import EmailTaskApprovalRequest, EmailTaskScheduleRequest
 from app.services import llm_runtime, mail_runtime
+from app.services.imap_message_fetcher import ImapFetchedMessage
+from app.services.imap_sync_state import (
+    claim_next_professor_scan,
+    ensure_professor_scan_states,
+    mark_professor_scan_completed,
+    mark_professor_scan_failed,
+)
 from app.services.batch_schedule import (
     has_future_batch_window,
     is_batch_window_expired,
@@ -60,6 +68,8 @@ TASK_RELATION_OPTIONS = (
     selectinload(EmailTask.professor),
     selectinload(EmailTask.primary_material),
 )
+_IMAP_IDENTITY_LOCKS: dict[int, asyncio.Lock] = {}
+_IMAP_IDENTITY_LOCKS_GUARD = asyncio.Lock()
 
 DISPATCHABLE_EMAIL_TASK_STATUSES = (
     EmailTaskStatus.APPROVED.value,
@@ -400,7 +410,7 @@ async def poll_for_replies_once(
 
     detected = 0
     for identity_id in identity_ids:
-        detected += await poll_identity_replies(session_factory, identity_id)
+        detected += await sync_identity_imap_once(session_factory, identity_id)
     return detected
 
 async def recover_stale_sending_tasks(
@@ -1380,13 +1390,134 @@ async def poll_identity_replies(
     session_factory: async_sessionmaker[AsyncSession],
     identity_id: int,
 ) -> int:
-    async with session_factory() as session:
-        identity = await session.get(IdentityProfile, identity_id)
-    if not identity:
+    return await sync_identity_imap_once(session_factory, identity_id)
+
+
+async def sync_identity_imap_once(
+    session_factory: async_sessionmaker[AsyncSession],
+    identity_id: int,
+) -> int:
+    lock = await _get_imap_identity_lock(identity_id)
+    if lock.locked():
+        return 0
+    async with lock:
+        return await _sync_identity_imap_once_unlocked(session_factory, identity_id)
+
+
+async def _sync_identity_imap_once_unlocked(
+    session_factory: async_sessionmaker[AsyncSession],
+    identity_id: int,
+) -> int:
+    await ensure_professor_scan_states(session_factory)
+    history_detected = await sync_identity_history_once(session_factory, identity_id)
+    incremental_detected = await sync_identity_incremental_once(session_factory, identity_id)
+    return history_detected + incremental_detected
+
+
+async def sync_identity_history_once(
+    session_factory: async_sessionmaker[AsyncSession],
+    identity_id: int,
+) -> int:
+    state = await claim_next_professor_scan(session_factory, identity_id)
+    if state is None:
+        return 0
+    try:
+        async with session_factory() as session:
+            identity = await session.get(IdentityProfile, identity_id)
+        if identity is None:
+            await mark_professor_scan_completed(session_factory, state.id, state.last_scanned_uid)
+            return 0
+        messages = await mail_runtime.fetch_professor_history_inbox_messages(
+            identity,
+            state.professor_email,
+        )
+        detected = await process_imap_fetched_messages(session_factory, identity_id, messages)
+        max_uid = max((message.uid for message in messages), default=state.last_scanned_uid)
+        await mark_professor_scan_completed(session_factory, state.id, max_uid)
+        return detected
+    except Exception as exc:
+        await mark_professor_scan_failed(session_factory, state.id, str(exc))
         return 0
 
-    messages = await mail_runtime.fetch_recent_inbox_messages(identity)
-    return await _process_incoming_reply_messages(session_factory, identity_id, messages)
+
+async def sync_identity_incremental_once(
+    session_factory: async_sessionmaker[AsyncSession],
+    identity_id: int,
+) -> int:
+    async with session_factory() as session:
+        identity = await session.get(IdentityProfile, identity_id)
+        if identity is None:
+            return 0
+        state = await _get_or_create_mailbox_state(session, identity_id)
+        last_seen_uid = state.last_seen_uid
+        await session.commit()
+    try:
+        max_seen_uid, messages = await mail_runtime.fetch_incremental_inbox_messages(
+            identity,
+            last_seen_uid,
+        )
+    except Exception as exc:
+        async with session_factory() as session:
+            state = await _get_or_create_mailbox_state(session, identity_id)
+            state.last_error = str(exc)
+            await session.commit()
+        return 0
+    detected = await process_imap_fetched_messages(session_factory, identity_id, messages)
+    async with session_factory() as session:
+        state = await _get_or_create_mailbox_state(session, identity_id)
+        state.last_seen_uid = max_seen_uid
+        state.last_sync_at = datetime.now(UTC)
+        state.last_error = None
+        await session.commit()
+    return detected
+
+
+async def sync_workspace_professor_replies(
+    session_factory: async_sessionmaker[AsyncSession],
+    identity_id: int,
+    professor_id: int,
+) -> int:
+    lock = await _get_imap_identity_lock(identity_id)
+    if lock.locked():
+        return 0
+    async with lock:
+        async with session_factory() as session:
+            identity = await session.get(IdentityProfile, identity_id)
+            professor = await session.get(Professor, professor_id)
+        if identity is None or professor is None or not professor.email:
+            return 0
+        messages = await mail_runtime.fetch_professor_history_inbox_messages(
+            identity,
+            professor.email,
+        )
+        return await process_imap_fetched_messages(session_factory, identity_id, messages)
+
+
+async def _get_or_create_mailbox_state(
+    session: AsyncSession,
+    identity_id: int,
+) -> ImapMailboxSyncState:
+    state = await session.scalar(
+        select(ImapMailboxSyncState).where(
+            ImapMailboxSyncState.identity_id == identity_id,
+            ImapMailboxSyncState.folder == "INBOX",
+        ),
+    )
+    if state is not None:
+        return state
+    state = ImapMailboxSyncState(identity_id=identity_id)
+    session.add(state)
+    await session.flush()
+    return state
+
+
+async def _get_imap_identity_lock(identity_id: int) -> asyncio.Lock:
+    async with _IMAP_IDENTITY_LOCKS_GUARD:
+        lock = _IMAP_IDENTITY_LOCKS.get(identity_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            _IMAP_IDENTITY_LOCKS[identity_id] = lock
+        return lock
 
 
 async def repair_identity_replies(
@@ -1400,12 +1531,10 @@ async def repair_identity_replies(
     if not identity:
         return 0
 
-    messages: list[ReceivedEmail] = []
     if professor_email and professor_email.strip():
-        messages = await mail_runtime.fetch_inbox_messages_from_sender(identity, professor_email)
-    if not messages:
-        messages = await mail_runtime.fetch_recent_inbox_messages(identity)
-    return await _process_incoming_reply_messages(session_factory, identity_id, messages)
+        messages = await mail_runtime.fetch_professor_history_inbox_messages(identity, professor_email)
+        return await process_imap_fetched_messages(session_factory, identity_id, messages)
+    return await sync_identity_imap_once(session_factory, identity_id)
 
 
 async def _process_incoming_reply_messages(
@@ -1422,14 +1551,11 @@ async def _process_incoming_reply_messages(
                     select(EmailLog).where(EmailLog.rfc_message_id == message.message_id),
                 )
                 if existing:
-                    if (
-                        existing.direction == EmailDirection.RECEIVED.value
-                        and not _datetimes_match(existing.created_at, reply_created_at)
-                    ):
-                        existing.created_at = reply_created_at
-                        existing.reply_headers = message.headers
-                        session.add(existing)
-                        await session.commit()
+                    if existing.direction == EmailDirection.RECEIVED.value:
+                        changed = _backfill_existing_reply(existing, message, reply_created_at)
+                        if changed:
+                            session.add(existing)
+                            await session.commit()
                     continue
 
             task = await _find_reply_target(session, identity_id, message)
@@ -1467,6 +1593,54 @@ async def _process_incoming_reply_messages(
                 continue
             detected += 1
     return detected
+
+
+async def process_imap_fetched_messages(
+    session_factory: async_sessionmaker[AsyncSession],
+    identity_id: int,
+    messages: list[ImapFetchedMessage],
+) -> int:
+    received_messages = [
+        ReceivedEmail(
+            from_email=message.from_email,
+            subject=message.subject,
+            content=message.body_text,
+            content_html=message.body_html,
+            message_id=message.message_id,
+            in_reply_to=message.in_reply_to,
+            references=message.references,
+            sent_at=message.sent_at,
+            received_at=message.received_at,
+            headers=message.headers,
+        )
+        for message in messages
+    ]
+    return await _process_incoming_reply_messages(
+        session_factory,
+        identity_id,
+        received_messages,
+    )
+
+
+def _backfill_existing_reply(
+    existing: EmailLog,
+    message: ReceivedEmail,
+    reply_created_at: datetime,
+) -> bool:
+    changed = False
+    if not existing.content and message.content:
+        existing.content = message.content
+        changed = True
+    if not existing.content_html and message.content_html:
+        existing.content_html = message.content_html
+        changed = True
+    if not existing.reply_headers and message.headers:
+        existing.reply_headers = message.headers
+        changed = True
+    if not _datetimes_match(existing.created_at, reply_created_at):
+        existing.created_at = reply_created_at
+        changed = True
+    return changed
 
 
 def _get_reply_created_at(message: mail_runtime.ReceivedEmail) -> datetime:
@@ -1606,6 +1780,7 @@ async def _find_reply_target(
                         [
                             EmailTaskStatus.SENT.value,
                             EmailTaskStatus.REPLY_DETECTED.value,
+                            EmailTaskStatus.CANCELED.value,
                         ],
                     ),
                 )

@@ -22,6 +22,12 @@ from typing import Any
 
 from app.core.config import get_settings
 from app.models import IdentityProfile, Professor
+from app.services.imap_message_fetcher import (
+    ImapFetchedMessage,
+    parse_text_parts_from_message,
+    search_uids_from_sender,
+    search_uids_since,
+)
 
 
 IMAP_CLIENT_ID_NAME = "AutoEmailSender"
@@ -191,10 +197,22 @@ async def send_email_to_recipient(
     )
 
 
-async def fetch_recent_inbox_messages(identity: IdentityProfile) -> list[ReceivedEmail]:
+async def fetch_incremental_inbox_messages(
+    identity: IdentityProfile,
+    last_seen_uid: int | None,
+) -> tuple[int | None, list[ImapFetchedMessage]]:
+    if not identity.imap_host or not identity.imap_username or not identity.imap_password:
+        return last_seen_uid, []
+    return await asyncio.to_thread(_fetch_incremental_inbox_messages_sync, identity, last_seen_uid)
+
+
+async def fetch_professor_history_inbox_messages(
+    identity: IdentityProfile,
+    professor_email: str,
+) -> list[ImapFetchedMessage]:
     if not identity.imap_host or not identity.imap_username or not identity.imap_password:
         return []
-    return await asyncio.to_thread(_fetch_recent_inbox_messages_sync, identity)
+    return await asyncio.to_thread(_fetch_professor_history_inbox_messages_sync, identity, professor_email)
 
 
 async def fetch_inbox_messages_from_sender(
@@ -205,7 +223,8 @@ async def fetch_inbox_messages_from_sender(
         return []
     if not from_email.strip():
         return []
-    return await asyncio.to_thread(_fetch_inbox_messages_from_sender_sync, identity, from_email.strip().lower())
+    messages = await fetch_professor_history_inbox_messages(identity, from_email.strip().lower())
+    return [_imap_fetched_to_received(message) for message in messages]
 
 
 def build_email_message(
@@ -278,7 +297,7 @@ def _test_imap_connection_sync(identity: IdentityProfile) -> None:
         _send_imap_client_id(client, identity)
         _select_inbox_or_raise(client)
     except OSError as exc:
-        raise MailRuntimeError(f"IMAP 连接失败: {exc}") from exc
+        raise MailRuntimeError(format_imap_login_error(identity, exc)) from exc
     finally:
         if client is not None:
             try:
@@ -303,54 +322,203 @@ def _send_email_sync(identity: IdentityProfile, message: EmailMessage) -> None:
                 pass
 
 
-def _fetch_recent_inbox_messages_sync(identity: IdentityProfile) -> list[ReceivedEmail]:
-    since_date = (datetime.now(UTC) - timedelta(hours=get_settings().imap_lookback_hours)).strftime(
-        "%d-%b-%Y",
-    )
-    return _fetch_inbox_messages_sync(identity, f'(SINCE "{since_date}")')
+def format_imap_login_error(identity: IdentityProfile, detail: object) -> str:
+    host = (identity.imap_host or "").lower()
+    base = f"IMAP 登录失败: {detail}"
+    if any(
+        provider in host
+        for provider in [
+            "imap.qq.com",
+            "imap.163.com",
+            "imap.126.com",
+            "imap.yeah.net",
+        ]
+    ):
+        return f"{base}。请确认已开启 IMAP/SMTP 服务，并使用邮箱客户端授权码而不是网页登录密码。"
+    return base
 
 
-def _fetch_inbox_messages_from_sender_sync(
+def _fetch_incremental_inbox_messages_sync(
     identity: IdentityProfile,
-    from_email: str,
-) -> list[ReceivedEmail]:
-    return _fetch_inbox_messages_sync(identity, f'(FROM "{_escape_imap_search_value(from_email)}")')
-
-
-def _fetch_inbox_messages_sync(identity: IdentityProfile, search_criterion: str) -> list[ReceivedEmail]:
+    last_seen_uid: int | None,
+) -> tuple[int | None, list[ImapFetchedMessage]]:
     client: IMAP4 | IMAP4_SSL | None = None
-    messages: list[ReceivedEmail] = []
+    messages: list[ImapFetchedMessage] = []
+    max_seen_uid = last_seen_uid
     try:
-        client = _open_imap_client(identity)
-        client.login(identity.imap_username or "", identity.imap_password or "")
-        _send_imap_client_id(client, identity)
-        _select_inbox_or_raise(client)
-
-        status, data = client.search(None, search_criterion)
-        if status != "OK":
-            raise MailRuntimeError("IMAP 搜索失败")
-
-        for message_id in data[0].split():
-            fetch_status, payload = client.fetch(message_id, "(RFC822 INTERNALDATE)")
-            if fetch_status != "OK" or not payload or payload[0] is None:
-                continue
-            raw_message = payload[0][1]
-            if not isinstance(raw_message, (bytes, bytearray)):
-                continue
-            message = parse_received_email(bytes(raw_message))
-            message.received_at = _extract_received_at_from_fetch_payload(payload)
-            messages.append(message)
+        client = _open_logged_in_imap_client(identity)
+        uids = search_uids_since(client, last_seen_uid)
+        for uid in uids:
+            max_seen_uid = max(max_seen_uid or 0, uid)
+            message = _fetch_message_by_uid_sync(client, uid)
+            if message is not None:
+                messages.append(message)
     except MailRuntimeError:
         raise
     except OSError as exc:
-        raise MailRuntimeError(f"IMAP 拉取失败: {exc}") from exc
+        raise MailRuntimeError(f"IMAP 增量同步失败: {exc}") from exc
     finally:
-        if client is not None:
-            try:
-                client.logout()
-            except OSError:
-                pass
+        _logout_imap_client(client)
+    return max_seen_uid, messages
+
+
+def _fetch_professor_history_inbox_messages_sync(
+    identity: IdentityProfile,
+    professor_email: str,
+) -> list[ImapFetchedMessage]:
+    client: IMAP4 | IMAP4_SSL | None = None
+    messages: list[ImapFetchedMessage] = []
+    try:
+        client = _open_logged_in_imap_client(identity)
+        for uid in search_uids_from_sender(client, professor_email):
+            message = _fetch_message_by_uid_sync(client, uid)
+            if message is not None:
+                messages.append(message)
+    except MailRuntimeError:
+        raise
+    except OSError as exc:
+        raise MailRuntimeError(f"IMAP 导师历史同步失败: {exc}") from exc
+    finally:
+        _logout_imap_client(client)
     return messages
+
+
+def _imap_fetched_to_received(message: ImapFetchedMessage) -> ReceivedEmail:
+    return ReceivedEmail(
+        from_email=message.from_email,
+        subject=message.subject,
+        content=message.body_text,
+        content_html=message.body_html,
+        message_id=message.message_id,
+        in_reply_to=message.in_reply_to,
+        references=message.references,
+        sent_at=message.sent_at,
+        headers=message.headers,
+        received_at=message.received_at,
+    )
+
+
+def _open_logged_in_imap_client(identity: IdentityProfile) -> IMAP4 | IMAP4_SSL:
+    client = _open_imap_client(identity)
+    try:
+        client.login(identity.imap_username or "", identity.imap_password or "")
+    except OSError as exc:
+        raise MailRuntimeError(format_imap_login_error(identity, exc)) from exc
+    _send_imap_client_id(client, identity)
+    _select_inbox_or_raise(client)
+    return client
+
+
+def _fetch_message_by_uid_sync(
+    client: IMAP4 | IMAP4_SSL,
+    uid: int,
+) -> ImapFetchedMessage | None:
+    header_payload = _fetch_message_header_payload_by_uid(client, uid)
+    raw_headers = _extract_message_bytes_from_fetch_payload(header_payload)
+    if not raw_headers:
+        return None
+    client.uid("FETCH", str(uid), "(BODYSTRUCTURE)")
+    raw_body = _fetch_message_body_by_uid(client, uid)
+    body_text, body_html = _parse_fetched_body(raw_headers, raw_body)
+    received_at = _extract_received_at_from_fetch_payload(header_payload)
+    return _parse_fetched_headers(uid, raw_headers, body_text, body_html, received_at)
+
+
+def _fetch_message_header_payload_by_uid(
+    client: IMAP4 | IMAP4_SSL,
+    uid: int,
+) -> list[object]:
+    status, payload = client.uid(
+        "FETCH",
+        str(uid),
+        "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID FROM TO CC SUBJECT DATE IN-REPLY-TO REFERENCES)] INTERNALDATE)",
+    )
+    if status != "OK" or not payload:
+        return []
+    return list(payload)
+
+
+def _extract_message_bytes_from_fetch_payload(payload: list[object]) -> bytes:
+    for item in payload:
+        if isinstance(item, tuple) and len(item) >= 2 and isinstance(item[1], (bytes, bytearray)):
+            return bytes(item[1])
+    return b""
+
+
+def _fetch_message_body_by_uid(client: IMAP4 | IMAP4_SSL, uid: int) -> bytes:
+    status, payload = client.uid("FETCH", str(uid), "(BODY.PEEK[TEXT])")
+    if status != "OK" or not payload:
+        return b""
+    return _extract_message_bytes_from_fetch_payload(list(payload))
+
+
+def _parse_fetched_body(raw_headers: bytes, raw_body: bytes) -> tuple[str | None, str | None]:
+    if not raw_body:
+        return None, None
+    parsed = BytesParser(policy=policy.default).parsebytes(raw_headers + b"\r\n" + raw_body)
+    parsed_parts = parse_text_parts_from_message(parsed)
+    body_text = strip_quoted_reply_text(parsed_parts.body_text or "")
+    body_html = strip_quoted_reply_html(parsed_parts.body_html or "") or None
+    if not body_text and body_html:
+        body_text = strip_quoted_reply_text(convert_html_to_text(body_html))
+    if not body_text:
+        fallback_charset = parsed.get_content_charset() or "utf-8"
+        body_text = strip_quoted_reply_text(raw_body.decode(fallback_charset, errors="replace"))
+    return body_text, body_html
+
+
+def _parse_fetched_headers(
+    uid: int,
+    raw_headers: bytes,
+    body_text: str | None,
+    body_html: str | None,
+    received_at: datetime | None,
+) -> ImapFetchedMessage | None:
+    parsed = BytesParser(policy=policy.default).parsebytes(raw_headers)
+    from_email = parseaddr(parsed.get("From", ""))[1].strip().lower()
+    if not from_email:
+        return None
+    subject = decode_mime_header(parsed.get("Subject"))
+    message_id = parsed.get("Message-ID")
+    in_reply_to = parsed.get("In-Reply-To")
+    references = parsed.get("References")
+    sent_at = datetime.now(UTC)
+    if parsed.get("Date"):
+        try:
+            parsed_at = parsedate_to_datetime(parsed.get("Date"))
+            sent_at = parsed_at.astimezone(UTC) if parsed_at.tzinfo else parsed_at.replace(tzinfo=UTC)
+        except (TypeError, ValueError, IndexError):
+            pass
+    headers = {
+        "from": parsed.get("From", ""),
+        "to": parsed.get("To", ""),
+        "subject": subject or "",
+        "message_id": message_id or "",
+        "in_reply_to": in_reply_to or "",
+        "references": references or "",
+    }
+    return ImapFetchedMessage(
+        uid=uid,
+        from_email=from_email,
+        subject=subject,
+        message_id=message_id,
+        in_reply_to=in_reply_to,
+        references=references,
+        sent_at=sent_at,
+        received_at=received_at,
+        headers=headers,
+        body_text=body_text or "",
+        body_html=body_html,
+    )
+
+
+def _logout_imap_client(client: IMAP4 | IMAP4_SSL | None) -> None:
+    if client is None:
+        return
+    try:
+        client.logout()
+    except OSError:
+        pass
 
 
 def _send_imap_client_id(client: IMAP4 | IMAP4_SSL, identity: IdentityProfile) -> None:

@@ -19,6 +19,11 @@ from app.models.email_task import (
 )
 from app.models.identity_profile import IdentityProfile
 from app.models.identity_material import IdentityMaterial, IdentityMaterialType
+from app.models.imap_sync import (
+    ImapMailboxSyncState,
+    ImapProfessorHistoricalScanStatus,
+    ImapProfessorSyncState,
+)
 from app.models.llm_profile import LLMProfile
 from app.models.match_analysis_job import (
     MatchAnalysisJob,
@@ -54,6 +59,9 @@ __all__ = [
     "IdentityProfile",
     "IdentityMaterial",
     "IdentityMaterialType",
+    "ImapMailboxSyncState",
+    "ImapProfessorHistoricalScanStatus",
+    "ImapProfessorSyncState",
     "LLMProfile",
     "MatchAnalysisJob",
     "MatchAnalysisJobItem",
