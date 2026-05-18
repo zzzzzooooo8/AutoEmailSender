@@ -58,3 +58,15 @@ class ImapSyncModelsTestCase(unittest.TestCase):
             self._run_async(scenario()),
             ImapProfessorHistoricalScanStatus.PENDING.value,
         )
+
+    def test_sync_state_tables_exist_in_metadata(self) -> None:
+        self.assertIn("imap_mailbox_sync_states", Base.metadata.tables)
+        self.assertIn("imap_professor_sync_states", Base.metadata.tables)
+        self.assertIn(
+            "last_seen_uid",
+            Base.metadata.tables["imap_mailbox_sync_states"].columns,
+        )
+        self.assertIn(
+            "historical_scan_status",
+            Base.metadata.tables["imap_professor_sync_states"].columns,
+        )
