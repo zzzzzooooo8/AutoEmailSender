@@ -29,13 +29,6 @@ export type MaterialOpenServiceOptions = {
 
 type MaterialOpenRequest = {
   materialId: unknown;
-  originalFilename?: unknown;
-};
-
-type MaterialInfo = {
-  sourcePath?: string;
-  originalFilename: string;
-  mimeType?: string;
 };
 
 const defaultDependencies: MaterialOpenDependencies = {
@@ -58,7 +51,6 @@ export function createMaterialOpenService(options: MaterialOpenServiceOptions) {
   return {
     async openMaterial(request: MaterialOpenRequest | unknown): Promise<MaterialOpenResult> {
       const materialId = getRequestMaterialId(request);
-      const originalFilename = getRequestOriginalFilename(request);
       const parsedMaterialId = parseMaterialId(materialId);
       if (parsedMaterialId === null) {
         return buildError("MaterialOpenInvalidId", "材料 ID 无效");
@@ -71,17 +63,9 @@ export function createMaterialOpenService(options: MaterialOpenServiceOptions) {
 
       await cleanupExpiredCopies(tempDir, dependencies);
 
-      const materialInfoResult = originalFilename
-        ? { materialInfo: { originalFilename } }
-        : await fetchMaterialInfo(backendBaseUrl, parsedMaterialId, dependencies);
-      if ("error" in materialInfoResult) {
-        return materialInfoResult.error;
-      }
-
       const copyResult = await createReadonlyCopy({
         backendBaseUrl,
         materialId: parsedMaterialId,
-        materialInfo: materialInfoResult.materialInfo,
         tempDir,
         dependencies,
       });
@@ -117,17 +101,6 @@ function getRequestMaterialId(request: MaterialOpenRequest | unknown): unknown {
   return request;
 }
 
-function getRequestOriginalFilename(request: MaterialOpenRequest | unknown): string | null {
-  if (typeof request !== "object" || request === null || !("originalFilename" in request)) {
-    return null;
-  }
-  const value = (request as MaterialOpenRequest).originalFilename;
-  if (typeof value !== "string" || value.trim().length === 0) {
-    return null;
-  }
-  return value;
-}
-
 export function parseMaterialId(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
     return null;
@@ -146,42 +119,14 @@ export function sanitizeCopyFilename(materialId: number, originalFilename: strin
   return `${materialId}-${Date.now()}-${safeStem}${safeExtension}`;
 }
 
-async function fetchMaterialInfo(
-  backendBaseUrl: string,
-  materialId: number,
-  dependencies: MaterialOpenDependencies,
-): Promise<{ materialInfo: MaterialInfo } | { error: MaterialOpenResult }> {
-  const response = await fetchWithBackendError(
-    dependencies,
-    `${backendBaseUrl}/api/materials/${materialId}/open`,
-  );
-  if ("error" in response) {
-    return response;
-  }
-
-  const contentDisposition = response.response.headers.get("content-disposition") ?? "";
-  return {
-    materialInfo: {
-      originalFilename: getFilenameFromContentDisposition(contentDisposition) ?? `material-${materialId}`,
-      mimeType: response.response.headers.get("content-type") ?? undefined,
-    },
-  };
-}
-
 async function createReadonlyCopy(options: {
   backendBaseUrl: string;
   materialId: number;
-  materialInfo: MaterialInfo;
   tempDir: string;
   dependencies: MaterialOpenDependencies;
 }): Promise<{ copyPath: string } | { error: MaterialOpenResult }> {
   try {
     await options.dependencies.mkdir(options.tempDir, { recursive: true });
-    const copyPath = path.join(
-      options.tempDir,
-      sanitizeCopyFilename(options.materialId, options.materialInfo.originalFilename),
-    );
-
     const response = await fetchWithBackendError(
       options.dependencies,
       `${options.backendBaseUrl}/api/materials/${options.materialId}/download`,
@@ -193,6 +138,13 @@ async function createReadonlyCopy(options: {
     if (!response.response.body) {
       return { error: buildError("MaterialOpenCopyFailed", "创建材料只读副本失败") };
     }
+
+    const contentDisposition = response.response.headers.get("content-disposition") ?? "";
+    const originalFilename = getFilenameFromContentDisposition(contentDisposition) ?? `material-${options.materialId}`;
+    const copyPath = path.join(
+      options.tempDir,
+      sanitizeCopyFilename(options.materialId, originalFilename),
+    );
 
     await pipeline(response.response.body, options.dependencies.createWriteStream(copyPath));
     await options.dependencies.chmod(copyPath, 0o444);

@@ -2224,7 +2224,7 @@ export const ProfilePage = () => {
       return;
     }
 
-    const result = await openDesktopMaterial(material.id, material.original_filename);
+    const result = await openDesktopMaterial(material.id);
     if (!result.ok) {
       notifyError("无法打开材料", result.message);
     }

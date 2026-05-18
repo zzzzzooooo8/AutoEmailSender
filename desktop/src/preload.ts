@@ -42,7 +42,7 @@ contextBridge.exposeInMainWorld("autoEmailSender", {
       type: string;
       data: ArrayBuffer;
     } | null>,
-  openMaterial: (request: { materialId: number; originalFilename?: string }) =>
+  openMaterial: (request: { materialId: number }) =>
     ipcRenderer.invoke("materials:open", request) as Promise<MaterialOpenResult>,
   checkForUpdate: () => ipcRenderer.invoke("update:check") as Promise<UpdateStatus>,
   downloadUpdate: (options?: { mode?: "differential" | "full" }) =>

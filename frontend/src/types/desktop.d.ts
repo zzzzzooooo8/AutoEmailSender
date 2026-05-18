@@ -87,6 +87,7 @@ declare global {
         type: string;
         data: ArrayBuffer;
       } | null>;
+      openMaterial?: (request: { materialId: number }) => Promise<DesktopMaterialOpenResult>;
       checkForUpdate: () => Promise<DesktopUpdateStatus>;
       downloadUpdate: (options?: { mode?: DesktopUpdateDownloadMode }) => Promise<DesktopUpdateStatus>;
       switchToFullDownload: () => Promise<DesktopUpdateStatus>;

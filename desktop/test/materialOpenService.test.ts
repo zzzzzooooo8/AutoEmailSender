@@ -31,7 +31,7 @@ describe("desktop material open service", () => {
     expect(parseMaterialId(0)).toBeNull();
   });
 
-  it("creates a readonly temp copy and opens it with the system app", async () => {
+  it("creates a readonly temp copy using the backend download filename", async () => {
     const writtenPaths: string[] = [];
     const chmodMock = vi.fn().mockResolvedValue(undefined);
     const openPathMock = vi.fn().mockResolvedValue("");
@@ -39,14 +39,11 @@ describe("desktop material open service", () => {
       getBackendBaseUrl: () => "http://127.0.0.1:8010",
       userDataPath: "C:\\Users\\Alice\\AppData\\Roaming\\Auto Email Sender",
       dependencies: {
-        fetch: vi
-          .fn<typeof fetch>()
-          .mockResolvedValueOnce(
-            okResponse("", {
-              "content-disposition": "inline; filename*=UTF-8''resume.docx",
-            }),
-          )
-          .mockResolvedValueOnce(okResponse("document content")),
+        fetch: vi.fn<typeof fetch>().mockResolvedValueOnce(
+          okResponse("document content", {
+            "content-disposition": "attachment; filename*=UTF-8''resume.docx",
+          }),
+        ),
         mkdir: vi.fn().mockResolvedValue(undefined),
         readdir: vi.fn().mockRejectedValue(new Error("missing")),
         chmod: chmodMock,
@@ -59,10 +56,10 @@ describe("desktop material open service", () => {
     });
 
     await expect(
-      service.openMaterial({ materialId: 42, originalFilename: "resume.pdf" }),
+      service.openMaterial({ materialId: 42, originalFilename: "renderer.pdf" }),
     ).resolves.toEqual({ ok: true });
     expect(writtenPaths[0]).toContain("material-open-copies");
-    expect(writtenPaths[0]).toMatch(/42-\d+-resume\.pdf$/);
+    expect(writtenPaths[0]).toMatch(/42-\d+-resume\.docx$/);
     expect(chmodMock).toHaveBeenCalledWith(writtenPaths[0], 0o444);
     expect(openPathMock).toHaveBeenCalledWith(writtenPaths[0]);
   });

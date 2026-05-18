@@ -2,7 +2,7 @@
 
 export const isDesktopApp = () => Boolean(window.autoEmailSender);
 
-export async function openDesktopMaterial(materialId: number, originalFilename?: string): Promise<DesktopMaterialOpenResult> {
+export async function openDesktopMaterial(materialId: number): Promise<DesktopMaterialOpenResult> {
   const api = getDesktopApi();
   if (!api.openMaterial) {
     return {
@@ -11,7 +11,7 @@ export async function openDesktopMaterial(materialId: number, originalFilename?:
       message: "当前桌面应用版本不支持直接打开材料",
     };
   }
-  return api.openMaterial({ materialId, originalFilename });
+  return api.openMaterial({ materialId });
 }
 export async function getDesktopAppVersion(): Promise<string> {
   const api = getDesktopApi();
