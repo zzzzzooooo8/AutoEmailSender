@@ -60,6 +60,8 @@ TASK_RELATION_OPTIONS = (
     selectinload(EmailTask.professor),
     selectinload(EmailTask.primary_material),
 )
+_IMAP_IDENTITY_LOCKS: dict[int, asyncio.Lock] = {}
+_IMAP_IDENTITY_LOCKS_GUARD = asyncio.Lock()
 
 DISPATCHABLE_EMAIL_TASK_STATUSES = (
     EmailTaskStatus.APPROVED.value,
@@ -1356,6 +1358,33 @@ async def poll_identity_replies(
 
     messages = await mail_runtime.fetch_recent_inbox_messages(identity)
     return await _process_incoming_reply_messages(session_factory, identity_id, messages)
+
+
+async def sync_identity_imap_once(
+    session_factory: async_sessionmaker[AsyncSession],
+    identity_id: int,
+) -> int:
+    lock = await _get_imap_identity_lock(identity_id)
+    if lock.locked():
+        return 0
+    async with lock:
+        return await _sync_identity_imap_once_unlocked(session_factory, identity_id)
+
+
+async def _sync_identity_imap_once_unlocked(
+    session_factory: async_sessionmaker[AsyncSession],
+    identity_id: int,
+) -> int:
+    return await poll_identity_replies(session_factory, identity_id)
+
+
+async def _get_imap_identity_lock(identity_id: int) -> asyncio.Lock:
+    async with _IMAP_IDENTITY_LOCKS_GUARD:
+        lock = _IMAP_IDENTITY_LOCKS.get(identity_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            _IMAP_IDENTITY_LOCKS[identity_id] = lock
+        return lock
 
 
 async def repair_identity_replies(

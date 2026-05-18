@@ -26,7 +26,13 @@ from app.models import (
     Professor,
 )
 from app.services import llm_runtime
-from app.services.task_runtime import _create_manual_child_task, continue_task_manually, generate_task_draft, poll_identity_replies
+from app.services.task_runtime import (
+    _create_manual_child_task,
+    continue_task_manually,
+    generate_task_draft,
+    poll_identity_replies,
+    sync_identity_imap_once,
+)
 from app.api.workspace_support import ensure_workspace_task
 
 
@@ -177,6 +183,28 @@ class ConcurrencyGuardTests(unittest.TestCase):
             self._run_async(self._get_task_status_by_professor(professor_id, identity_id)),
             EmailTaskStatus.REPLY_DETECTED.value,
         )
+
+    def test_imap_identity_sync_is_single_flight(self) -> None:
+        identity_id, _, _ = self._run_async(self._create_reply_context())
+
+        async def delayed_sync(*args, **kwargs):
+            await asyncio.sleep(0.05)
+            return 1
+
+        async def sync_twice() -> list[int]:
+            return await asyncio.gather(
+                sync_identity_imap_once(self.session_factory, identity_id),
+                sync_identity_imap_once(self.session_factory, identity_id),
+            )
+
+        with patch(
+            "app.services.task_runtime._sync_identity_imap_once_unlocked",
+            new=AsyncMock(side_effect=delayed_sync),
+        ) as mocked_sync:
+            results = self._run_async(sync_twice())
+
+        self.assertEqual(mocked_sync.await_count, 1)
+        self.assertEqual(sum(results), 1)
 
     async def _create_schema(self) -> None:
         async with self.engine.begin() as connection:
