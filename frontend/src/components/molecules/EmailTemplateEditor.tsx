@@ -53,6 +53,10 @@ type EmailTemplateEditorProps = {
 
 type MenuKey = "placeholder" | "font" | "fontSize" | "lineHeight" | "indent";
 
+type DataTransferEvent = Event & {
+  dataTransfer?: DataTransfer | null;
+};
+
 type ToolbarMenuProps = {
   active: boolean;
   ariaLabel: string;
@@ -75,22 +79,28 @@ const getLineHeightLabel = (value: string | null | undefined) =>
     (option) => normalizeValue(option.value) === normalizeValue(value),
   )?.label ?? "行距";
 
-const getFirstDroppedFile = (event: Event) => {
+const getEventDataTransfer = (event: Event) => {
   if (!("dataTransfer" in event)) {
     return null;
   }
-  return event.dataTransfer?.files?.[0] ?? null;
+
+  return (event as DataTransferEvent).dataTransfer ?? null;
+};
+
+const getFirstDroppedFile = (event: Event) => {
+  return getEventDataTransfer(event)?.files?.[0] ?? null;
 };
 
 const isFileDragEvent = (event: Event) => {
-  if (!("dataTransfer" in event)) {
+  const dataTransfer = getEventDataTransfer(event);
+  if (!dataTransfer) {
     return false;
   }
 
-  const types = event.dataTransfer?.types
-    ? Array.from(event.dataTransfer.types)
+  const types = dataTransfer.types
+    ? Array.from(dataTransfer.types)
     : [];
-  return types.includes("Files") || Boolean(event.dataTransfer?.files?.length);
+  return types.includes("Files") || Boolean(dataTransfer.files?.length);
 };
 
 const ToolbarMenu = ({
