@@ -353,17 +353,17 @@ function DesktopUpdateReleaseNotesDialog({
           </button>
           <button
             type="button"
-            onClick={() => onStartDownload("differential")}
+            onClick={() => onStartDownload("full")}
             className="rounded-2xl border border-stone-200 bg-white px-4 py-2.5 text-sm font-semibold text-stone-700 transition hover:border-primary/40 hover:text-primary"
           >
-            增量下载
+            全量下载
           </button>
           <button
             type="button"
-            onClick={() => onStartDownload("full")}
+            onClick={() => onStartDownload("differential")}
             className="rounded-2xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-primary/20 transition hover:bg-primary/90"
           >
-            全量下载
+            差量下载
           </button>
         </div>
       </section>
@@ -408,21 +408,21 @@ function DesktopUpdateStatusBar({
     return (
       <span className="inline-flex min-h-[2.8rem] items-center gap-2 rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs text-stone-600 shadow-sm">
         <span className="font-medium text-stone-800">发现 v{status.nextVersion}</span>
-        <span>增量下载：开始后显示实际大小</span>
+        <span>差量下载：开始后显示实际大小</span>
         <span>全量约 {formatBytes(status.fullDownloadBytes ?? 0)}</span>
         <button
           type="button"
-          onClick={() => onStartDownload("differential")}
+          onClick={() => onStartDownload("full")}
           className="rounded-lg border border-stone-200 px-2 py-1 text-stone-700 transition hover:border-primary/40 hover:text-primary"
         >
-          增量下载
+          全量下载
         </button>
         <button
           type="button"
-          onClick={() => onStartDownload("full")}
+          onClick={() => onStartDownload("differential")}
           className="rounded-lg bg-primary px-2 py-1 text-white transition hover:bg-primary/90"
         >
-          全量下载
+          差量下载
         </button>
       </span>
     );

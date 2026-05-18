@@ -89,9 +89,17 @@ describe("DesktopUpdateButton", () => {
     render(<DesktopUpdateButton />);
     fireEvent.click(await screen.findByRole("button", { name: /检查更新/ }));
 
-    expect((await screen.findAllByRole("button", { name: /增量下载/ })).length).toBeGreaterThan(0);
+    const downloadButtons = await screen.findAllByRole("button", { name: /下载/ });
+
+    expect(downloadButtons.map((button) => button.textContent)).toEqual([
+      "全量下载",
+      "差量下载",
+      "全量下载",
+      "差量下载",
+    ]);
+    expect(screen.getAllByRole("button", { name: /差量下载/ }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: /全量下载/ }).length).toBeGreaterThan(0);
-    expect(screen.getByText(/增量下载：开始后显示实际大小/)).toBeInTheDocument();
+    expect(screen.getByText(/差量下载：开始后显示实际大小/)).toBeInTheDocument();
     expect(screen.getByText(/全量约 200.0 MB/)).toBeInTheDocument();
     expect(screen.getAllByText(/v0\.1\.1/).length).toBeGreaterThan(0);
     expect(confirm).not.toHaveBeenCalled();
