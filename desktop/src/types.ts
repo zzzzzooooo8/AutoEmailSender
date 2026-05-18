@@ -1,4 +1,4 @@
-export type BackendPathInput = {
+﻿export type BackendPathInput = {
   isPackaged: boolean;
   resourcesPath: string;
   repoRoot: string;
@@ -95,3 +95,16 @@ export type UpdateStatus =
   | { state: "downloaded_pending_install"; version: string; nextVersion: string; fullDownloadBytes?: number }
   | { state: "installing"; version: string; nextVersion: string }
   | { state: "error"; version: string; message: string };
+
+export type MaterialOpenResult =
+  | { ok: true }
+  | {
+      ok: false;
+      code:
+        | "MaterialOpenInvalidId"
+        | "MaterialOpenBackendUnavailable"
+        | "MaterialOpenNotFound"
+        | "MaterialOpenCopyFailed"
+        | "MaterialOpenSystemFailed";
+      message: string;
+    };

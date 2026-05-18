@@ -56,4 +56,16 @@ describe("ProfilePage setup sections", () => {
     expect(profilePageSource).toContain("testLLMProfilePreview");
     expect(profilePageSource).toContain("toLLMPayload(llmForm)");
   });
+  it("opens materials through desktop api and keeps download endpoint", () => {
+    const materialModalSource = profilePageSource.slice(
+      profilePageSource.indexOf("const MaterialLibraryModal = ({"),
+    );
+
+    expect(profilePageSource).toContain("openDesktopMaterial(material.id)");
+    expect(materialModalSource).toContain("onClick={() => onOpen(material)}");
+    expect(materialModalSource).toContain("triggerDownload(getMaterialDownloadUrl(material.id))");
+    expect(materialModalSource).not.toContain("getMaterialOpenUrl(material.id)");
+    expect(materialModalSource).not.toContain("openFileInNewTab(getMaterialOpenUrl");
+  });
+
 });

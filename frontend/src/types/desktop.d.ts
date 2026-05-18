@@ -1,4 +1,4 @@
-export {};
+﻿export {};
 
 export type DesktopUpdateDownloadMode = "differential" | "full";
 
@@ -28,6 +28,20 @@ export type DesktopUpdateStatus =
   | { state: "downloaded_pending_install"; version: string; nextVersion: string; fullDownloadBytes?: number }
   | { state: "installing"; version: string; nextVersion: string }
   | { state: "error"; version: string; message: string };
+
+
+export type DesktopMaterialOpenResult =
+  | { ok: true }
+  | {
+      ok: false;
+      code:
+        | "MaterialOpenInvalidId"
+        | "MaterialOpenBackendUnavailable"
+        | "MaterialOpenNotFound"
+        | "MaterialOpenCopyFailed"
+        | "MaterialOpenSystemFailed";
+      message: string;
+    };
 
 export type DesktopBackendStartupPhase =
   | "starting"
@@ -73,6 +87,7 @@ declare global {
         type: string;
         data: ArrayBuffer;
       } | null>;
+      openMaterial?: (request: { materialId: number }) => Promise<DesktopMaterialOpenResult>;
       checkForUpdate: () => Promise<DesktopUpdateStatus>;
       downloadUpdate: (options?: { mode?: DesktopUpdateDownloadMode }) => Promise<DesktopUpdateStatus>;
       switchToFullDownload: () => Promise<DesktopUpdateStatus>;
@@ -82,3 +97,4 @@ declare global {
     };
   }
 }
+
