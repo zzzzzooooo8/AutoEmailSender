@@ -45,6 +45,9 @@ async def build_workspace_thread(
     identity = await _get_identity(session, identity_id)
     llm_profile = await _get_llm_profile(session, llm_profile_id)
     current_task = await _get_latest_email_task(session, professor_id, identity_id, llm_profile_id)
+    if _recover_legacy_sent_task_status(current_task):
+        await session.commit()
+        await session.refresh(current_task)
     match_task = (
         current_task
         if _task_has_match_result(current_task)
@@ -404,6 +407,28 @@ def _copy_match_snapshot(target: EmailTask, source: EmailTask) -> None:
     target.match_keywords = list(source.match_keywords or [])
     if target.status == EmailTaskStatus.DISCOVERED.value:
         target.status = EmailTaskStatus.MATCHED.value
+
+
+def _recover_legacy_sent_task_status(task: EmailTask | None) -> bool:
+    if (
+        task is None
+        or task.sent_at is None
+        or task.status
+        not in {
+            EmailTaskStatus.DISCOVERED.value,
+            EmailTaskStatus.MATCHED.value,
+            EmailTaskStatus.DRAFT_FAILED.value,
+            EmailTaskStatus.REVIEW_REQUIRED.value,
+            EmailTaskStatus.APPROVED.value,
+            EmailTaskStatus.SCHEDULED.value,
+        }
+    ):
+        return False
+
+    task.status = EmailTaskStatus.SENT.value
+    task.last_error = None
+    task.updated_at = datetime.now(UTC)
+    return True
 
 
 def _extract_usage(provider_payload: dict[str, object] | None) -> dict[str, int | None]:
