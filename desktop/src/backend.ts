@@ -170,9 +170,9 @@ async function waitForReady(
     stderr += chunk.toString("utf8");
   });
 
-  await waitForHealth(baseUrl, child, () => stderr);
+  await waitForHealth(baseUrl, child, () => stderr, { onStatus });
   try {
-    await waitForStartupStatus(baseUrl, { onStatus });
+    await waitForStartupStatus(baseUrl, { child, getStderr: () => stderr, onStatus });
   } catch (error) {
     if (child.exitCode !== null) {
       throw new Error(`后端进程已退出：${stderr.slice(-800)}`);
@@ -181,36 +181,65 @@ async function waitForReady(
   }
 }
 
-async function waitForHealth(
+export async function waitForHealth(
   baseUrl: string,
   child: ChildProcessWithoutNullStreams,
   getStderr: () => string,
+  options: {
+    onStatus?: (status: BackendStatus) => void;
+    pollIntervalMs?: number;
+    timeoutMs?: number;
+    slowStartupMs?: number;
+  } = {},
 ): Promise<void> {
-  const deadline = Date.now() + 30_000;
+  const pollIntervalMs = options.pollIntervalMs ?? 400;
+  const timeoutMs = options.timeoutMs ?? 30_000;
+  const slowStartupMs = options.slowStartupMs ?? 30_000;
+  const startedAt = Date.now();
+  const deadline = startedAt + timeoutMs;
+  let slowStatusEmitted = false;
 
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
       throw new Error(`Backend exited before health check succeeded: ${getStderr().slice(-800)}`);
     }
+    const elapsedMs = Date.now() - startedAt;
+    if (!slowStatusEmitted && elapsedMs >= slowStartupMs) {
+      slowStatusEmitted = true;
+      const elapsedSeconds = Math.round(elapsedMs / 1000);
+      options.onStatus?.({
+        state: "starting",
+        phase: "starting",
+        message: "首次启动可能较慢，正在继续等待本地服务",
+        elapsedSeconds,
+        slowStartup: true,
+        verySlowStartup: elapsedSeconds >= 120,
+      });
+    }
     if (await isEndpointOk(`${baseUrl}/health`)) {
       return;
     }
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
   }
 
-  throw new Error(`Backend health check timed out: ${getStderr().slice(-800)}`);
+  const waitedSeconds = Math.round((Date.now() - startedAt) / 1000);
+  throw new Error(
+    `Backend health check timed out after ${waitedSeconds}s; processExited=${child.exitCode !== null}: ${getStderr().slice(-800)}`,
+  );
 }
 
 export async function waitForStartupStatus(
   baseUrl: string,
   options: {
     onStatus: (status: BackendStatus) => void;
+    child?: ChildProcessWithoutNullStreams;
+    getStderr?: () => string;
     pollIntervalMs?: number;
     hardTimeoutMs?: number;
   },
 ): Promise<void> {
   const pollIntervalMs = options.pollIntervalMs ?? 800;
-  const hardTimeoutMs = options.hardTimeoutMs ?? 10 * 60_000;
+  const hardTimeoutMs = options.hardTimeoutMs ?? 60_000;
   const startedAt = Date.now();
   const deadline = Date.now() + hardTimeoutMs;
   let lastStatus: BackendStatus | null = null;
@@ -218,6 +247,10 @@ export async function waitForStartupStatus(
   let lastElapsedSeconds: number | null = null;
 
   while (Date.now() < deadline) {
+    if (options.child?.exitCode !== null && options.child?.exitCode !== undefined) {
+      throw new Error(`后端进程已退出：${(options.getStderr?.() ?? "").slice(-800)}`);
+    }
+
     let status: BackendStartupStatus;
     try {
       status = await fetchStartupStatus(baseUrl);
@@ -233,7 +266,7 @@ export async function waitForStartupStatus(
         message: "系统正在准备中",
         elapsedSeconds,
         slowStartup: elapsedSeconds >= 30,
-        verySlowStartup: elapsedSeconds >= 120,
+        verySlowStartup: elapsedSeconds >= 60,
       };
       lastStatus = startingStatus;
       options.onStatus(startingStatus);
@@ -271,7 +304,7 @@ export async function waitForStartupStatus(
       message: status.message,
       elapsedSeconds: status.elapsed_seconds,
       slowStartup: status.elapsed_seconds >= 30,
-      verySlowStartup: status.elapsed_seconds >= 120,
+      verySlowStartup: status.elapsed_seconds >= 60,
     };
     lastStatus = startingStatus;
     lastStartingPhase = startingStatus.phase;
@@ -289,7 +322,7 @@ export async function waitForStartupStatus(
     phase: "error",
     message: "系统准备时间过长",
     elapsedSeconds,
-    detail: "启动状态轮询超过 10 分钟仍未完成",
+    detail: "启动状态轮询超过 60 秒仍未完成",
   };
   options.onStatus(timeoutStatus);
   throw new Error(timeoutStatus.message);

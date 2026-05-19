@@ -66,9 +66,9 @@ Backend health check timed out:
 
 ## 方案比较
 
-### 方案 A：延长桌面端健康检查超时
+### 方案 A：优化桌面端启动等待边界
 
-特点：将 `/health` 等待时间从 30 秒提升到 90–120 秒，并优化启动文案。
+特点：保持 `/health` 30 秒等待上限，将 `/startup-status` 等待控制在 60 秒内，并优化启动文案。
 
 优点：
 
@@ -115,7 +115,7 @@ Backend health check timed out:
 
 推荐采用「方案 B + 方案 A 的保底策略」。
 
-第一阶段先做低风险结构优化：拆除 API 包全量导入副作用、懒加载重第三方依赖，并增加启动耗时埋点。这样可以用数据确认真正收益。与此同时，将桌面端健康检查超时提升到 120 秒，避免优化尚未覆盖的极慢机器继续误判失败。
+第一阶段先做低风险结构优化：拆除 API 包全量导入副作用、懒加载重第三方依赖，并增加启动耗时埋点。这样可以用数据确认真正收益。与此同时，保持桌面端 `/health` 30 秒上限，并将 `/startup-status` 轮询控制在 60 秒内，避免真实故障被长时间等待掩盖。
 
 不建议第一阶段直接采用方案 C。当前问题尚可通过导入边界治理缓解，先拆最小应用会放大改造范围。
 
@@ -193,14 +193,17 @@ Backend health check timed out:
 
 预期做法：
 
-- 将 `/health` 硬超时从 30 秒提升到 120 秒。
-- 超过 30 秒后，状态仍显示启动中，但文案改为「首次启动可能较慢，正在继续等待本地服务」。
+- 将 `/health` 硬超时保持为 30 秒。
+- 将 `/startup-status` 硬超时设置为 60 秒。
+- 在任意等待阶段，只要后端子进程退出就立即失败。
+- 接近 30 秒时，状态仍显示启动中，但文案改为「首次启动可能较慢，正在继续等待本地服务」。
 - 超时时将后端进程 PID、是否仍存活、端口、stderr 尾部、安装路径和数据目录写入诊断事件。
 
 验收标准：
 
-- 30 秒后不立即显示「系统准备失败」。
-- 如果 120 秒仍失败，诊断信息能区分进程退出、进程存活但端口未监听、端口已监听但业务初始化失败。
+- `/health` 超过 30 秒仍不可用时显示启动失败。
+- `/startup-status` 超过 60 秒仍未 ready 时显示启动失败。
+- 任意阶段后端进程退出时立即失败，并带出 stderr 尾部。
 
 ## 风险与应对
 
@@ -260,3 +263,12 @@ PyInstaller 可能因为懒加载而漏收集某些动态导入依赖。
 - 启动失败诊断能明确指出失败阶段，而不是只给出空的 `Backend health check timed out:`。
 - 现有业务功能和 API 契约保持兼容。
 
+## 实施验证记录
+
+- `import main` 优化前：约 3.796 秒；优化后：约 1.702 秒。
+- 导入边界测试：`cd backend && uv run python -m unittest test.test_api_import_boundaries`，PASS。
+- 启动日志测试：`cd backend && uv run python -m unittest test.test_startup_runtime`，PASS。
+- 懒加载重点回归：`cd backend && uv run python -m unittest test.test_crawl_job_runtime.CrawlJobThinkingAdaptationIntegrationTests.test_thinking_adaptation_failure_marks_job_failed_and_skips_run test.test_crawl_jobs_api.CrawlJobsApiTests.test_enrich_selected_candidates_returns_summary test.test_operation_log_integration.OperationLogIntegrationTests.test_smtp_test_records_result_without_sensitive_fields`，PASS。
+- 桌面端测试：`cd desktop && npm.cmd run test -- backend.test.ts`，14 个测试 PASS。
+- 桌面端类型检查：`cd desktop && npm.cmd run typecheck`，PASS。
+- 后端完整测试：`cd backend && uv run python -m unittest discover test`，564 个测试 PASS。
