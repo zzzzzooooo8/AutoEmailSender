@@ -75,6 +75,7 @@ describe("windows installer packaging", () => {
     expect(script).toContain("--delete-app-data");
     expect(script).toContain("永久删除 Auto Email Sender 的本地数据");
     expect(script).toContain("$APPDATA\\Auto Email Sender");
+    expect(script).toContain("!macro customUnInstallSection");
     expect(script).toContain("un.DeleteAutoEmailSenderAppData");
   });
 });

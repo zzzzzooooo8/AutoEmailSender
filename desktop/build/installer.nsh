@@ -15,7 +15,6 @@ Var /GLOBAL UninstallShouldDeleteAppData
 
 !macro customUnInstall
   ${If} ${Silent}
-    Call un.DeleteAutoEmailSenderAppData
     Goto done
   ${EndIf}
 
@@ -26,7 +25,6 @@ Var /GLOBAL UninstallShouldDeleteAppData
 
   delete_data:
     StrCpy $UninstallShouldDeleteAppData "1"
-    Call un.DeleteAutoEmailSenderAppData
     Goto done
 
   skip_delete:
@@ -34,6 +32,12 @@ Var /GLOBAL UninstallShouldDeleteAppData
     Goto done
 
   done:
+!macroend
+
+!macro customUnInstallSection
+Section "un.DeleteAutoEmailSenderAppData"
+  Call un.DeleteAutoEmailSenderAppData
+SectionEnd
 !macroend
 
 !ifdef BUILD_UNINSTALLER
