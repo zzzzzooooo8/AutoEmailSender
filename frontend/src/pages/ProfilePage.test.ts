@@ -108,6 +108,8 @@ describe("ProfilePage setup sections", () => {
     expect(materialModalSource).toContain("triggerDownload(getMaterialDownloadUrl(material.id))");
     expect(materialModalSource).not.toContain("getMaterialOpenUrl(material.id)");
     expect(materialModalSource).not.toContain("openFileInNewTab(getMaterialOpenUrl");
+    expect(profilePageSource).not.toContain('link.target = "_blank"');
+    expect(profilePageSource).not.toContain('link.rel = "noreferrer"');
   });
 
 });
