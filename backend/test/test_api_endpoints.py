@@ -1231,6 +1231,210 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(payload["current_task"]["generated_subject"], "申请与模板导师老师交流")
         self.assertIn("模板导师老师您好", payload["current_task"]["generated_content_text"])
 
+    def test_template_mode_regeneration_uses_latest_identity_template_after_existing_draft(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+
+        update_response = self.client.put(
+            f"/api/identities/{identity_id}",
+            json=self._build_identity_payload(
+                with_imap=False,
+                outreach_generation_mode="template",
+                outreach_template_subject="旧模板主题 {{name}}",
+                outreach_template_body_text="旧模板正文 {{name}}",
+                outreach_template_body_html="<p>旧模板正文 {{name}}</p>",
+            ),
+        )
+        self.assertEqual(update_response.status_code, 200, msg=update_response.text)
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "模板更新导师",
+                "email": "template-update@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Agents",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        ensure_response = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(ensure_response.status_code, 200, msg=ensure_response.text)
+        task_id = ensure_response.json()["current_task"]["id"]
+
+        first_generate = self.client.post(f"/api/email-tasks/{task_id}/generate-draft")
+        self.assertEqual(first_generate.status_code, 200, msg=first_generate.text)
+        self.assertEqual(first_generate.json()["current_task"]["generated_subject"], "旧模板主题 模板更新导师")
+
+        update_template_response = self.client.put(
+            f"/api/identities/{identity_id}",
+            json=self._build_identity_payload(
+                with_imap=False,
+                outreach_generation_mode="template",
+                outreach_template_subject="新模板主题 {{name}}",
+                outreach_template_body_text="新模板正文 {{name}}",
+                outreach_template_body_html="<p>新模板正文 {{name}}</p>",
+            ),
+        )
+        self.assertEqual(update_template_response.status_code, 200, msg=update_template_response.text)
+
+        second_generate = self.client.post(f"/api/email-tasks/{task_id}/generate-draft")
+        self.assertEqual(second_generate.status_code, 200, msg=second_generate.text)
+        payload = second_generate.json()
+        self.assertEqual(payload["current_task"]["generated_subject"], "新模板主题 模板更新导师")
+        self.assertIn("新模板正文 模板更新导师", payload["current_task"]["generated_content_text"])
+        latest_draft = [message for message in payload["messages"] if message["direction"] == "draft"][-1]
+        self.assertEqual(latest_draft["subject"], "新模板主题 模板更新导师")
+        self.assertIn("新模板正文 模板更新导师", latest_draft["content"])
+
+    def test_workspace_template_summary_returns_backend_rendered_template(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+
+        update_response = self.client.put(
+            f"/api/identities/{identity_id}",
+            json=self._build_identity_payload(
+                with_imap=False,
+                outreach_generation_mode="template",
+                outreach_template_subject="申请与 {{name}} 老师交流",
+                outreach_template_body_text=(
+                    "{{name}} 老师您好，我是 {{sender_name}}，关注 {{department}} 的 {{research_direction}}。"
+                ),
+                outreach_template_body_html=(
+                    "<p>{{name}} 老师您好，我是 {{sender_name}}，关注 {{department}} 的 {{research_direction}}。</p>"
+                ),
+            ),
+        )
+        self.assertEqual(update_response.status_code, 200, msg=update_response.text)
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "渲染导师",
+                "email": "rendered-template@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Agents",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        ensure_response = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(ensure_response.status_code, 200, msg=ensure_response.text)
+        task = ensure_response.json()["current_task"]
+
+        self.assertEqual(task["rendered_template_subject"], "申请与 渲染导师 老师交流")
+        self.assertEqual(
+            task["rendered_template_body_text"],
+            "渲染导师 老师您好，我是 测试身份，关注 Computer Science 的 Agents。",
+        )
+        self.assertIn(
+            "渲染导师 老师您好，我是 测试身份，关注 Computer Science 的 Agents。",
+            task["rendered_template_body_html"],
+        )
+
+    def test_child_manual_template_regeneration_uses_latest_identity_template(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        update_response = self.client.put(
+            f"/api/identities/{identity_id}",
+            json=self._build_identity_payload(
+                with_imap=False,
+                outreach_generation_mode="template",
+                outreach_template_subject="父任务旧主题 {{name}}",
+                outreach_template_body_text="父任务旧正文 {{name}}",
+                outreach_template_body_html="<p>父任务旧正文 {{name}}</p>",
+            ),
+        )
+        self.assertEqual(update_response.status_code, 200, msg=update_response.text)
+
+        professor_response = self.client.post(
+            "/api/professors",
+            json={
+                "name": "子任务模板导师",
+                "email": "child-template@example.edu",
+                "title": "Professor",
+                "university": "Example University",
+                "school": "School of Computing",
+                "department": "Computer Science",
+                "research_direction": "Agents",
+                "recent_papers": [],
+                "profile_url": None,
+                "source_url": None,
+            },
+        )
+        self.assertEqual(professor_response.status_code, 201, msg=professor_response.text)
+        professor_id = professor_response.json()["id"]
+
+        ensure_response = self.client.post(
+            f"/api/workspaces/{professor_id}/ensure-task",
+            params={"identity_id": identity_id, "llm_profile_id": llm_id},
+        )
+        self.assertEqual(ensure_response.status_code, 200, msg=ensure_response.text)
+        parent_task_id = ensure_response.json()["current_task"]["id"]
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            connection.execute(
+                """
+                UPDATE email_tasks
+                SET status = 'sent',
+                    sent_at = CURRENT_TIMESTAMP,
+                    generated_subject = '父任务旧主题 子任务模板导师',
+                    generated_content_text = '父任务旧正文 子任务模板导师',
+                    generated_content_html = '<p>父任务旧正文 子任务模板导师</p>'
+                WHERE id = ?
+                """,
+                (parent_task_id,),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        follow_up_response = self.client.post(f"/api/email-tasks/{parent_task_id}/start-follow-up")
+        self.assertEqual(follow_up_response.status_code, 200, msg=follow_up_response.text)
+        child_task = follow_up_response.json()["current_task"]
+        self.assertEqual(child_task["parent_task_id"], parent_task_id)
+        self.assertEqual(child_task["generated_subject"], None)
+        child_task_id = child_task["id"]
+
+        update_template_response = self.client.put(
+            f"/api/identities/{identity_id}",
+            json=self._build_identity_payload(
+                with_imap=False,
+                outreach_generation_mode="template",
+                outreach_template_subject="子任务新主题 {{name}}",
+                outreach_template_body_text="子任务新正文 {{name}}",
+                outreach_template_body_html="<p>子任务新正文 {{name}}</p>",
+            ),
+        )
+        self.assertEqual(update_template_response.status_code, 200, msg=update_template_response.text)
+
+        generate_response = self.client.post(f"/api/email-tasks/{child_task_id}/generate-draft")
+        self.assertEqual(generate_response.status_code, 200, msg=generate_response.text)
+        generated = generate_response.json()["current_task"]
+        self.assertEqual(generated["generated_subject"], "子任务新主题 子任务模板导师")
+        self.assertIn("子任务新正文 子任务模板导师", generated["generated_content_text"])
+
     def test_manual_send_renders_subject_and_body_placeholders(self) -> None:
         identity_id = self._create_identity(with_imap=False)
         llm_id = self._create_llm()
@@ -3463,9 +3667,9 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(current_task["generated_content_text"], "旧草稿正文")
         self.assertEqual(current_task["generated_content_html"], "<p>旧草稿正文</p>")
         self.assertEqual(current_task["outreach_generation_mode"], "template")
-        self.assertEqual(current_task["outreach_template_subject"], "继续联系 {{name}}")
-        self.assertEqual(current_task["outreach_template_body_text"], "继续联系正文 {{name}}")
-        self.assertEqual(current_task["outreach_template_body_html"], "<p>继续联系正文 {{name}}</p>")
+        self.assertEqual(current_task["outreach_template_subject"], "申请与{{name}}老师交流")
+        self.assertEqual(current_task["outreach_template_body_text"], "老师您好，我是{{sender_name}}，关注到您在{{research_direction}}方向的工作。")
+        self.assertIsNone(current_task["outreach_template_body_html"])
         self.assertFalse(current_task["can_continue_manually"])
         self.assertFalse(current_task["can_write_follow_up"])
 
@@ -4076,9 +4280,9 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertIsNone(current_task["approved_body_text"])
         self.assertIsNone(current_task["approved_body_html"])
         self.assertEqual(current_task["outreach_generation_mode"], "template")
-        self.assertEqual(current_task["outreach_template_subject"], "跟进主题 {{name}}")
-        self.assertEqual(current_task["outreach_template_body_text"], "跟进正文 {{name}}")
-        self.assertEqual(current_task["outreach_template_body_html"], "<p>跟进正文 {{name}}</p>")
+        self.assertEqual(current_task["outreach_template_subject"], "申请与{{name}}老师交流")
+        self.assertEqual(current_task["outreach_template_body_text"], "老师您好，我是{{sender_name}}，关注到您在{{research_direction}}方向的工作。")
+        self.assertIsNone(current_task["outreach_template_body_html"])
         self.assertFalse(current_task["can_continue_manually"])
         self.assertFalse(current_task["can_write_follow_up"])
 
@@ -5274,7 +5478,7 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertIn("{{name}}您好", draft["body_html"])
         self.assertIn("{{sender_name}}", draft["body_html"])
 
-    def test_batch_task_outreach_snapshot_is_independent_from_identity_defaults(self) -> None:
+    def test_batch_task_workspace_uses_latest_identity_template_defaults(self) -> None:
         identity_id = self._create_identity(with_imap=False)
         llm_id = self._create_llm()
 
@@ -5347,8 +5551,8 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(workspace.status_code, 200, msg=workspace.text)
         payload = workspace.json()
         self.assertEqual(payload["current_task"]["outreach_generation_mode"], "template")
-        self.assertEqual(payload["current_task"]["outreach_template_subject"], "批量主题 {{name}}")
-        self.assertEqual(payload["current_task"]["outreach_template_body_text"], "批量正文 {{name}}")
+        self.assertEqual(payload["current_task"]["outreach_template_subject"], "后来改掉的主题")
+        self.assertEqual(payload["current_task"]["outreach_template_body_text"], "后来改掉的正文 {{name}}")
 
     def test_llm_batch_task_prefers_outreach_template_fields_for_snapshot_and_draft(self) -> None:
         identity_id = self._create_identity(with_imap=False)
@@ -5459,7 +5663,7 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["detail"], "未找到身份配置")
 
-    def test_workspace_mode_switch_uses_task_snapshot_over_identity_defaults(self) -> None:
+    def test_workspace_generate_draft_uses_latest_identity_template_defaults(self) -> None:
         identity_id = self._create_identity(with_imap=False)
         llm_id = self._create_llm()
 
@@ -5516,14 +5720,17 @@ class ApiEndpointTests(unittest.TestCase):
             json={"outreach_generation_mode": "template"},
         )
         self.assertEqual(switch_response.status_code, 200, msg=switch_response.text)
-        self.assertEqual(switch_response.json()["current_task"]["outreach_generation_mode"], "template")
+        switched_task = switch_response.json()["current_task"]
+        self.assertEqual(switched_task["outreach_generation_mode"], "template")
+        self.assertEqual(switched_task["outreach_template_subject"], "后来切换成新的默认主题")
+        self.assertEqual(switched_task["outreach_template_body_text"], "后来切换成新的默认正文 {{name}}")
 
         generate_response = self.client.post(f"/api/email-tasks/{task_id}/generate-draft")
         self.assertEqual(generate_response.status_code, 200, msg=generate_response.text)
         generated = generate_response.json()
         self.assertEqual(generated["current_task"]["status"], "review_required")
-        self.assertEqual(generated["current_task"]["generated_subject"], "申请与工作区切换导师老师交流")
-        self.assertIn("工作区切换导师老师您好", generated["current_task"]["generated_content_text"])
+        self.assertEqual(generated["current_task"]["generated_subject"], "后来切换成新的默认主题")
+        self.assertIn("后来切换成新的默认正文 工作区切换导师", generated["current_task"]["generated_content_text"])
 
     def _create_sent_professor_with_later_task(
         self,
