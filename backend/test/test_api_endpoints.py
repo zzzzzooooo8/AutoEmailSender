@@ -5329,6 +5329,39 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(send_payload["history"][0]["rfc_message_id"], "<self-test@example.com>")
         mocked_send.assert_awaited_once()
 
+    def test_delete_material_removes_stale_test_compose_attachment_selection(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        material_id = self._upload_material(
+            identity_id,
+            filename="resume.txt",
+            content=b"My research background is in information extraction.",
+            material_type="resume",
+        )
+
+        save_response = self.client.post(
+            f"/api/test-compose/{identity_id}/{llm_id}/draft",
+            json={
+                "subject": "测试主题",
+                "body_text": "测试正文",
+                "body_html": "<p>测试正文</p>",
+                "selected_material_ids": [material_id],
+            },
+        )
+        self.assertEqual(save_response.status_code, 200, msg=save_response.text)
+        self.assertEqual(save_response.json()["draft"]["selected_material_ids"], [material_id])
+
+        delete_response = self.client.delete(f"/api/materials/{material_id}")
+
+        self.assertEqual(delete_response.status_code, 204, msg=delete_response.text)
+
+        thread_response = self.client.get(f"/api/test-compose/{identity_id}/{llm_id}")
+
+        self.assertEqual(thread_response.status_code, 200, msg=thread_response.text)
+        payload = thread_response.json()
+        self.assertEqual(payload["draft"]["selected_material_ids"], [])
+        self.assertEqual(payload["material_options"], [])
+
     def test_test_compose_generate_draft_returns_bad_gateway_when_llm_fails(self) -> None:
         identity_id = self._create_identity(with_imap=False)
         llm_id = self._create_llm()
