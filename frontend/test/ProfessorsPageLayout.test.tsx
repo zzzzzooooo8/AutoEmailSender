@@ -4,8 +4,6 @@ import { NotificationProvider } from "@/context/NotificationContext";
 import { formatApiDateTime } from "@/lib/dateTime";
 import { ProfessorsPage } from "@/pages/ProfessorsPage";
 import type { ProfessorManagementItemDTO } from "@/types";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
 const mockedUseSelectionContext = vi.hoisted(() => vi.fn());
 const listProfessorsForManagement = vi.hoisted(() => vi.fn());
@@ -76,11 +74,6 @@ const expectToAppearBefore = (first: HTMLElement, second: HTMLElement) => {
     Node.DOCUMENT_POSITION_FOLLOWING,
   );
 };
-
-const professorsPageSource = readFileSync(
-  resolve(process.cwd(), "src/pages/ProfessorsPage.tsx"),
-  "utf8",
-);
 
 describe("ProfessorsPage layout", () => {
   beforeEach(() => {
@@ -357,11 +350,25 @@ describe("ProfessorsPage layout", () => {
     });
   });
 
-  it("downloads professor templates without opening a blank window", () => {
-    expect(professorsPageSource).toContain(
-      "triggerDownload(getProfessorTemplateDownloadUrl(format))",
-    );
-    expect(professorsPageSource).not.toContain('link.target = "_blank"');
-    expect(professorsPageSource).not.toContain('link.rel = "noreferrer"');
+  it("downloads professor templates without opening a blank window", async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(listProfessorsForManagement).toHaveBeenCalledWith("active");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "模板导入" }));
+
+    const link = document.createElement("a");
+    const click = vi.spyOn(link, "click").mockImplementation(() => undefined);
+    const createElement = vi.spyOn(document, "createElement").mockReturnValue(link);
+
+    fireEvent.click(screen.getByRole("button", { name: "下载 XLSX 模板" }));
+
+    expect(createElement).toHaveBeenCalledWith("a");
+    expect(link).toHaveAttribute("href", "/templates/professors.xlsx");
+    expect(link).not.toHaveAttribute("target");
+    expect(link).not.toHaveAttribute("rel");
+    expect(click).toHaveBeenCalledTimes(1);
   });
 });
