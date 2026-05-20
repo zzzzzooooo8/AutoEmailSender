@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
@@ -208,6 +209,61 @@ class OutreachTemplateImportTests(unittest.TestCase):
         self.assertEqual(rendered.subject, "申请与李老师老师交流")
         self.assertIn("我是王同学", rendered.body_text)
         self.assertIn("我是王同学", rendered.body_html)
+
+    def test_send_date_context_uses_beijing_date_without_zero_padding(self) -> None:
+        from app.services.outreach_templates import build_send_date_context
+
+        context = build_send_date_context(datetime(2026, 5, 19, 16, 30, tzinfo=UTC))
+
+        self.assertEqual(
+            context,
+            {
+                "year": "2026",
+                "month": "5",
+                "day": "20",
+            },
+        )
+
+    def test_template_rendering_preserves_send_date_until_send_context(self) -> None:
+        from app.models import IdentityProfile, Professor
+        from app.services.outreach_templates import (
+            build_send_template_context,
+            render_outreach_template,
+            render_template_with_context,
+        )
+
+        identity = IdentityProfile(
+            name="内部配置",
+            profile_name="博士申请配置",
+            sender_name="王同学",
+            email_address="sender@example.com",
+            smtp_host="smtp.example.com",
+            smtp_username="sender@example.com",
+            smtp_password="secret",
+        )
+        professor = Professor(name="李老师", email="li@example.edu")
+
+        rendered = render_outreach_template(
+            identity,
+            professor,
+            subject_template="申请与{{name}}老师交流",
+            body_text_template="{{name}}老师您好，发送日期：{{year}}年{{month}}月{{day}}日。",
+            body_html_template="<p>{{name}}老师您好，发送日期：{{year}}年{{month}}月{{day}}日。</p>",
+        )
+
+        self.assertIn("{{year}}年{{month}}月{{day}}日", rendered.body_text)
+        self.assertIn("{{year}}年{{month}}月{{day}}日", rendered.body_html)
+
+        send_context = build_send_template_context(
+            identity,
+            professor,
+            now=datetime(2026, 5, 19, 16, 30, tzinfo=UTC),
+        )
+
+        self.assertEqual(
+            render_template_with_context(rendered.body_text, send_context),
+            "李老师老师您好，发送日期：2026年5月20日。",
+        )
 
 
 if __name__ == "__main__":

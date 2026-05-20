@@ -4,8 +4,10 @@ import io
 import re
 import tempfile
 from dataclasses import dataclass
+from datetime import datetime
 from html import escape
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
 
@@ -21,6 +23,12 @@ OUTREACH_GENERATION_MODE_LLM = "llm"
 OUTREACH_GENERATION_MODE_TEMPLATE = "template"
 TEST_RECIPIENT_NAME = "测试收件人"
 SUPPORTED_TEMPLATE_IMPORT_SUFFIXES = {".docx", ".html", ".htm", ".txt", ".md"}
+BEIJING_TIMEZONE = ZoneInfo("Asia/Shanghai")
+SEND_DATE_PLACEHOLDER_CONTEXT = {
+    "year": "{{year}}",
+    "month": "{{month}}",
+    "day": "{{day}}",
+}
 PLACEHOLDER_HELP_TEXT = {
     "name": "导师姓名",
     "email": "导师邮箱",
@@ -31,6 +39,9 @@ PLACEHOLDER_HELP_TEXT = {
     "research_direction": "导师研究方向",
     "sender_name": "你的发件人姓名",
     "sender_email": "你的发件邮箱",
+    "year": "北京时间发送年份",
+    "month": "北京时间发送月份",
+    "day": "北京时间发送日期",
 }
 EMAIL_TEMPLATE_FONT_STACK = (
     "'Times New Roman','Songti SC','STSong','SimSun','Noto Serif SC',serif"
@@ -90,6 +101,7 @@ def build_template_context(identity: IdentityProfile, professor: Professor) -> d
         "research_direction": professor.research_direction or "",
         "sender_name": get_identity_sender_name(identity),
         "sender_email": identity.email_address or "",
+        **SEND_DATE_PLACEHOLDER_CONTEXT,
     }
 
 
@@ -113,6 +125,42 @@ def build_test_compose_template_context(identity: IdentityProfile) -> dict[str, 
         "research_direction": "测试研究方向",
         "sender_name": get_identity_sender_name(identity),
         "sender_email": identity.email_address or "",
+        **SEND_DATE_PLACEHOLDER_CONTEXT,
+    }
+
+
+def build_send_date_context(now: datetime | None = None) -> dict[str, str]:
+    current = now or datetime.now(BEIJING_TIMEZONE)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=BEIJING_TIMEZONE)
+    beijing_now = current.astimezone(BEIJING_TIMEZONE)
+    return {
+        "year": str(beijing_now.year),
+        "month": str(beijing_now.month),
+        "day": str(beijing_now.day),
+    }
+
+
+def build_send_template_context(
+    identity: IdentityProfile,
+    professor: Professor,
+    *,
+    now: datetime | None = None,
+) -> dict[str, str]:
+    return {
+        **build_template_context(identity, professor),
+        **build_send_date_context(now),
+    }
+
+
+def build_test_compose_send_template_context(
+    identity: IdentityProfile,
+    *,
+    now: datetime | None = None,
+) -> dict[str, str]:
+    return {
+        **build_test_compose_template_context(identity),
+        **build_send_date_context(now),
     }
 
 

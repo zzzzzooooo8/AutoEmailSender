@@ -16,6 +16,9 @@ import {
 describe("templatePlaceholders", () => {
   it("finds known placeholders and ignores unknown keys", () => {
     expect(getTemplatePlaceholder("name")?.label).toBe("导师姓名");
+    expect(getTemplatePlaceholder("year")?.label).toBe("发送年份");
+    expect(getTemplatePlaceholder("month")?.token).toBe("{{month}}");
+    expect(getTemplatePlaceholder("day")?.label).toBe("发送日期");
     expect(getTemplatePlaceholder("unknown")).toBeUndefined();
     expect(getTemplatePlaceholder(null)).toBeUndefined();
   });
@@ -38,12 +41,16 @@ describe("templatePlaceholders", () => {
   });
 
   it("prepares and serializes placeholder spans without changing surrounding html", () => {
-    const prepared = prepareTemplatePlaceholderHtml("<p>{{ name }}老师您好，我是{{sender_email}}</p>");
+    const prepared = prepareTemplatePlaceholderHtml(
+      "<p>{{ name }}老师您好，我是{{sender_email}}。{{year}}年{{month}}月{{day}}日</p>",
+    );
 
     expect(prepared).toBe(
-      '<p><span data-template-placeholder="name">导师姓名</span>老师您好，我是<span data-template-placeholder="sender_email">发件邮箱</span></p>',
+      '<p><span data-template-placeholder="name">导师姓名</span>老师您好，我是<span data-template-placeholder="sender_email">发件邮箱</span>。<span data-template-placeholder="year">发送年份</span>年<span data-template-placeholder="month">发送月份</span>月<span data-template-placeholder="day">发送日期</span>日</p>',
     );
-    expect(serializeTemplatePlaceholderHtml(prepared)).toBe("<p>{{name}}老师您好，我是{{sender_email}}</p>");
+    expect(serializeTemplatePlaceholderHtml(prepared)).toBe(
+      "<p>{{name}}老师您好，我是{{sender_email}}。{{year}}年{{month}}月{{day}}日</p>",
+    );
   });
 
   it("treats editor placeholder chips and stored template tokens as equivalent html", () => {

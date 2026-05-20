@@ -32,6 +32,7 @@ from app.services.operation_logs import record_operation_log
 from app.services.outreach_templates import (
     OUTREACH_GENERATION_MODE_TEMPLATE,
     TEST_RECIPIENT_NAME,
+    build_test_compose_send_template_context,
     build_test_compose_template_context,
     get_identity_sender_name,
     get_outreach_template_defaults_validation_error,
@@ -159,7 +160,7 @@ async def send_test_compose_message(
     else:
         draft_rendered = text_to_email_html(payload.body_text)
 
-    context = build_test_compose_template_context(identity)
+    context = build_test_compose_send_template_context(identity)
     subject = render_template_with_context(payload.subject, context).strip()
     rendered_body_text = render_template_with_context(payload.body_text, context)
     rendered_body_html = render_template_with_context(payload.body_html, context)

@@ -12,7 +12,10 @@ export type TemplatePlaceholderKey =
   | "department"
   | "research_direction"
   | "sender_name"
-  | "sender_email";
+  | "sender_email"
+  | "year"
+  | "month"
+  | "day";
 
 export type TemplatePlaceholderOption = {
   key: TemplatePlaceholderKey;
@@ -39,13 +42,16 @@ export const TEMPLATE_PLACEHOLDER_OPTIONS: TemplatePlaceholderOption[] = [
   { key: "research_direction", label: "研究方向", token: "{{research_direction}}" },
   { key: "sender_name", label: "发件人姓名", token: "{{sender_name}}" },
   { key: "sender_email", label: "发件邮箱", token: "{{sender_email}}" },
+  { key: "year", label: "发送年份", token: "{{year}}" },
+  { key: "month", label: "发送月份", token: "{{month}}" },
+  { key: "day", label: "发送日期", token: "{{day}}" },
 ];
 
 export const getTemplatePlaceholder = (key: string | null | undefined) =>
   TEMPLATE_PLACEHOLDER_OPTIONS.find((option) => option.key === key);
 
 const createTemplateTokenPattern = () =>
-  /\{\{\s*(name|email|title|university|school|department|research_direction|sender_name|sender_email)\s*\}\}/g;
+  /\{\{\s*(name|email|title|university|school|department|research_direction|sender_name|sender_email|year|month|day)\s*\}\}/g;
 
 export const parseTemplatePlaceholderText = (text: string) => {
   const segments: TemplatePlaceholderSegment[] = [];
