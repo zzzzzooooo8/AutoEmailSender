@@ -351,4 +351,26 @@ describe("ProfessorsPage layout", () => {
       expect(label).toHaveClass("h-5", "leading-5", "text-sm", "font-medium");
     });
   });
+
+  it("downloads professor templates without opening a blank window", async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(listProfessorsForManagement).toHaveBeenCalledWith("active");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "模板导入" }));
+
+    const link = document.createElement("a");
+    const click = vi.spyOn(link, "click").mockImplementation(() => undefined);
+    const createElement = vi.spyOn(document, "createElement").mockReturnValue(link);
+
+    fireEvent.click(screen.getByRole("button", { name: "下载 XLSX 模板" }));
+
+    expect(createElement).toHaveBeenCalledWith("a");
+    expect(link).toHaveAttribute("href", "/templates/professors.xlsx");
+    expect(link).not.toHaveAttribute("target");
+    expect(link).not.toHaveAttribute("rel");
+    expect(click).toHaveBeenCalledTimes(1);
+  });
 });
