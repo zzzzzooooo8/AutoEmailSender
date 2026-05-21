@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.models import (
@@ -23,7 +24,13 @@ from app.models import (
     Professor,
 )
 from app.services.mail_runtime import SendMailResult
-from app.services.task_runtime import dispatch_due_tasks_once, dispatch_email_task
+from app.schemas.email_task import EmailTaskApprovalRequest
+from app.services.task_runtime import (
+    approve_and_send_task,
+    approve_draft_task,
+    dispatch_due_tasks_once,
+    dispatch_email_task,
+)
 
 
 class BatchTaskDispatchScheduleTests(unittest.TestCase):
@@ -171,6 +178,128 @@ class BatchTaskDispatchScheduleTests(unittest.TestCase):
         self.assertEqual(processed, 0)
         self.assertEqual(self._run_async(self._get_task_status(task_id)), EmailTaskStatus.APPROVED.value)
         mocked_send.assert_not_called()
+
+    def test_approve_draft_preserves_scheduled_batch_plan(self) -> None:
+        scheduled_date = (datetime.now(UTC) + timedelta(days=1)).date().isoformat()
+        task_id = self._run_async(
+            self._create_batch_task_with_review_required_task(
+                scheduled_dates=[scheduled_date],
+                emails_per_window=20,
+            ),
+        )
+        scheduled_at = datetime.fromisoformat(f"{scheduled_date}T10:30:00+00:00")
+        self._run_async(self._set_task_scheduled_at(task_id, scheduled_at))
+
+        self._run_async(
+            approve_draft_task(
+                self.session_factory,
+                task_id,
+                EmailTaskApprovalRequest(
+                    subject="申请交流",
+                    body_text="老师您好。",
+                    body_html=None,
+                    selected_material_ids=[],
+                ),
+            ),
+        )
+
+        self.assertEqual(self._run_async(self._get_task_status(task_id)), EmailTaskStatus.SCHEDULED.value)
+        actual_scheduled_at = self._run_async(self._get_task_scheduled_at(task_id))
+        self.assertIsNotNone(actual_scheduled_at)
+        self.assertEqual(actual_scheduled_at.replace(tzinfo=UTC), scheduled_at)
+
+    def test_dispatch_email_task_skips_future_scheduled_task(self) -> None:
+        task_id = self._run_async(
+            self._create_batch_task_with_approved_task(
+                scheduled_dates=["2026-05-04"],
+                emails_per_window=20,
+            ),
+        )
+        self._run_async(
+            self._set_task_scheduled_at(
+                task_id,
+                datetime.now(UTC) + timedelta(hours=1),
+            ),
+        )
+
+        with patch(
+            "app.services.task_runtime.mail_runtime.send_email",
+            AsyncMock(return_value=self._build_send_result()),
+        ) as mocked_send:
+            self._run_async(dispatch_email_task(self.session_factory, task_id))
+
+        self.assertEqual(self._run_async(self._get_task_status(task_id)), EmailTaskStatus.APPROVED.value)
+        mocked_send.assert_not_awaited()
+
+    def test_dispatch_email_task_claim_skips_task_rescheduled_during_claim(self) -> None:
+        task_id = self._run_async(
+            self._create_batch_task_with_approved_task(
+                scheduled_dates=["2026-05-04"],
+                emails_per_window=20,
+            ),
+        )
+        reschedule_once = True
+
+        def reschedule_before_claim(conn, _cursor, statement, _parameters, _context, _executemany):
+            nonlocal reschedule_once
+            if not reschedule_once:
+                return
+            if not statement.lstrip().upper().startswith("UPDATE EMAIL_TASKS"):
+                return
+            reschedule_once = False
+            conn.exec_driver_sql(
+                "UPDATE email_tasks SET scheduled_at = ? WHERE id = ?",
+                ((datetime.now(UTC) + timedelta(hours=1)).isoformat(), task_id),
+            )
+
+        event.listen(self.engine.sync_engine, "before_cursor_execute", reschedule_before_claim)
+        try:
+            with patch(
+                "app.services.task_runtime.mail_runtime.send_email",
+                AsyncMock(return_value=self._build_send_result()),
+            ) as mocked_send:
+                self._run_async(dispatch_email_task(self.session_factory, task_id))
+        finally:
+            event.remove(self.engine.sync_engine, "before_cursor_execute", reschedule_before_claim)
+
+        self.assertEqual(self._run_async(self._get_task_status(task_id)), EmailTaskStatus.APPROVED.value)
+        mocked_send.assert_not_awaited()
+
+    def test_approve_and_send_explicitly_bypasses_future_scheduled_plan(self) -> None:
+        scheduled_date = (datetime.now(UTC) + timedelta(days=1)).date().isoformat()
+        task_id = self._run_async(
+            self._create_batch_task_with_review_required_task(
+                scheduled_dates=[scheduled_date],
+                emails_per_window=20,
+            ),
+        )
+        self._run_async(
+            self._set_task_scheduled_at(
+                task_id,
+                datetime.fromisoformat(f"{scheduled_date}T10:30:00+00:00"),
+            ),
+        )
+
+        with patch(
+            "app.services.task_runtime.mail_runtime.send_email",
+            AsyncMock(return_value=self._build_send_result()),
+        ) as mocked_send:
+            self._run_async(
+                approve_and_send_task(
+                    self.session_factory,
+                    task_id,
+                    EmailTaskApprovalRequest(
+                        subject="申请交流",
+                        body_text="老师您好。",
+                        body_html=None,
+                        selected_material_ids=[],
+                    ),
+                ),
+            )
+
+        self.assertEqual(self._run_async(self._get_task_status(task_id)), EmailTaskStatus.SENT.value)
+        self.assertIsNone(self._run_async(self._get_task_scheduled_at(task_id)))
+        mocked_send.assert_awaited_once()
 
     def test_dispatch_email_task_skips_task_no_longer_dispatchable(self) -> None:
         task_id = self._run_async(self._create_manual_approved_task())
@@ -960,6 +1089,12 @@ class BatchTaskDispatchScheduleTests(unittest.TestCase):
             task = await session.get(EmailTask, task_id)
             assert task is not None
             return task.status
+
+    async def _get_task_scheduled_at(self, task_id: int) -> datetime | None:
+        async with self.session_factory() as session:
+            task = await session.get(EmailTask, task_id)
+            assert task is not None
+            return task.scheduled_at
 
     async def _get_batch_task_status_by_email_task_id(self, task_id: int) -> str:
         async with self.session_factory() as session:
