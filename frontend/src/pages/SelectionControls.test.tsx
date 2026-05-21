@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -156,6 +162,7 @@ vi.mock("@/lib/api/workspacesApi", () => ({
 describe("selection controls", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.sessionStorage.clear();
     Object.assign(selectionContextValue, {
       identities: [selectedIdentity],
       llmProfiles: [selectedLlmProfile],
@@ -272,5 +279,101 @@ describe("selection controls", () => {
     expect(
       screen.getByRole("button", { name: "清空选择" }),
     ).toBeInTheDocument();
+  });
+
+  it("opens management advanced filters and resets them", async () => {
+    render(
+      <MemoryRouter>
+        <ProfessorsPage />
+      </MemoryRouter>,
+    );
+
+    const advancedFilterButton = await screen.findByRole("button", {
+      name: "高级筛选",
+    });
+    const filterToolbar = screen.getByTestId("professor-filter-toolbar");
+
+    expect(within(filterToolbar).getByRole("textbox")).toBeInTheDocument();
+    expect(
+      within(filterToolbar).getByRole("button", { name: "排序" }),
+    ).toBeInTheDocument();
+    expect(
+      within(filterToolbar).getByRole("button", { name: "高级筛选" }),
+    ).toBeInTheDocument();
+    expect(
+      within(filterToolbar).getByRole("button", { name: "重置" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(advancedFilterButton);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "学校：全部学校" }),
+    );
+    fireEvent.click(screen.getByRole("option", { name: "示例大学" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "高级筛选 1" }),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.getByRole("button", { name: "清空高级筛选" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "清空高级筛选" }));
+
+    expect(
+      screen.getByRole("button", { name: "高级筛选" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "重置" }));
+
+    expect(
+      screen.getByRole("button", { name: "高级筛选" }),
+    ).toBeInTheDocument();
+  });
+
+  it("restores management filters after remount", async () => {
+    const { unmount } = render(
+      <MemoryRouter>
+        <ProfessorsPage />
+      </MemoryRouter>,
+    );
+
+    const advancedFilterButton = await screen.findByRole("button", {
+      name: "高级筛选",
+    });
+
+    fireEvent.click(advancedFilterButton);
+    fireEvent.click(
+      screen.getByRole("button", { name: "学校：全部学校" }),
+    );
+    fireEvent.click(screen.getByRole("option", { name: "示例大学" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "高级筛选 1" }),
+      ).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      const storedValue = Array.from({ length: window.sessionStorage.length }, (_, index) =>
+        window.sessionStorage.getItem(window.sessionStorage.key(index) ?? ""),
+      ).join("\n");
+      expect(storedValue).toContain("示例大学");
+    });
+
+    unmount();
+
+    render(
+      <MemoryRouter>
+        <ProfessorsPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "高级筛选 1" }),
+      ).toBeInTheDocument();
+    });
   });
 });

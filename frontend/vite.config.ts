@@ -10,6 +10,7 @@ const nodeTestFiles = [
   "src/features/create-task/client/scheduleDates.test.ts",
   "src/features/home-dashboard/client/*.test.ts",
   "src/features/match-analysis/client/tokenUsage.test.ts",
+  "src/features/professor-management/client/*.test.ts",
   "src/features/token-usage/client/tokenUsage.test.ts",
   "src/lib/dateTime.test.ts",
   "src/lib/pagination.test.ts",

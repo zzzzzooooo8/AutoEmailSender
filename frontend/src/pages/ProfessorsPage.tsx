@@ -27,13 +27,10 @@ import {
 } from "lucide-react";
 import { NativeSelectField } from "@/components/atoms/NativeSelectField";
 import { ManagementProfessorRow } from "@/components/molecules/ManagementProfessorRow";
+import { MultiSelectFilter } from "@/components/molecules/MultiSelectFilter";
 import { useNotification } from "@/context/NotificationContext";
 import { useSelectionContext } from "@/context/SelectionContext";
 import { safeRecordUserAction } from "@/lib/diagnosticUserActions";
-import {
-  extractProfessorTitleTags,
-  matchesProfessorTitleTag,
-} from "@/lib/professorTitle";
 import { useConfirmDialog } from "@/lib/useConfirmDialog";
 import { createCrawlJob } from "@/lib/api/crawlJobsApi";
 import {
@@ -52,6 +49,19 @@ import type {
   ProfessorManagementItemDTO,
   ProfessorUpsertPayloadDTO,
 } from "@/types";
+import {
+  buildManagementFilterOptions,
+  createDefaultManagementFilters,
+  filterManagementProfessors,
+  getActiveManagementAdvancedFilterCount,
+  pruneManagementFilters,
+  type ProfessorManagementFilterState,
+} from "@/features/professor-management/client/filterManagementProfessors";
+import {
+  PROFESSOR_MANAGEMENT_SORT_OPTIONS,
+  sortManagementProfessors,
+  type ProfessorManagementSortKey,
+} from "@/features/professor-management/client/sortManagementProfessors";
 
 type ArchiveFilter = "active" | "archived" | "all";
 type ProfessorFormState = {
@@ -75,7 +85,7 @@ type CrawlerJobFormState = {
 type IntakeActionTone = "primary" | "amber" | "stone";
 
 const PROFESSORS_PER_PAGE = 10;
-const ALL_PROFESSOR_FILTER_VALUE = "__all__";
+const PROFESSORS_FILTERS_STORAGE_KEY = "professors_page_filters";
 const managementTableColumns =
   "lg:grid-cols-[2.75rem_minmax(0,0.72fr)_minmax(0,0.74fr)_minmax(0,1.08fr)_minmax(0,1.18fr)_minmax(0,1.56fr)_minmax(0,0.78fr)_minmax(12rem,0.92fr)]";
 
@@ -83,6 +93,108 @@ const archiveFilterLabels: Record<ArchiveFilter, string> = {
   active: "正常",
   archived: "已删除",
   all: "全部",
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const readStringArray = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+
+const isArchiveFilter = (value: unknown): value is ArchiveFilter =>
+  value === "active" || value === "archived" || value === "all";
+
+const readStoredProfessorManagementState = () => {
+  const defaults = {
+    archiveFilter: "active" as ArchiveFilter,
+    filters: createDefaultManagementFilters(),
+    advancedFiltersOpen: false,
+    sortKey: "latest" as ProfessorManagementSortKey,
+    currentPage: 1,
+  };
+
+  if (typeof window === "undefined") {
+    return defaults;
+  }
+
+  try {
+    const rawValue = window.sessionStorage.getItem(
+      PROFESSORS_FILTERS_STORAGE_KEY,
+    );
+    if (!rawValue) {
+      return defaults;
+    }
+
+    const parsedValue = JSON.parse(rawValue);
+    if (!isRecord(parsedValue)) {
+      return defaults;
+    }
+
+    const filters = isRecord(parsedValue.filters)
+      ? parsedValue.filters
+      : null;
+
+    const nextFilters = createDefaultManagementFilters();
+    nextFilters.keyword =
+      typeof filters?.keyword === "string" ? filters.keyword : "";
+    nextFilters.universities = readStringArray(filters?.universities);
+    nextFilters.schools = readStringArray(filters?.schools);
+    nextFilters.departments = readStringArray(filters?.departments);
+    nextFilters.titles = readStringArray(filters?.titles);
+
+    const nextSortKey =
+      parsedValue.sortKey === "latest" ||
+      parsedValue.sortKey === "updatedAtDesc" ||
+      parsedValue.sortKey === "nameAsc" ||
+      parsedValue.sortKey === "universityAsc"
+        ? parsedValue.sortKey
+        : defaults.sortKey;
+
+    return {
+      archiveFilter: isArchiveFilter(parsedValue.archiveFilter)
+        ? parsedValue.archiveFilter
+        : defaults.archiveFilter,
+      filters: nextFilters,
+      advancedFiltersOpen:
+        typeof parsedValue.advancedFiltersOpen === "boolean"
+          ? parsedValue.advancedFiltersOpen
+          : defaults.advancedFiltersOpen,
+      sortKey: nextSortKey,
+      currentPage:
+        typeof parsedValue.currentPage === "number" &&
+        Number.isFinite(parsedValue.currentPage) &&
+        parsedValue.currentPage > 0
+          ? Math.floor(parsedValue.currentPage)
+          : defaults.currentPage,
+    };
+  } catch {
+    return defaults;
+  }
+};
+
+const writeStoredProfessorManagementState = (
+  state: {
+    archiveFilter: ArchiveFilter;
+    filters: ProfessorManagementFilterState;
+    advancedFiltersOpen: boolean;
+    sortKey: ProfessorManagementSortKey;
+    currentPage: number;
+  },
+) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.sessionStorage.setItem(
+      PROFESSORS_FILTERS_STORAGE_KEY,
+      JSON.stringify(state),
+    );
+  } catch {
+    // 缓存丢失不影响页面使用。
+  }
 };
 
 const emptyProfessorForm = (): ProfessorFormState => ({
@@ -153,8 +265,6 @@ const toProfessorPayload = (
 
 const fieldLabelClassName =
   "mb-2 inline-flex items-center gap-1 text-sm font-medium text-stone-800";
-const filterFieldLabelClassName =
-  "h-5 text-sm font-medium leading-5 text-stone-800";
 const inputClassName =
   "w-full rounded-2xl border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-700 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15";
 
@@ -177,12 +287,6 @@ const triggerDownload = (url: string) => {
 
 const getActionErrorMessage = (error: unknown, fallback: string) =>
   error instanceof Error ? error.message : fallback;
-
-const getSchoolPairValue = (professor: ProfessorManagementItemDTO) =>
-  `${professor.university ?? ""}\t${professor.school ?? ""}`;
-
-const getSchoolPairLabel = (professor: ProfessorManagementItemDTO) =>
-  [professor.university, professor.school].filter(Boolean).join(" / ");
 
 const intakeActionToneClassNames: Record<IntakeActionTone, string> = {
   primary:
@@ -304,16 +408,26 @@ export const ProfessorsPage = () => {
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const { selectedLlmProfileId } = useSelectionContext();
   const { notifyError, notifySuccess, notifyWarning } = useNotification();
-  const [archiveFilter, setArchiveFilter] = useState<ArchiveFilter>("active");
+  const storedState = useMemo(
+    () => readStoredProfessorManagementState(),
+    [],
+  );
+  const [archiveFilter, setArchiveFilter] = useState<ArchiveFilter>(
+    storedState.archiveFilter,
+  );
   const [professors, setProfessors] = useState<ProfessorManagementItemDTO[]>(
     [],
   );
-  const [keyword, setKeyword] = useState("");
-  const [titleFilter, setTitleFilter] = useState(ALL_PROFESSOR_FILTER_VALUE);
-  const [schoolPairFilter, setSchoolPairFilter] = useState(
-    ALL_PROFESSOR_FILTER_VALUE,
+  const [filters, setFilters] = useState<ProfessorManagementFilterState>(
+    storedState.filters,
   );
-  const [currentPage, setCurrentPage] = useState(1);
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(
+    storedState.advancedFiltersOpen,
+  );
+  const [sortKey, setSortKey] = useState<ProfessorManagementSortKey>(
+    storedState.sortKey,
+  );
+  const [currentPage, setCurrentPage] = useState(storedState.currentPage);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(false);
   const [upsertModalOpen, setUpsertModalOpen] = useState(false);
@@ -364,95 +478,89 @@ export const ProfessorsPage = () => {
     void loadProfessors();
   }, [loadProfessors]);
 
-  const titleOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          professors
-            .flatMap((professor) => extractProfessorTitleTags(professor.title))
-            .filter((title): title is string => Boolean(title)),
-        ),
-      ).sort((first, second) => first.localeCompare(second)),
-    [professors],
-  );
-
-  const schoolPairOptions = useMemo(() => {
-    const pairMap = new Map<string, string>();
-    professors.forEach((professor) => {
-      const label = getSchoolPairLabel(professor);
-      if (!label) {
-        return;
-      }
-      pairMap.set(getSchoolPairValue(professor), label);
-    });
-    return Array.from(pairMap.entries())
-      .map(([value, label]) => ({ value, label }))
-      .sort((first, second) => first.label.localeCompare(second.label));
+  useEffect(() => {
+    if (professors.length === 0) {
+      return;
+    }
+    setFilters((previous) => pruneManagementFilters(professors, previous));
   }, [professors]);
 
-  const hasAdvancedFilters =
-    titleFilter !== ALL_PROFESSOR_FILTER_VALUE ||
-    schoolPairFilter !== ALL_PROFESSOR_FILTER_VALUE;
-
-  const filteredProfessors = useMemo(() => {
-    const query = keyword.trim().toLowerCase();
-    return professors.filter((professor) => {
-      const textMatched =
-        !query ||
-        [
-          professor.name,
-          professor.email,
-          professor.university,
-          professor.school,
-          professor.department,
-          professor.research_direction,
-        ]
-          .filter(Boolean)
-          .some((value) => value?.toLowerCase().includes(query));
-      const titleMatched =
-        titleFilter === ALL_PROFESSOR_FILTER_VALUE ||
-        matchesProfessorTitleTag(professor.title, titleFilter);
-      const schoolPairMatched =
-        schoolPairFilter === ALL_PROFESSOR_FILTER_VALUE ||
-        getSchoolPairValue(professor) === schoolPairFilter;
-
-      return textMatched && titleMatched && schoolPairMatched;
+  useEffect(() => {
+    writeStoredProfessorManagementState({
+      archiveFilter,
+      filters,
+      advancedFiltersOpen,
+      sortKey,
+      currentPage,
     });
-  }, [keyword, professors, schoolPairFilter, titleFilter]);
+  }, [archiveFilter, advancedFiltersOpen, currentPage, filters, sortKey]);
 
-  const resetAdvancedFilters = () => {
-    setTitleFilter(ALL_PROFESSOR_FILTER_VALUE);
-    setSchoolPairFilter(ALL_PROFESSOR_FILTER_VALUE);
+  const filterOptions = useMemo(
+    () => buildManagementFilterOptions(professors, { universities: filters.universities }),
+    [filters.universities, professors],
+  );
+  const activeAdvancedFilterCount =
+    getActiveManagementAdvancedFilterCount(filters);
+  const filteredProfessors = useMemo(
+    () => filterManagementProfessors(professors, filters),
+    [filters, professors],
+  );
+  const visibleProfessors = useMemo(
+    () => sortManagementProfessors(filteredProfessors, sortKey),
+    [filteredProfessors, sortKey],
+  );
+
+  const updateFilters = (nextFilters: Partial<ProfessorManagementFilterState>) => {
+    setCurrentPage(1);
+    setFilters((previous) => ({ ...previous, ...nextFilters }));
   };
 
-  useEffect(() => {
+  const toggleFilterValue = (
+    key: "universities" | "schools" | "departments" | "titles",
+    value: string,
+  ) => {
     setCurrentPage(1);
-  }, [archiveFilter, keyword, schoolPairFilter, titleFilter]);
+    setFilters((previous) => {
+      const currentValues = previous[key];
+      const nextValues = currentValues.includes(value)
+        ? currentValues.filter((item) => item !== value)
+        : [...currentValues, value];
 
-  useEffect(() => {
-    if (
-      titleFilter !== ALL_PROFESSOR_FILTER_VALUE &&
-      !titleOptions.includes(titleFilter)
-    ) {
-      setTitleFilter(ALL_PROFESSOR_FILTER_VALUE);
-    }
-  }, [titleFilter, titleOptions]);
+      if (key === "universities") {
+        const nextFilters = {
+          ...previous,
+          universities: nextValues,
+        };
+        return pruneManagementFilters(professors, nextFilters);
+      }
 
-  useEffect(() => {
-    if (
-      schoolPairFilter !== ALL_PROFESSOR_FILTER_VALUE &&
-      !schoolPairOptions.some((option) => option.value === schoolPairFilter)
-    ) {
-      setSchoolPairFilter(ALL_PROFESSOR_FILTER_VALUE);
-    }
-  }, [schoolPairFilter, schoolPairOptions]);
+      return { ...previous, [key]: nextValues };
+    });
+  };
+
+  const clearAdvancedFilters = () => {
+    setCurrentPage(1);
+    setFilters((previous) => ({
+      ...previous,
+      universities: [],
+      schools: [],
+      departments: [],
+      titles: [],
+    }));
+  };
+
+  const resetAllFilters = () => {
+    setCurrentPage(1);
+    setFilters(createDefaultManagementFilters());
+    setSortKey("latest");
+  };
 
   const totalPages = Math.max(
     1,
-    Math.ceil(filteredProfessors.length / PROFESSORS_PER_PAGE),
+    Math.ceil(visibleProfessors.length / PROFESSORS_PER_PAGE),
   );
   const safeCurrentPage = Math.min(currentPage, totalPages);
-  const paginatedProfessors = filteredProfessors.slice(
+  const paginatedProfessors = visibleProfessors.slice(
     (safeCurrentPage - 1) * PROFESSORS_PER_PAGE,
     safeCurrentPage * PROFESSORS_PER_PAGE,
   );
@@ -462,7 +570,7 @@ export const ProfessorsPage = () => {
     }
     return !professor.archived_at;
   };
-  const filteredSelectableIds = filteredProfessors
+  const filteredSelectableIds = visibleProfessors
     .filter(isProfessorSelectable)
     .map((professor) => professor.id);
   const filteredSelectedCount = filteredSelectableIds.filter((id) =>
@@ -873,6 +981,7 @@ export const ProfessorsPage = () => {
                   type="button"
                   onClick={() => {
                     setArchiveFilter(item);
+                    setCurrentPage(1);
                     setSelectedIds(new Set());
                   }}
                   className={clsx(
@@ -889,110 +998,130 @@ export const ProfessorsPage = () => {
           </div>
 
           <div className="grid gap-3">
-            <div data-testid="professor-search-row" className="min-w-0">
-              <label className="flex min-h-12 w-full min-w-0 items-center gap-3 rounded-3xl border border-stone-200 bg-white px-4 py-3 shadow-sm">
-                <Search className="h-4 w-4 shrink-0 text-stone-400" />
-                <input
-                  value={keyword}
-                  onChange={(event) => setKeyword(event.target.value)}
-                  placeholder="搜索姓名、邮箱、学校、院系或研究方向"
-                  className="w-full min-w-0 bg-transparent text-sm text-stone-700 outline-none placeholder:text-stone-400"
-                />
-              </label>
-            </div>
-
             <div
-              data-testid="professor-filter-row"
-              className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between"
+              data-testid="professor-filter-toolbar"
+              className="grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(12rem,1fr)_auto_auto] lg:items-stretch"
             >
-              <div className="grid min-w-0 flex-1 items-start gap-3 sm:grid-cols-[minmax(11rem,0.65fr)_minmax(15rem,1fr)_auto]">
-                <div className="grid gap-2">
-                  <div
-                    data-testid="professor-title-filter-label"
-                    className={filterFieldLabelClassName}
-                  >
-                    职称 / 导师资格
-                  </div>
-                  <NativeSelectField
-                    ariaLabel="职称筛选"
-                    value={titleFilter}
-                    onChange={(event) => setTitleFilter(event.target.value)}
-                    shellClassName="min-h-[3.1rem] rounded-3xl bg-white shadow-sm"
-                  >
-                    <option value={ALL_PROFESSOR_FILTER_VALUE}>
-                      全部职称 / 导师资格
-                    </option>
-                    {titleOptions.map((title) => (
-                      <option key={title} value={title}>
-                        {title}
-                      </option>
-                    ))}
-                  </NativeSelectField>
+              <label className="flex min-w-0 items-center gap-3 rounded-2xl border border-stone-200 bg-white px-4 py-2.5 text-sm text-stone-600 shadow-sm">
+                <div className="shrink-0 font-medium leading-5 text-stone-800">
+                  关键词
                 </div>
-
-                <div className="grid gap-2">
-                  <div
-                    data-testid="professor-school-filter-label"
-                    className={filterFieldLabelClassName}
-                  >
-                    学校 / 学院
-                  </div>
-                  <NativeSelectField
-                    ariaLabel="学校学院筛选"
-                    value={schoolPairFilter}
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <Search className="h-4 w-4 shrink-0 text-stone-400" />
+                  <input
+                    value={filters.keyword}
                     onChange={(event) =>
-                      setSchoolPairFilter(event.target.value)
+                      updateFilters({ keyword: event.target.value })
                     }
-                    shellClassName="min-h-[3.1rem] rounded-3xl bg-white shadow-sm"
-                  >
-                    <option value={ALL_PROFESSOR_FILTER_VALUE}>
-                      全部学校 / 学院
-                    </option>
-                    {schoolPairOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </NativeSelectField>
+                    placeholder="姓名、邮箱、学校、学院、系所、职称、研究方向"
+                    className="w-full min-w-0 bg-transparent leading-5 outline-none placeholder:text-stone-400"
+                  />
                 </div>
+              </label>
 
-                <div className="grid gap-2">
-                  <div
-                    data-testid="professor-reset-filter-label"
-                    className={filterFieldLabelClassName}
-                  >
-                    操作
+              <div className="flex min-w-0 items-center gap-3 rounded-2xl border border-stone-200 bg-white px-4 py-2.5 text-sm text-stone-600 shadow-sm">
+                <div className="shrink-0 font-medium leading-5 text-stone-800">
+                  排序
+                </div>
+                <NativeSelectField
+                  ariaLabel="排序"
+                  value={sortKey}
+                  onChange={(event) => {
+                    setCurrentPage(1);
+                    setSortKey(
+                      event.target.value as ProfessorManagementSortKey,
+                    );
+                  }}
+                  wrapperClassName="min-w-0 flex-1"
+                  shellClassName="!min-h-0 h-8 border-0 bg-stone-50 px-3 py-0 shadow-none"
+                >
+                  {PROFESSOR_MANAGEMENT_SORT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </NativeSelectField>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setAdvancedFiltersOpen((previous) => !previous)}
+                className={clsx(
+                  "ui-btn-secondary h-full justify-center whitespace-nowrap",
+                  advancedFiltersOpen &&
+                    "border-primary/30 bg-primary/5 text-primary",
+                )}
+              >
+                高级筛选
+                {activeAdvancedFilterCount > 0
+                  ? ` ${activeAdvancedFilterCount}`
+                  : ""}
+              </button>
+
+              <button
+                type="button"
+                onClick={resetAllFilters}
+                className="ui-btn-secondary h-full justify-center whitespace-nowrap"
+              >
+                重置
+              </button>
+            </div>
+
+            {advancedFiltersOpen ? (
+              <div className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <div className="text-sm font-semibold text-stone-800">
+                    高级筛选
                   </div>
                   <button
                     type="button"
-                    onClick={resetAdvancedFilters}
-                    disabled={!hasAdvancedFilters}
-                    className="ui-select-shell min-h-[3.1rem] w-full justify-center rounded-3xl bg-white font-medium shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={clearAdvancedFilters}
+                    className="ui-btn-secondary px-3 py-1.5 text-sm"
                   >
-                    <RefreshCcw className="h-4 w-4" />
-                    重置筛选
+                    清空高级筛选
                   </button>
                 </div>
-              </div>
 
-              <div className="grid gap-2 lg:justify-end">
-                <div
-                  aria-hidden="true"
-                  data-testid="professor-toolbar-spacer"
-                  className={filterFieldLabelClassName}
-                />
-                <div className="flex flex-wrap items-center gap-3 lg:justify-end">
-                  <button
-                    type="button"
-                    onClick={() => void loadProfessors()}
-                    className="ui-btn-secondary h-10 rounded-2xl"
-                  >
-                    <RefreshCcw className="h-4 w-4" />
-                    刷新
-                  </button>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <MultiSelectFilter
+                    label="学校"
+                    allLabel="全部学校"
+                    selectedValues={filters.universities}
+                    options={filterOptions.universities}
+                    onToggle={(value) =>
+                      toggleFilterValue("universities", value)
+                    }
+                    onClear={() => updateFilters({ universities: [] })}
+                  />
+                  <MultiSelectFilter
+                    label="学院"
+                    allLabel="全部学院"
+                    selectedValues={filters.schools}
+                    options={filterOptions.schools}
+                    onToggle={(value) => toggleFilterValue("schools", value)}
+                    onClear={() => updateFilters({ schools: [] })}
+                  />
+                  <MultiSelectFilter
+                    label="系所"
+                    allLabel="全部系所"
+                    selectedValues={filters.departments}
+                    options={filterOptions.departments}
+                    onToggle={(value) =>
+                      toggleFilterValue("departments", value)
+                    }
+                    onClear={() => updateFilters({ departments: [] })}
+                  />
+                  <MultiSelectFilter
+                    label="职称 / 导师资格"
+                    allLabel="全部职称 / 导师资格"
+                    selectedValues={filters.titles}
+                    options={filterOptions.titles}
+                    onToggle={(value) => toggleFilterValue("titles", value)}
+                    onClear={() => updateFilters({ titles: [] })}
+                  />
                 </div>
               </div>
-            </div>
+            ) : null}
           </div>
         </div>
       </section>
@@ -1000,7 +1129,7 @@ export const ProfessorsPage = () => {
       <section className="mt-6 overflow-hidden rounded-[32px] border border-stone-200 bg-white shadow-sm">
         <div className="flex flex-col gap-3 border-b border-stone-100 px-6 py-4">
           <div className="text-sm text-stone-600">
-            共 {filteredProfessors.length} 位符合筛选条件，当前第 {safeCurrentPage} / {totalPages} 页，每页最多 {PROFESSORS_PER_PAGE} 位
+            共 {visibleProfessors.length} 位符合筛选条件，当前第 {safeCurrentPage} / {totalPages} 页，每页最多 {PROFESSORS_PER_PAGE} 位
           </div>
           {filteredSelectableIds.length > 0 ? (
             <button
@@ -1080,7 +1209,7 @@ export const ProfessorsPage = () => {
             <Loader2 className="h-4 w-4 animate-spin" />
             正在加载导师列表...
           </div>
-        ) : filteredProfessors.length === 0 ? (
+        ) : visibleProfessors.length === 0 ? (
           <div className="px-6 py-16 text-center">
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-stone-100 text-stone-400">
               <Users className="h-6 w-6" />
@@ -1210,10 +1339,10 @@ export const ProfessorsPage = () => {
           </div>
         )}
 
-        {!loading && filteredProfessors.length > 0 ? (
+        {!loading && visibleProfessors.length > 0 ? (
           <div className="flex flex-col gap-3 border-t border-stone-100 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-sm text-stone-500">
-              共 {filteredProfessors.length} 位符合筛选条件，当前第 {safeCurrentPage} / {totalPages} 页，已选中 {selectedIds.size} 位
+              共 {visibleProfessors.length} 位符合筛选条件，当前第 {safeCurrentPage} / {totalPages} 页，已选中 {selectedIds.size} 位
             </div>
             <div className="flex items-center gap-2">
               <button
