@@ -1,4 +1,4 @@
-# 发送日期占位符实施计划
+﻿# 发送日期占位符实施计划
 
 关联设计文档：
 
@@ -8,7 +8,7 @@
 
 - 新增 `{{year}}`、`{{month}}`、`{{day}}` 三个模板占位符。
 - 前端只负责插入和展示 token。
-- 后端在最终发送前按北京时间 `Asia/Shanghai` 计算实际发送日并渲染 token。
+- 后端在最终发送前按本地时区 计算实际发送日并渲染 token。
 
 ## 1. 改动范围
 
@@ -91,31 +91,36 @@
 支持 {{name}}、{{university}}、{{sender_name}}、{{year}}、{{month}}、{{day}} 等占位符。
 ```
 
-### 2.3 新增北京时间日期上下文工具
+### 2.3 新增本地时区日期上下文工具
 
 文件：`backend/app/services/outreach_templates.py`
 
 操作：
 
-1. 引入 `datetime` 和 `ZoneInfo`。
-2. 定义北京时间常量：
+1. 引入 `datetime` 和 `tzinfo`。
+2. 使用运行环境本地时区作为默认时区：
 
 ```python
-BEIJING_TIMEZONE = ZoneInfo("Asia/Shanghai")
+local_timezone = datetime.now().astimezone().tzinfo
 ```
 
 3. 新增函数：
 
 ```python
-def build_send_date_context(now: datetime | None = None) -> dict[str, str]:
-    current = now or datetime.now(BEIJING_TIMEZONE)
+def build_send_date_context(
+    now: datetime | None = None,
+    *,
+    local_timezone: tzinfo | None = None,
+) -> dict[str, str]:
+    local_timezone = local_timezone or datetime.now().astimezone().tzinfo
+    current = now or datetime.now(local_timezone)
     if current.tzinfo is None:
-        current = current.replace(tzinfo=BEIJING_TIMEZONE)
-    beijing_now = current.astimezone(BEIJING_TIMEZONE)
+        current = current.replace(tzinfo=local_timezone)
+    local_now = current.astimezone(local_timezone)
     return {
-        "year": str(beijing_now.year),
-        "month": str(beijing_now.month),
-        "day": str(beijing_now.day),
+        "year": str(local_now.year),
+        "month": str(local_now.month),
+        "day": str(local_now.day),
     }
 ```
 
@@ -133,9 +138,9 @@ def build_send_date_context(now: datetime | None = None) -> dict[str, str]:
 1. 在 `PLACEHOLDER_HELP_TEXT` 中加入：
 
 ```python
-"year": "北京时间发送年份",
-"month": "北京时间发送月份",
-"day": "北京时间发送日期",
+"year": "本地发送年份",
+"month": "本地发送月份",
+"day": "本地发送日期",
 ```
 
 2. 让 `build_template_context(identity, professor)` 继续负责导师和身份字段，并把 `year/month/day` 设为原始 token，避免早期渲染阶段把日期占位符清空。
@@ -186,7 +191,7 @@ def build_test_compose_send_template_context(
 目标：
 
 - 最终发送当天才替换 `{{year}}`、`{{month}}`、`{{day}}`。
-- 定时任务跨天发送时使用真实发送时刻的北京时间日期。
+- 定时任务跨天发送时使用真实发送时刻的本地时区日期。
 
 ### 2.6 调整测试发信渲染路径
 
@@ -200,7 +205,7 @@ def build_test_compose_send_template_context(
 
 目标：
 
-- 测试发送按触发发送时的北京时间渲染日期。
+- 测试发送按触发发送时的本地时区渲染日期。
 
 ### 2.7 保护早期生成阶段不固化日期
 
@@ -249,7 +254,7 @@ def build_test_compose_send_template_context(
 覆盖点：
 
 1. 固定 UTC 时间 `2026-05-19 16:30:00Z`，发送日期上下文为 `2026`、`5`、`20`。
-2. `{{year}}年{{month}}月{{day}}日` 渲染为不补零北京时间日期。
+2. `{{year}}年{{month}}月{{day}}日` 渲染为不补零本地时区日期。
 3. 基础模板上下文不应在早期阶段强制固化发送日期。
 4. AI 改写前的模板渲染对日期 token 不应破坏最终发送语义。
 
@@ -261,7 +266,7 @@ def build_test_compose_send_template_context(
 
 覆盖点：
 
-1. 直接套用模板任务最终发送时，日期占位符被替换为北京时间发送日。
+1. 直接套用模板任务最终发送时，日期占位符被替换为本地发送日。
 2. 手动发送或测试发送路径能渲染日期占位符。
 3. 使用跨 UTC 日期边界的固定时间，防止误用 UTC 日期。
 
@@ -319,15 +324,15 @@ cd frontend && npm run build
 
 2. 触发测试发送或手动发送。
 3. 检查已发送邮件内容。
-4. 确认日期为北京时间实际发送日，月份和日期不补零。
+4. 确认日期为本地发送日，月份和日期不补零。
 
 ### 跨日验收
 
 如果可通过测试注入固定时间，应覆盖：
 
-- UTC：`2026-05-19 16:30:00Z`
-- 北京时间：`2026-05-20 00:30:00+08:00`
-- 期望渲染：`2026年5月20日`
+- UTC：`2026-05-20 06:30:00Z`
+- 本地时区：`UTC-07:00`
+- 期望渲染：`2026年5月19日`
 
 ## 6. 风险与处理
 
@@ -347,12 +352,12 @@ cd frontend && npm run build
 
 表现：
 
-- 北京时间凌晨发送时，日期显示为 UTC 前一天。
+- 本地时区凌晨发送时，日期显示为 UTC 前一天。
 
 处理：
 
-- 所有日期占位符统一通过 `ZoneInfo("Asia/Shanghai")` 派生。
-- 增加 UTC 到北京时间跨日测试。
+- 所有日期占位符统一通过 本地时区 派生。
+- 增加 UTC 到本地时区跨日测试。
 
 ### 风险 3：AI 改写吃掉日期 token
 
@@ -398,3 +403,4 @@ cd frontend && npm run build
 - 不改调度算法。
 - 不改数据库 schema。
 - 不重构模板编辑器。
+

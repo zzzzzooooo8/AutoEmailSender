@@ -1471,6 +1471,10 @@ class ApiEndpointTests(unittest.TestCase):
             from datetime import UTC, datetime
 
             mocked_datetime.now.return_value = datetime(2026, 5, 19, 16, 30, tzinfo=UTC)
+            expected_local_date = mocked_datetime.now.return_value.astimezone()
+            expected_date = (
+                f"{expected_local_date.year}年{expected_local_date.month}月{expected_local_date.day}日"
+            )
             response = self.client.post(
                 f"/api/email-tasks/{task_id}/approve-and-send",
                 json={
@@ -1485,10 +1489,10 @@ class ApiEndpointTests(unittest.TestCase):
         kwargs = mocked_send.await_args.kwargs
         self.assertEqual(kwargs["subject"], "申请与主题导师老师交流")
         self.assertIn("主题导师老师您好", kwargs["body_text"])
-        self.assertIn("发送日期：2026年5月20日", kwargs["body_text"])
+        self.assertIn(f"发送日期：{expected_date}", kwargs["body_text"])
         self.assertNotIn("{{name}}", kwargs["body_html"])
         self.assertNotIn("{{year}}", kwargs["body_html"])
-        self.assertIn("发送日期：2026年5月20日", kwargs["body_html"])
+        self.assertIn(f"发送日期：{expected_date}", kwargs["body_html"])
         self.assertEqual(response.json()["current_task"]["approved_subject"], "申请与{{name}}老师交流")
         self.assertIn("{{year}}年{{month}}月{{day}}日", response.json()["current_task"]["approved_body_text"])
 

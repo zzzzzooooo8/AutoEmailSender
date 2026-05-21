@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timezone, timedelta
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
@@ -210,17 +210,21 @@ class OutreachTemplateImportTests(unittest.TestCase):
         self.assertIn("我是王同学", rendered.body_text)
         self.assertIn("我是王同学", rendered.body_html)
 
-    def test_send_date_context_uses_beijing_date_without_zero_padding(self) -> None:
+    def test_send_date_context_uses_local_date_without_zero_padding(self) -> None:
         from app.services.outreach_templates import build_send_date_context
 
-        context = build_send_date_context(datetime(2026, 5, 19, 16, 30, tzinfo=UTC))
+        local_timezone = timezone(timedelta(hours=-7))
+        context = build_send_date_context(
+            datetime(2026, 5, 20, 6, 30, tzinfo=UTC),
+            local_timezone=local_timezone,
+        )
 
         self.assertEqual(
             context,
             {
                 "year": "2026",
                 "month": "5",
-                "day": "20",
+                "day": "19",
             },
         )
 
@@ -257,12 +261,13 @@ class OutreachTemplateImportTests(unittest.TestCase):
         send_context = build_send_template_context(
             identity,
             professor,
-            now=datetime(2026, 5, 19, 16, 30, tzinfo=UTC),
+            now=datetime(2026, 5, 20, 6, 30, tzinfo=UTC),
+            local_timezone=timezone(timedelta(hours=-7)),
         )
 
         self.assertEqual(
             render_template_with_context(rendered.body_text, send_context),
-            "李老师老师您好，发送日期：2026年5月20日。",
+            "李老师老师您好，发送日期：2026年5月19日。",
         )
 
 

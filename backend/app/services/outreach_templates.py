@@ -4,10 +4,9 @@ import io
 import re
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, tzinfo
 from html import escape
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
 
@@ -23,7 +22,6 @@ OUTREACH_GENERATION_MODE_LLM = "llm"
 OUTREACH_GENERATION_MODE_TEMPLATE = "template"
 TEST_RECIPIENT_NAME = "测试收件人"
 SUPPORTED_TEMPLATE_IMPORT_SUFFIXES = {".docx", ".html", ".htm", ".txt", ".md"}
-BEIJING_TIMEZONE = ZoneInfo("Asia/Shanghai")
 SEND_DATE_PLACEHOLDER_CONTEXT = {
     "year": "{{year}}",
     "month": "{{month}}",
@@ -39,9 +37,9 @@ PLACEHOLDER_HELP_TEXT = {
     "research_direction": "导师研究方向",
     "sender_name": "你的发件人姓名",
     "sender_email": "你的发件邮箱",
-    "year": "北京时间发送年份",
-    "month": "北京时间发送月份",
-    "day": "北京时间发送日期",
+    "year": "本地发送年份",
+    "month": "本地发送月份",
+    "day": "本地发送日期",
 }
 EMAIL_TEMPLATE_FONT_STACK = (
     "'Times New Roman','Songti SC','STSong','SimSun','Noto Serif SC',serif"
@@ -129,15 +127,20 @@ def build_test_compose_template_context(identity: IdentityProfile) -> dict[str, 
     }
 
 
-def build_send_date_context(now: datetime | None = None) -> dict[str, str]:
-    current = now or datetime.now(BEIJING_TIMEZONE)
+def build_send_date_context(
+    now: datetime | None = None,
+    *,
+    local_timezone: tzinfo | None = None,
+) -> dict[str, str]:
+    timezone = local_timezone or datetime.now().astimezone().tzinfo
+    current = now or datetime.now(timezone)
     if current.tzinfo is None:
-        current = current.replace(tzinfo=BEIJING_TIMEZONE)
-    beijing_now = current.astimezone(BEIJING_TIMEZONE)
+        current = current.replace(tzinfo=timezone)
+    local_now = current.astimezone(timezone)
     return {
-        "year": str(beijing_now.year),
-        "month": str(beijing_now.month),
-        "day": str(beijing_now.day),
+        "year": str(local_now.year),
+        "month": str(local_now.month),
+        "day": str(local_now.day),
     }
 
 
@@ -146,10 +149,11 @@ def build_send_template_context(
     professor: Professor,
     *,
     now: datetime | None = None,
+    local_timezone: tzinfo | None = None,
 ) -> dict[str, str]:
     return {
         **build_template_context(identity, professor),
-        **build_send_date_context(now),
+        **build_send_date_context(now, local_timezone=local_timezone),
     }
 
 
@@ -157,10 +161,11 @@ def build_test_compose_send_template_context(
     identity: IdentityProfile,
     *,
     now: datetime | None = None,
+    local_timezone: tzinfo | None = None,
 ) -> dict[str, str]:
     return {
         **build_test_compose_template_context(identity),
-        **build_send_date_context(now),
+        **build_send_date_context(now, local_timezone=local_timezone),
     }
 
 

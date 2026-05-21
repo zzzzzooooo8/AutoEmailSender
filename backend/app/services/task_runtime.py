@@ -1297,7 +1297,11 @@ async def dispatch_email_task(
         subject_template = task.approved_subject or task.generated_subject
         body_text_template = task.approved_body_text or task.generated_content_text
         body_html_template = task.approved_body_html or task.generated_content_html
-        context = build_send_template_context(task.identity, task.professor)
+        context = build_send_template_context(
+            task.identity,
+            task.professor,
+            local_timezone=datetime.now().astimezone().tzinfo,
+        )
         subject = render_template_with_context(subject_template, context).strip()
         body_text = render_template_with_context(body_text_template, context).strip()
         body_html = (
