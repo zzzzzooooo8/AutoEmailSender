@@ -90,6 +90,7 @@ EMAIL_DOT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 EMAIL_CHINESE_DOT_PATTERN = re.compile(r"(?<=[A-Za-z0-9])\s*点\s*(?=[A-Za-z0-9])")
+SPREADSHEET_FORMULA_PREFIXES = ("=", "+", "-", "@")
 TITLE_SPLIT_PATTERN = re.compile(r"[、，,/／|｜；;\s]+")
 ALLOWED_TITLES = (
     "教授",
@@ -309,7 +310,10 @@ def _professor_to_export_row(professor: Any) -> list[str]:
 def _export_cell(value: Any) -> str:
     if value is None:
         return ""
-    return str(value).strip()
+    text = str(value).strip()
+    if text.startswith(SPREADSHEET_FORMULA_PREFIXES):
+        return f"'{text}"
+    return text
 
 
 def parse_professor_import_file(filename: str, content: bytes) -> ParsedProfessorImport:

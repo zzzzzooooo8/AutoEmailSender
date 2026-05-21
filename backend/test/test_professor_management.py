@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import io
 import unittest
 
@@ -274,6 +275,39 @@ class ProfessorManagementServiceTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "仅支持 csv 或 xlsx 导出"):
             build_professor_export([], "json")
+
+    def test_build_professor_export_escapes_spreadsheet_formulas(self) -> None:
+        professor = Professor(
+            name="=cmd|' /C calc'!A0",
+            email="formula@example.edu",
+            title="+教授",
+            university="-示例大学",
+            school="@人工智能学院",
+            department="  =计算机科学系",
+            research_direction="大语言模型",
+            recent_papers=["=Paper A", "+Paper B", "Normal Paper"],
+            profile_url="https://example.edu/formula",
+            source_url=None,
+        )
+
+        csv_content, _, _ = build_professor_export([professor], "csv")
+        csv_rows = list(csv.reader(io.StringIO(csv_content.decode("utf-8-sig"))))
+        self.assertEqual(csv_rows[1][0], "'=cmd|' /C calc'!A0")
+        self.assertEqual(csv_rows[1][2], "'+教授")
+        self.assertEqual(csv_rows[1][3], "'-示例大学")
+        self.assertEqual(csv_rows[1][4], "'@人工智能学院")
+        self.assertEqual(csv_rows[1][5], "'=计算机科学系")
+        self.assertEqual(csv_rows[1][7], "'=Paper A|'+Paper B|Normal Paper")
+
+        xlsx_content, _, _ = build_professor_export([professor], "xlsx")
+        workbook = load_workbook(io.BytesIO(xlsx_content), read_only=True, data_only=True)
+        rows = list(workbook.active.iter_rows(values_only=True))
+        self.assertEqual(rows[1][0], "'=cmd|' /C calc'!A0")
+        self.assertEqual(rows[1][2], "'+教授")
+        self.assertEqual(rows[1][3], "'-示例大学")
+        self.assertEqual(rows[1][4], "'@人工智能学院")
+        self.assertEqual(rows[1][5], "'=计算机科学系")
+        self.assertEqual(rows[1][7], "'=Paper A|'+Paper B|Normal Paper")
 
 
 if __name__ == "__main__":
