@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import csv
 import io
 import unittest
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from pydantic import ValidationError
 
+from app.models import Professor
 from app.schemas.professor import ProfessorUpsertPayload
 from app.services.professor_management import (
     PROFESSOR_TEMPLATE_COLUMNS,
+    build_professor_export,
     build_professor_template,
     is_valid_professor_email,
     normalize_professor_email,
@@ -196,6 +199,115 @@ class ProfessorManagementServiceTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "仅支持 csv 或 xlsx 模板"):
             build_professor_template("json")
+
+    def test_build_professor_export_csv_can_be_imported_without_changes(self) -> None:
+        professor = Professor(
+            name="李伟",
+            email="li@example.edu",
+            title="教授",
+            university="示例大学",
+            school="人工智能学院",
+            department="计算机科学系",
+            research_direction="大语言模型",
+            recent_papers=["Paper A", "Paper B"],
+            profile_url="https://example.edu/li",
+            source_url=None,
+        )
+
+        content, media_type, filename = build_professor_export([professor], "csv")
+
+        self.assertEqual(media_type, "text/csv; charset=utf-8")
+        self.assertEqual(filename, "professors_export.csv")
+        self.assertTrue(content.startswith(b"\xef\xbb\xbf"))
+        decoded = content.decode("utf-8-sig")
+        self.assertIn(",".join(PROFESSOR_TEMPLATE_COLUMNS), decoded)
+        self.assertIn("Paper A|Paper B", decoded)
+        self.assertNotIn("None", decoded)
+        self.assertNotIn("null", decoded)
+
+        parsed = parse_professor_import_file(filename, content)
+        self.assertEqual(parsed.failed_count, 0)
+        self.assertEqual(parsed.data["li@example.edu"]["name"], "李伟")
+        self.assertEqual(parsed.data["li@example.edu"]["recent_papers"], ["Paper A", "Paper B"])
+
+    def test_build_professor_export_xlsx_can_be_imported_without_changes(self) -> None:
+        professor = Professor(
+            name="王芳",
+            email="wang@example.edu",
+            title="副教授",
+            university="样例大学",
+            school="生命科学学院",
+            department="生物信息系",
+            research_direction="计算生物学",
+            recent_papers=["Paper C"],
+            profile_url=None,
+            source_url="https://example.edu/faculty",
+        )
+
+        content, media_type, filename = build_professor_export([professor], "xlsx")
+
+        self.assertEqual(
+            media_type,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        self.assertEqual(filename, "professors_export.xlsx")
+        workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+        rows = list(workbook.active.iter_rows(values_only=True))
+        self.assertEqual(list(rows[0]), PROFESSOR_TEMPLATE_COLUMNS)
+        self.assertEqual(rows[1][0], "王芳")
+        self.assertEqual(rows[1][7], "Paper C")
+        self.assertIsNone(rows[1][8])
+
+        parsed = parse_professor_import_file(filename, content)
+        self.assertEqual(parsed.failed_count, 0)
+        self.assertEqual(parsed.data["wang@example.edu"]["source_url"], "https://example.edu/faculty")
+
+    def test_build_professor_export_empty_file_and_unknown_format(self) -> None:
+        csv_content, _, csv_filename = build_professor_export([], "csv")
+        parsed_csv = parse_professor_import_file(csv_filename, csv_content)
+        self.assertEqual(parsed_csv.failed_count, 0)
+        self.assertEqual(parsed_csv.data, {})
+
+        xlsx_content, _, xlsx_filename = build_professor_export([], "xlsx")
+        parsed_xlsx = parse_professor_import_file(xlsx_filename, xlsx_content)
+        self.assertEqual(parsed_xlsx.failed_count, 0)
+        self.assertEqual(parsed_xlsx.data, {})
+
+        with self.assertRaisesRegex(ValueError, "仅支持 csv 或 xlsx 导出"):
+            build_professor_export([], "json")
+
+    def test_build_professor_export_escapes_spreadsheet_formulas(self) -> None:
+        professor = Professor(
+            name="=cmd|' /C calc'!A0",
+            email="formula@example.edu",
+            title="+教授",
+            university="-示例大学",
+            school="@人工智能学院",
+            department="  =计算机科学系",
+            research_direction="大语言模型",
+            recent_papers=["=Paper A", "+Paper B", "Normal Paper"],
+            profile_url="https://example.edu/formula",
+            source_url=None,
+        )
+
+        csv_content, _, _ = build_professor_export([professor], "csv")
+        csv_rows = list(csv.reader(io.StringIO(csv_content.decode("utf-8-sig"))))
+        self.assertEqual(csv_rows[1][0], "'=cmd|' /C calc'!A0")
+        self.assertEqual(csv_rows[1][2], "'+教授")
+        self.assertEqual(csv_rows[1][3], "'-示例大学")
+        self.assertEqual(csv_rows[1][4], "'@人工智能学院")
+        self.assertEqual(csv_rows[1][5], "'=计算机科学系")
+        self.assertEqual(csv_rows[1][7], "'=Paper A|'+Paper B|Normal Paper")
+
+        xlsx_content, _, _ = build_professor_export([professor], "xlsx")
+        workbook = load_workbook(io.BytesIO(xlsx_content), read_only=True, data_only=True)
+        rows = list(workbook.active.iter_rows(values_only=True))
+        self.assertEqual(rows[1][0], "'=cmd|' /C calc'!A0")
+        self.assertEqual(rows[1][2], "'+教授")
+        self.assertEqual(rows[1][3], "'-示例大学")
+        self.assertEqual(rows[1][4], "'@人工智能学院")
+        self.assertEqual(rows[1][5], "'=计算机科学系")
+        self.assertEqual(rows[1][7], "'=Paper A|'+Paper B|Normal Paper")
 
 
 if __name__ == "__main__":

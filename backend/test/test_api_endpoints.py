@@ -861,6 +861,76 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(wang_professor["university"], "Updated University")
         self.assertEqual(wang_professor["recent_papers"], ["Paper 8", "Paper 9"])
 
+    def test_professor_export_downloads_active_records_that_can_be_reimported(self) -> None:
+        active = self.client.post(
+            "/api/professors",
+            json={
+                "name": "导出导师",
+                "email": "export@example.edu",
+                "title": "教授",
+                "university": "导出大学",
+                "school": "计算机学院",
+                "department": "人工智能系",
+                "research_direction": "智能体",
+                "recent_papers": ["Paper A", "Paper B"],
+                "profile_url": "https://example.edu/export",
+                "source_url": None,
+            },
+        )
+        self.assertEqual(active.status_code, 201, msg=active.text)
+        archived = self.client.post(
+            "/api/professors",
+            json={"name": "回收站导师", "email": "archived-export@example.edu"},
+        )
+        self.assertEqual(archived.status_code, 201, msg=archived.text)
+        self.client.post(f"/api/professors/{archived.json()['id']}/archive")
+
+        csv_export = self.client.get("/api/professors/export", params={"format": "csv"})
+        self.assertEqual(csv_export.status_code, 200, msg=csv_export.text)
+        self.assertEqual(csv_export.content[:3], b"\xef\xbb\xbf")
+        self.assertIn("text/csv", csv_export.headers["content-type"])
+        self.assertIn("professors_export.csv", csv_export.headers["content-disposition"])
+        decoded = csv_export.content.decode("utf-8-sig")
+        self.assertIn("export@example.edu", decoded)
+        self.assertIn("Paper A|Paper B", decoded)
+        self.assertNotIn("archived-export@example.edu", decoded)
+
+        csv_reimport = self.client.post(
+            "/api/professors/import-file",
+            files={"file": ("professors_export.csv", io.BytesIO(csv_export.content), "text/csv")},
+        )
+        self.assertEqual(csv_reimport.status_code, 200, msg=csv_reimport.text)
+        self.assertEqual(csv_reimport.json()["inserted_count"], 0)
+        self.assertEqual(csv_reimport.json()["updated_count"], 1)
+        self.assertEqual(csv_reimport.json()["failed_count"], 0)
+
+        xlsx_export = self.client.get("/api/professors/export", params={"format": "xlsx"})
+        self.assertEqual(xlsx_export.status_code, 200, msg=xlsx_export.text)
+        self.assertIn("professors_export.xlsx", xlsx_export.headers["content-disposition"])
+        workbook = load_workbook(io.BytesIO(xlsx_export.content), read_only=True, data_only=True)
+        rows = list(workbook.active.iter_rows(values_only=True))
+        self.assertEqual(rows[0][0], "name")
+        self.assertEqual(rows[1][1], "export@example.edu")
+
+        xlsx_reimport = self.client.post(
+            "/api/professors/import-file",
+            files={
+                "file": (
+                    "professors_export.xlsx",
+                    io.BytesIO(xlsx_export.content),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+            },
+        )
+        self.assertEqual(xlsx_reimport.status_code, 200, msg=xlsx_reimport.text)
+        self.assertEqual(xlsx_reimport.json()["inserted_count"], 0)
+        self.assertEqual(xlsx_reimport.json()["updated_count"], 1)
+        self.assertEqual(xlsx_reimport.json()["failed_count"], 0)
+
+        bad_format = self.client.get("/api/professors/export", params={"format": "json"})
+        self.assertEqual(bad_format.status_code, 400)
+        self.assertEqual(bad_format.json()["detail"], "仅支持 csv 或 xlsx 导出")
+
     def test_workspace_endpoint_without_existing_task_returns_empty_thread(self) -> None:
         identity_id = self._create_identity(with_imap=False)
         llm_id = self._create_llm()

@@ -21,6 +21,7 @@ from app.schemas.professor import (
 )
 from app.services.operation_logs import record_operation_log
 from app.services.professor_management import (
+    build_professor_export,
     build_professor_template,
     is_valid_professor_email,
     normalize_professor_payload,
@@ -128,6 +129,34 @@ async def download_professor_template(
 ) -> Response:
     try:
         content, media_type, filename = build_professor_template(format)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
+
+
+@router.get("/export")
+async def export_professors(
+    format: str = Query(default="xlsx"),
+    session: AsyncSession = Depends(get_async_session),
+) -> Response:
+    professors = list(
+        (
+            await session.execute(
+                select(Professor)
+                .where(Professor.archived_at.is_(None))
+                .order_by(Professor.updated_at.desc(), Professor.created_at.desc()),
+            )
+        ).scalars(),
+    )
+    try:
+        content, media_type, filename = build_professor_export(professors, format)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 

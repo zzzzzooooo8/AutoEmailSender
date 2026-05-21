@@ -7,6 +7,7 @@ import type { ProfessorManagementItemDTO } from "@/types";
 
 const mockedUseSelectionContext = vi.hoisted(() => vi.fn());
 const listProfessorsForManagement = vi.hoisted(() => vi.fn());
+const getProfessorExportDownloadUrl = vi.hoisted(() => vi.fn());
 
 vi.mock("@/context/SelectionContext", () => ({
   useSelectionContext: mockedUseSelectionContext,
@@ -17,6 +18,7 @@ vi.mock("@/lib/api/professorsApi", () => ({
   archiveProfessor: vi.fn(),
   bulkArchiveProfessors: vi.fn(),
   createProfessor: vi.fn(),
+  getProfessorExportDownloadUrl,
   getProfessorTemplateDownloadUrl: vi.fn(() => "/templates/professors.xlsx"),
   importProfessorsFromFile: vi.fn(),
   restoreProfessor: vi.fn(),
@@ -92,6 +94,10 @@ describe("ProfessorsPage layout", () => {
     });
     listProfessorsForManagement.mockReset();
     listProfessorsForManagement.mockResolvedValue([professor]);
+    getProfessorExportDownloadUrl.mockReset();
+    getProfessorExportDownloadUrl.mockImplementation(
+      (format: "xlsx" | "csv") => `/exports/professors.${format}`,
+    );
   });
 
   it("omits the low-value summary cards from the workbench header", async () => {
@@ -267,7 +273,9 @@ describe("ProfessorsPage layout", () => {
     const resetButton = screen.getByRole("button", { name: "重置筛选" });
     expect(resetButton).toHaveClass("ui-select-shell", "rounded-3xl");
     const intakePanel = screen.getByTestId("professor-intake-panel");
-    expect(within(intakePanel).getByText("导师录入方式")).toBeInTheDocument();
+    expect(intakePanel).toHaveClass("grid", "gap-3");
+    expect(intakePanel).not.toHaveClass("rounded-[30px]", "border", "shadow-sm");
+    expect(within(intakePanel).getByText("导师导入与导出方式")).toBeInTheDocument();
     expect(
       within(intakePanel).getByRole("heading", { name: "智能抓取" }),
     ).toBeInTheDocument();
@@ -287,16 +295,23 @@ describe("ProfessorsPage layout", () => {
     ].forEach((description) => {
       expect(within(intakePanel).queryByText(description)).not.toBeInTheDocument();
     });
-    ["智能抓取", "模板批量新增", "单个新增"].forEach((label) => {
+    ["智能抓取", "模板批量新增", "单个新增", "导出导师信息"].forEach((label) => {
       expect(within(intakePanel).getByTestId(`professor-intake-${label}`)).toHaveClass(
-        "rounded-[28px]",
+        "rounded-[24px]",
         "border",
-        "min-h-0",
+        "min-h-[7.5rem]",
       );
     });
     ["模板导入", "智能抓取", "新增导师"].forEach((name) => {
       expect(within(intakePanel).getByRole("button", { name })).toBeInTheDocument();
     });
+    expect(within(intakePanel).queryByText("导出全部正常导师，字段与导入模板一致。")).not.toBeInTheDocument();
+    expect(within(intakePanel).getByTestId("professor-intake-导出导师信息")).toHaveClass(
+      "border-emerald-200",
+    );
+    expect(within(intakePanel).getByRole("button", { name: "导出导师信息" })).toHaveClass(
+      "bg-emerald-600",
+    );
     expect(within(intakePanel).queryByRole("button", { name: "下载模板" })).not.toBeInTheDocument();
     expect(within(intakePanel).queryByRole("button", { name: "导入文件" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "刷新" })).toHaveClass("h-10", "rounded-2xl");
@@ -372,5 +387,39 @@ describe("ProfessorsPage layout", () => {
     expect(link).not.toHaveAttribute("target");
     expect(link).not.toHaveAttribute("rel");
     expect(click).toHaveBeenCalledTimes(1);
+    createElement.mockRestore();
+    click.mockRestore();
+  });
+
+  it("opens professor export dialog and downloads without opening a blank window", async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(listProfessorsForManagement).toHaveBeenCalledWith("active");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "导出导师信息" }));
+
+    expect(screen.getByRole("dialog", { name: "导出导师信息" })).toBeInTheDocument();
+    expect(screen.getByText("导出范围：全部正常导师，不包含回收站导师。")).toBeInTheDocument();
+    expect(
+      screen.getByText("当前搜索、筛选、分页和勾选状态不会影响导出结果。"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("字段顺序与导入模板一致，未修改即可重新导入系统。")).toBeInTheDocument();
+
+    const link = document.createElement("a");
+    const click = vi.spyOn(link, "click").mockImplementation(() => undefined);
+    const createElement = vi.spyOn(document, "createElement").mockReturnValue(link);
+
+    fireEvent.click(screen.getByRole("button", { name: "导出 XLSX" }));
+
+    expect(getProfessorExportDownloadUrl).toHaveBeenCalledWith("xlsx");
+    expect(createElement).toHaveBeenCalledWith("a");
+    expect(link).toHaveAttribute("href", "/exports/professors.xlsx");
+    expect(link).not.toHaveAttribute("target");
+    expect(link).not.toHaveAttribute("rel");
+    expect(click).toHaveBeenCalledTimes(1);
+    createElement.mockRestore();
+    click.mockRestore();
   });
 });
