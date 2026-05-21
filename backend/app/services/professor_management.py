@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+from collections.abc import Sequence
 from html import unescape
 import re
 from dataclasses import dataclass
@@ -250,6 +251,65 @@ def build_professor_template(format_name: str) -> tuple[bytes, str, str]:
         )
 
     raise ValueError("仅支持 csv 或 xlsx 模板")
+
+
+def build_professor_export(professors: Sequence[Any], format_name: str) -> tuple[bytes, str, str]:
+    normalized = format_name.lower()
+    rows = [_professor_to_export_row(professor) for professor in professors]
+    if normalized == "csv":
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(PROFESSOR_TEMPLATE_COLUMNS)
+        writer.writerows(rows)
+        content = buffer.getvalue().encode("utf-8-sig")
+        return content, "text/csv; charset=utf-8", "professors_export.csv"
+
+    if normalized == "xlsx":
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "Professors"
+        header_fill = PatternFill("solid", fgColor="E7E5E4")
+        sheet.append(PROFESSOR_TEMPLATE_COLUMNS)
+        for index, column in enumerate(PROFESSOR_TEMPLATE_COLUMNS, start=1):
+            cell = sheet.cell(row=1, column=index)
+            cell.value = column
+            cell.font = Font(bold=True)
+            cell.fill = header_fill
+            sheet.column_dimensions[chr(64 + index)].width = 22
+        for row in rows:
+            sheet.append(row)
+        sheet.freeze_panes = "A2"
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+        return (
+            buffer.getvalue(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "professors_export.xlsx",
+        )
+
+    raise ValueError("仅支持 csv 或 xlsx 导出")
+
+
+def _professor_to_export_row(professor: Any) -> list[str]:
+    recent_papers = getattr(professor, "recent_papers", None) or []
+    return [
+        _export_cell(getattr(professor, "name", None)),
+        _export_cell(getattr(professor, "email", None)),
+        _export_cell(getattr(professor, "title", None)),
+        _export_cell(getattr(professor, "university", None)),
+        _export_cell(getattr(professor, "school", None)),
+        _export_cell(getattr(professor, "department", None)),
+        _export_cell(getattr(professor, "research_direction", None)),
+        "|".join(_export_cell(item) for item in recent_papers if _export_cell(item)),
+        _export_cell(getattr(professor, "profile_url", None)),
+        _export_cell(getattr(professor, "source_url", None)),
+    ]
+
+
+def _export_cell(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
 
 
 def parse_professor_import_file(filename: str, content: bytes) -> ParsedProfessorImport:

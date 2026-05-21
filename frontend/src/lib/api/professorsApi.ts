@@ -82,3 +82,6 @@ export const importProfessorsFromFile = async (file: File) => {
 
 export const getProfessorTemplateDownloadUrl = (format: 'xlsx' | 'csv') =>
   buildApiUrl('/api/professors/template', { format });
+
+export const getProfessorExportDownloadUrl = (format: 'xlsx' | 'csv') =>
+  buildApiUrl('/api/professors/export', { format });
