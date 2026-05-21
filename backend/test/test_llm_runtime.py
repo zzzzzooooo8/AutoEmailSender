@@ -924,6 +924,59 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(payload["input"]["source_blocks"][0]["locked"])
         self.assertTrue(payload["input"]["source_blocks"][1]["locked"])
 
+    def test_draft_rewrite_prompts_preserve_user_written_dates(self) -> None:
+        from app.models import IdentityMaterial, IdentityProfile, Professor
+        from app.services.outreach_templates import build_template_context
+        from app.services.template_draft_rewrite import build_draft_rewrite_document
+
+        identity = IdentityProfile(
+            id=1,
+            name="张三",
+            email_address="sender@example.com",
+            smtp_host="smtp.example.com",
+            smtp_port=465,
+            smtp_username="sender@example.com",
+            smtp_password="secret",
+            default_language="zh-CN",
+            outreach_generation_mode="llm",
+        )
+        primary_material = IdentityMaterial(
+            id=12,
+            identity_id=1,
+            display_name="简历",
+            file_path="data/materials/resume.txt",
+            original_filename="resume.txt",
+            material_type="resume",
+            extracted_text="我做过信息抽取与智能体相关研究。",
+        )
+        professor = Professor(
+            id=1,
+            name="李老师",
+            email="prof@example.edu",
+            research_direction="Information Extraction",
+        )
+        document = build_draft_rewrite_document(
+            "<p>我关注到您 2024 年发表的论文。</p><p>2026年5月21日</p>",
+            build_template_context(identity, professor),
+        )
+
+        prompt = build_draft_rewrite_prompt(
+            identity=identity,
+            primary_material=primary_material,
+            professor=professor,
+            available_materials=[primary_material],
+            subject_template="申请与{{name}}老师交流",
+            source_blocks=document.blocks,
+            current_match=None,
+            rewrite_preferences=DraftRewritePreferences(),
+        )
+        payload = json.loads(prompt)
+
+        self.assertIn("日期", SYSTEM_DRAFT_REWRITE_PROMPT)
+        self.assertIn("不要新增日期", SYSTEM_DRAFT_REWRITE_PROMPT)
+        self.assertIn("不要修改或删除用户已写的日期", "\n".join(payload["instructions"]))
+        self.assertIn("不要新增日期", "\n".join(payload["instructions"]))
+
     def test_build_draft_rewrite_prompt_omits_empty_professor_fields(self) -> None:
         from app.models import IdentityMaterial, IdentityProfile, Professor
         from app.services.template_draft_rewrite import build_draft_rewrite_document
