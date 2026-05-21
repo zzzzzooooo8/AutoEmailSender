@@ -120,6 +120,33 @@ class TemplateDraftRewriteTests(unittest.TestCase):
         self.assertTrue(document.blocks[0].locked)
         self.assertFalse(document.blocks[1].locked)
 
+    def test_build_draft_rewrite_document_preserves_send_date_tokens(self) -> None:
+        identity = IdentityProfile(
+            id=1,
+            name="张三",
+            profile_name="张三",
+            sender_name="张三",
+            email_address="sender@example.com",
+            smtp_host="smtp.example.com",
+            smtp_port=465,
+            smtp_username="sender@example.com",
+            smtp_password="secret",
+            default_language="zh-CN",
+            outreach_generation_mode="llm",
+        )
+        professor = Professor(
+            id=1,
+            name="李老师",
+            email="prof@example.edu",
+            research_direction="Agent",
+        )
+
+        document = build_draft_rewrite_document(
+            "<p>{{year}}年{{month}}月{{day}}日</p>",
+            build_template_context(identity, professor),
+        )
+
+        self.assertEqual(document.blocks[0].text, "{{year}}年{{month}}月{{day}}日")
 
     def test_select_dominant_font_and_size_uses_visible_char_count(self) -> None:
         html = (

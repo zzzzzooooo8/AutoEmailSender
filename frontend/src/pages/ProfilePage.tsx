@@ -139,6 +139,9 @@ const TEMPLATE_PLACEHOLDERS = [
   ["{{research_direction}}", "导师研究方向"],
   ["{{sender_name}}", "你的发件人姓名"],
   ["{{sender_email}}", "你的发件邮箱"],
+  ["{{year}}", "本地发送年份"],
+  ["{{month}}", "本地发送月份"],
+  ["{{day}}", "本地发送日期"],
 ] as const;
 
 const PROFILE_SETUP_STAGES = [

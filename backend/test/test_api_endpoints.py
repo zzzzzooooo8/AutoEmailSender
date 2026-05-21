@@ -1465,13 +1465,22 @@ class ApiEndpointTests(unittest.TestCase):
         with patch(
             "app.services.task_runtime.mail_runtime.send_email",
             AsyncMock(return_value=self._build_send_result(message_id="<subject-render@example.com>", provider_payload={})),
-        ) as mocked_send:
+        ) as mocked_send, patch(
+            "app.services.outreach_templates.datetime",
+        ) as mocked_datetime:
+            from datetime import UTC, datetime
+
+            mocked_datetime.now.return_value = datetime(2026, 5, 19, 16, 30, tzinfo=UTC)
+            expected_local_date = mocked_datetime.now.return_value.astimezone()
+            expected_date = (
+                f"{expected_local_date.year}年{expected_local_date.month}月{expected_local_date.day}日"
+            )
             response = self.client.post(
                 f"/api/email-tasks/{task_id}/approve-and-send",
                 json={
                     "subject": "申请与{{name}}老师交流",
-                    "body_text": "{{name}}老师您好，我是{{sender_name}}。",
-                    "body_html": "<p>{{name}}老师您好，我是{{sender_name}}。</p>",
+                    "body_text": "{{name}}老师您好，我是{{sender_name}}。发送日期：{{year}}年{{month}}月{{day}}日。",
+                    "body_html": "<p>{{name}}老师您好，我是{{sender_name}}。发送日期：{{year}}年{{month}}月{{day}}日。</p>",
                     "selected_material_ids": [],
                 },
             )
@@ -1480,8 +1489,12 @@ class ApiEndpointTests(unittest.TestCase):
         kwargs = mocked_send.await_args.kwargs
         self.assertEqual(kwargs["subject"], "申请与主题导师老师交流")
         self.assertIn("主题导师老师您好", kwargs["body_text"])
+        self.assertIn(f"发送日期：{expected_date}", kwargs["body_text"])
         self.assertNotIn("{{name}}", kwargs["body_html"])
+        self.assertNotIn("{{year}}", kwargs["body_html"])
+        self.assertIn(f"发送日期：{expected_date}", kwargs["body_html"])
         self.assertEqual(response.json()["current_task"]["approved_subject"], "申请与{{name}}老师交流")
+        self.assertIn("{{year}}年{{month}}月{{day}}日", response.json()["current_task"]["approved_body_text"])
 
     def test_approve_draft_snapshots_content_without_immediate_send(self) -> None:
         identity_id = self._create_identity(with_imap=False)
