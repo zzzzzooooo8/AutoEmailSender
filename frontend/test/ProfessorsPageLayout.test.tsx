@@ -87,6 +87,7 @@ const expectToAppearBefore = (first: HTMLElement, second: HTMLElement) => {
 describe("ProfessorsPage layout", () => {
   beforeEach(() => {
     localStorage.clear();
+    sessionStorage.clear();
     mockedUseSelectionContext.mockReset();
     mockedUseSelectionContext.mockReturnValue({
       identities: [],
@@ -256,7 +257,7 @@ describe("ProfessorsPage layout", () => {
     });
   });
 
-  it("filters professors by title and school pair from the management toolbar", async () => {
+  it("filters professors by title and school from the advanced filter panel", async () => {
     listProfessorsForManagement.mockResolvedValue([professor, anotherProfessor]);
     renderPage();
 
@@ -264,13 +265,16 @@ describe("ProfessorsPage layout", () => {
       expect(listProfessorsForManagement).toHaveBeenCalledWith("active");
     });
 
-    expect(screen.queryByRole("combobox", { name: "职称筛选" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("combobox", { name: "学校学院筛选" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("listbox", { name: "职称 / 导师资格" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("listbox", { name: "学校" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "职称筛选" }));
+    fireEvent.click(screen.getByRole("button", { name: "高级筛选" }));
+    fireEvent.click(screen.getByRole("button", { name: "职称 / 导师资格：全部职称 / 导师资格" }));
     fireEvent.click(screen.getByRole("option", { name: "Professor" }));
-    fireEvent.click(screen.getByRole("button", { name: "学校学院筛选" }));
-    fireEvent.click(screen.getByRole("option", { name: "样例大学 / 生命科学学院" }));
+    fireEvent.click(screen.getByRole("button", { name: "学校：全部学校" }));
+    fireEvent.click(screen.getByRole("option", { name: "样例大学" }));
+    fireEvent.click(screen.getByRole("button", { name: "学院：全部学院" }));
+    fireEvent.click(screen.getByRole("option", { name: "生命科学学院" }));
 
     expect(screen.queryByText("李教授")).not.toBeInTheDocument();
     expect(screen.getByText("王教授")).toBeInTheDocument();
@@ -278,24 +282,16 @@ describe("ProfessorsPage layout", () => {
       screen.getByText("共 1 位符合筛选条件，当前第 1 / 1 页，每页最多 10 位"),
     ).toBeInTheDocument();
 
-    const resetButton = screen.getByRole("button", { name: "重置筛选" });
-    expect(resetButton).toHaveClass("ui-select-shell", "rounded-3xl");
+    const resetButton = screen.getByRole("button", { name: "重置" });
+    expect(resetButton).toHaveClass("ui-btn-secondary");
     const intakePanel = screen.getByTestId("professor-intake-panel");
     expect(intakePanel).toHaveClass("grid", "gap-3");
     expect(intakePanel).not.toHaveClass("rounded-[30px]", "border", "shadow-sm");
     expect(within(intakePanel).getByText("导师导入与导出方式")).toBeInTheDocument();
-    expect(
-      within(intakePanel).getByRole("heading", { name: "智能抓取" }),
-    ).toBeInTheDocument();
-    expect(
-      within(intakePanel).getByRole("heading", { name: "模板批量新增" }),
-    ).toBeInTheDocument();
-    expect(
-      within(intakePanel).getByRole("heading", { name: "单个新增" }),
-    ).toBeInTheDocument();
-    expect(
-      within(intakePanel).queryByText("按数据来源选择入口，系统会统一沉淀到导师档案库。"),
-    ).not.toBeInTheDocument();
+    expect(within(intakePanel).getByRole("heading", { name: "智能抓取" })).toBeInTheDocument();
+    expect(within(intakePanel).getByRole("heading", { name: "模板批量新增" })).toBeInTheDocument();
+    expect(within(intakePanel).getByRole("heading", { name: "单个新增" })).toBeInTheDocument();
+    expect(within(intakePanel).queryByText("按数据来源选择入口，系统会统一沉淀到导师档案库。")).not.toBeInTheDocument();
     [
       "从学院页面自动发现导师，抓取结果进入候选审核。",
       "下载模板后批量导入导师信息，适合已有名单或表格。",
@@ -314,34 +310,20 @@ describe("ProfessorsPage layout", () => {
       expect(within(intakePanel).getByRole("button", { name })).toBeInTheDocument();
     });
     expect(within(intakePanel).queryByText("导出全部正常导师，字段与导入模板一致。")).not.toBeInTheDocument();
-    expect(within(intakePanel).getByTestId("professor-intake-导出导师信息")).toHaveClass(
-      "border-emerald-200",
-    );
-    expect(within(intakePanel).getByRole("button", { name: "导出导师信息" })).toHaveClass(
-      "bg-emerald-600",
-    );
+    expect(within(intakePanel).getByTestId("professor-intake-导出导师信息")).toHaveClass("border-emerald-200");
+    expect(within(intakePanel).getByRole("button", { name: "导出导师信息" })).toHaveClass("bg-emerald-600");
     expect(within(intakePanel).queryByRole("button", { name: "下载模板" })).not.toBeInTheDocument();
     expect(within(intakePanel).queryByRole("button", { name: "导入文件" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "刷新" })).toHaveClass("h-10", "rounded-2xl");
-    expectToAppearBefore(
-      intakePanel,
-      screen.getByRole("button", { name: "正常" }),
-    );
-    expectToAppearBefore(
-      screen.getByRole("heading", { name: "导师档案管理" }),
-      intakePanel,
-    );
+    expectToAppearBefore(intakePanel, screen.getByRole("button", { name: "正常" }));
+    expectToAppearBefore(screen.getByRole("heading", { name: "导师档案管理" }), intakePanel);
     expect(screen.queryByText("样例导入与智能抓取")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "导入样例导师" })).not.toBeInTheDocument();
-    expect(screen.getByTestId("professor-toolbar-spacer")).toHaveClass("h-5", "leading-5");
-    expect(screen.getAllByText("操作").length).toBeGreaterThan(1);
 
     fireEvent.click(resetButton);
 
     expect(screen.getByText("李教授")).toBeInTheDocument();
     expect(screen.getByText("王教授")).toBeInTheDocument();
   });
-
   it("changes and stores the independent management page size", async () => {
     listProfessorsForManagement.mockResolvedValue(
       Array.from({ length: 12 }, (_, index) => buildProfessor(index + 1)),
@@ -370,39 +352,37 @@ describe("ProfessorsPage layout", () => {
     expect(localStorage.getItem("home-dashboard:page-size")).toBeNull();
   });
 
-  it("keeps search and filter controls in separate toolbar rows", async () => {
+  it("keeps keyword search, sort, and advanced filters in the toolbar", async () => {
     renderPage();
 
     await waitFor(() => {
       expect(listProfessorsForManagement).toHaveBeenCalledWith("active");
     });
 
-    const searchInput = screen.getByPlaceholderText("搜索姓名、邮箱、学校、院系或研究方向");
-    const searchRow = searchInput.closest('[data-testid="professor-search-row"]');
-    const filterRow = screen.getByTestId("professor-filter-row");
+    const searchInput = screen.getByPlaceholderText("姓名、邮箱、学校、学院、系所、职称、研究方向");
+    const toolbar = screen.getByTestId("professor-filter-toolbar");
 
-    expect(searchRow).not.toBeNull();
-    expect(searchRow).toHaveClass("min-w-0");
-    expect(filterRow).toHaveClass("lg:justify-between");
-    expect(filterRow.contains(searchInput)).toBe(false);
+    expect(toolbar).toHaveClass("grid", "gap-3", "lg:items-stretch");
+    expect(toolbar.contains(searchInput)).toBe(true);
+    expect(within(toolbar).getByRole("button", { name: "排序" })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("button", { name: "高级筛选" })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("button", { name: "重置" })).toBeInTheDocument();
   });
 
-  it("aligns filter labels with one shared field rhythm", async () => {
+  it("shows advanced filter fields with consistent labels", async () => {
     renderPage();
 
     await waitFor(() => {
       expect(listProfessorsForManagement).toHaveBeenCalledWith("active");
     });
 
-    const titleLabel = screen.getByTestId("professor-title-filter-label");
-    const schoolLabel = screen.getByTestId("professor-school-filter-label");
-    const resetLabel = screen.getByTestId("professor-reset-filter-label");
+    fireEvent.click(screen.getByRole("button", { name: "高级筛选" }));
 
-    [titleLabel, schoolLabel, resetLabel].forEach((label) => {
-      expect(label).toHaveClass("h-5", "leading-5", "text-sm", "font-medium");
+    ["学校", "学院", "系所", "职称 / 导师资格"].forEach((label) => {
+      expect(screen.getByText(label)).toHaveClass("text-sm", "font-medium", "text-stone-800");
     });
+    expect(screen.getByRole("button", { name: "清空高级筛选" })).toHaveClass("ui-btn-secondary");
   });
-
   it("downloads professor templates without opening a blank window", async () => {
     renderPage();
 
@@ -410,7 +390,7 @@ describe("ProfessorsPage layout", () => {
       expect(listProfessorsForManagement).toHaveBeenCalledWith("active");
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "模板导入" }));
+    fireEvent.click(within(screen.getByTestId("professor-intake-模板批量新增")).getByRole("button", { name: "模板导入" }));
 
     const link = document.createElement("a");
     const click = vi.spyOn(link, "click").mockImplementation(() => undefined);
@@ -459,3 +439,9 @@ describe("ProfessorsPage layout", () => {
     click.mockRestore();
   });
 });
+
+
+
+
+
+
