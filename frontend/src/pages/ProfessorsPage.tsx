@@ -511,8 +511,12 @@ export const ProfessorsPage = () => {
   }, [archiveFilter, advancedFiltersOpen, currentPage, filters, sortKey]);
 
   const filterOptions = useMemo(
-    () => buildManagementFilterOptions(professors, { universities: filters.universities }),
-    [filters.universities, professors],
+    () =>
+      buildManagementFilterOptions(professors, {
+        universities: filters.universities,
+        schools: filters.schools,
+      }),
+    [filters.schools, filters.universities, professors],
   );
   const activeAdvancedFilterCount =
     getActiveManagementAdvancedFilterCount(filters);
@@ -541,10 +545,10 @@ export const ProfessorsPage = () => {
         ? currentValues.filter((item) => item !== value)
         : [...currentValues, value];
 
-      if (key === "universities") {
+      if (key === "universities" || key === "schools") {
         const nextFilters = {
           ...previous,
-          universities: nextValues,
+          [key]: nextValues,
         };
         return pruneManagementFilters(professors, nextFilters);
       }
@@ -553,6 +557,16 @@ export const ProfessorsPage = () => {
     });
   };
 
+  const clearAdvancedFilters = () => {
+    setCurrentPage(1);
+    setFilters((previous) => ({
+      ...previous,
+      universities: [],
+      schools: [],
+      departments: [],
+      titles: [],
+    }));
+  };
 
   const resetAllFilters = () => {
     setCurrentPage(1);
@@ -1101,6 +1115,13 @@ export const ProfessorsPage = () => {
                   <div className="text-sm font-semibold text-stone-800">
                     高级筛选
                   </div>
+                                  <button
+                    type="button"
+                    onClick={clearAdvancedFilters}
+                    className="ui-btn-secondary px-3 py-1.5 text-sm"
+                  >
+                    清空高级筛选
+                  </button>
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">

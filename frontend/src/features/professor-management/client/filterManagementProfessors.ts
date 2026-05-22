@@ -57,8 +57,10 @@ export const createDefaultManagementFilters = (): ProfessorManagementFilterState
 
 export const buildManagementFilterOptions = (
   professors: ProfessorManagementItemDTO[],
-  filters: Pick<ProfessorManagementFilterState, "universities"> = {
+  filters: Pick<ProfessorManagementFilterState, "universities"> &
+    Partial<Pick<ProfessorManagementFilterState, "schools">> = {
     universities: [],
+    schools: [],
   },
 ): ProfessorManagementFilterOptions => {
   const universities = new Set<string>();
@@ -66,16 +68,24 @@ export const buildManagementFilterOptions = (
   const departments = new Set<string>();
   const titles = new Set<string>();
   const selectedUniversities = filters.universities;
+  const selectedSchools = filters.schools ?? [];
 
   professors.forEach((professor) => {
     addNonEmpty(universities, professor.university);
     if (
       selectedUniversities.length === 0 ||
-      selectedUniversities.includes(professor.university ?? "")
+      selectedUniversities.includes(professor.university?.trim() ?? "")
     ) {
       addNonEmpty(schools, professor.school);
     }
-    addNonEmpty(departments, professor.department);
+    if (
+      (selectedUniversities.length === 0 ||
+        selectedUniversities.includes(professor.university?.trim() ?? "")) &&
+      (selectedSchools.length === 0 ||
+        selectedSchools.includes(professor.school?.trim() ?? ""))
+    ) {
+      addNonEmpty(departments, professor.department);
+    }
     extractProfessorTitleTags(professor.title).forEach((title) => {
       addNonEmpty(titles, title);
     });
@@ -138,14 +148,20 @@ export const pruneManagementFilters = (
   );
   const schoolOptions = buildManagementFilterOptions(professors, {
     universities,
+    schools: [],
   }).schools;
+  const schools = filters.schools.filter((value) => schoolOptions.includes(value));
+  const departmentOptions = buildManagementFilterOptions(professors, {
+    universities,
+    schools,
+  }).departments;
 
   return {
     ...filters,
     universities,
-    schools: filters.schools.filter((value) => schoolOptions.includes(value)),
+    schools,
     departments: filters.departments.filter((value) =>
-      allOptions.departments.includes(value),
+      departmentOptions.includes(value),
     ),
     titles: filters.titles.filter((value) => allOptions.titles.includes(value)),
   };

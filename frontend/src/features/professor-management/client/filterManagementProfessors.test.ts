@@ -130,6 +130,21 @@ describe("filterManagementProfessors", () => {
     ]);
   });
 
+  it("limits departments to selected universities and schools", () => {
+    const mitOptions = buildManagementFilterOptions(professors, {
+      universities: ["MIT"],
+      schools: [],
+    });
+
+    expect(mitOptions.departments).toEqual(["EECS", "Robotics"]);
+
+    const instituteOptions = buildManagementFilterOptions(professors, {
+      universities: ["MIT"],
+      schools: ["AI Institute"],
+    });
+
+    expect(instituteOptions.departments).toEqual(["Robotics"]);
+  });
   it("matches selected options against trimmed management fields", () => {
     const professorsWithWhitespace = [
       buildProfessor({
@@ -173,7 +188,17 @@ describe("filterManagementProfessors", () => {
 
     expect(pruned.universities).toEqual(["MIT"]);
     expect(pruned.schools).toEqual(["AI Institute"]);
-    expect(pruned.departments).toEqual(["EECS"]);
+    expect(pruned.departments).toEqual([]);
+
+    const schoolPruned = pruneManagementFilters(professors, {
+      keyword: "",
+      universities: ["MIT"],
+      schools: ["AI Institute"],
+      departments: ["EECS", "Robotics"],
+      titles: [],
+    });
+
+    expect(schoolPruned.departments).toEqual(["Robotics"]);
     expect(pruned.titles).toEqual(["教授"]);
   });
 

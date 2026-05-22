@@ -315,12 +315,11 @@ describe("selection controls", () => {
       expect(
         screen.getByRole("button", { name: "高级筛选 1" }),
       ).toBeInTheDocument();
-    });
-    expect(
-      screen.queryByRole("button", { name: "清空高级筛选" }),
-    ).not.toBeInTheDocument();
+    });    expect(
+      screen.getByRole("button", { name: "清空高级筛选" }),
+    ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "重置" }));
+    fireEvent.click(screen.getByRole("button", { name: "清空高级筛选" }));
 
     expect(
       screen.getByRole("button", { name: "高级筛选" }),
