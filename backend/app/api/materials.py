@@ -19,6 +19,7 @@ from app.models import (
     IdentityMaterial,
     IdentityMaterialType,
     IdentityProfile,
+    TestComposeSession,
 )
 from app.schemas.identity import IdentityMaterialRead
 from app.services.file_storage import (
@@ -177,6 +178,20 @@ async def delete_material(
         if reset_draft:
             reset_draft_task_ids.append(task.id)
 
+    referencing_test_compose_sessions = list(
+        (
+            await session.execute(
+                select(TestComposeSession).where(
+                    TestComposeSession.identity_id == material.identity_id,
+                ),
+            )
+        ).scalars()
+    )
+    detached_test_compose_session_ids: list[int] = []
+    for compose_session in referencing_test_compose_sessions:
+        if _detach_material_from_test_compose_session(compose_session, material.id):
+            detached_test_compose_session_ids.append(compose_session.id)
+
     referencing_batch_tasks = list(
         (
             await session.execute(
@@ -209,6 +224,7 @@ async def delete_material(
             "detached_primary_task_ids": detached_primary_task_ids,
             "removed_attachment_task_ids": removed_attachment_task_ids,
             "reset_draft_task_ids": reset_draft_task_ids,
+            "detached_test_compose_session_ids": detached_test_compose_session_ids,
             "detached_batch_task_ids": detached_batch_task_ids,
         },
     )
@@ -357,6 +373,22 @@ def _detach_material_from_batch_task(task: BatchTask, material_id: int) -> bool:
     if updated:
         task.updated_at = datetime.now(UTC)
     return updated
+
+
+def _detach_material_from_test_compose_session(
+    compose_session: TestComposeSession,
+    material_id: int,
+) -> bool:
+    if material_id not in (compose_session.selected_material_ids or []):
+        return False
+
+    compose_session.selected_material_ids = [
+        selected_material_id
+        for selected_material_id in compose_session.selected_material_ids or []
+        if selected_material_id != material_id
+    ]
+    compose_session.updated_at = datetime.now(UTC)
+    return True
 
 
 def _normalize_material_type(material_type: str) -> str:

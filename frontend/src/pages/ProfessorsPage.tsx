@@ -28,15 +28,23 @@ import {
 import { NativeSelectField } from "@/components/atoms/NativeSelectField";
 import { ManagementProfessorRow } from "@/components/molecules/ManagementProfessorRow";
 import { MultiSelectFilter } from "@/components/molecules/MultiSelectFilter";
+import { PageSizeSelector } from "@/components/molecules/PageSizeSelector";
 import { useNotification } from "@/context/NotificationContext";
 import { useSelectionContext } from "@/context/SelectionContext";
 import { safeRecordUserAction } from "@/lib/diagnosticUserActions";
+import {
+  getPageItems,
+  getStoredPageSize,
+  getTotalPages,
+  setStoredPageSize,
+} from "@/lib/pagination";
 import { useConfirmDialog } from "@/lib/useConfirmDialog";
 import { createCrawlJob } from "@/lib/api/crawlJobsApi";
 import {
   archiveProfessor,
   bulkArchiveProfessors,
   createProfessor,
+  getProfessorExportDownloadUrl,
   getProfessorTemplateDownloadUrl,
   importProfessorsFromFile,
   listProfessorsForManagement,
@@ -82,10 +90,10 @@ type CrawlerJobFormState = {
   start_urls: string[];
   entry_type: CrawlJobEntryTypeDTO;
 };
-type IntakeActionTone = "primary" | "amber" | "stone";
+type IntakeActionTone = "primary" | "amber" | "stone" | "emerald";
 
-const PROFESSORS_PER_PAGE = 10;
 const PROFESSORS_FILTERS_STORAGE_KEY = "professors_page_filters";
+const PROFESSORS_PAGE_SIZE_STORAGE_KEY = "professors-management:page-size";
 const managementTableColumns =
   "lg:grid-cols-[2.75rem_minmax(0,0.72fr)_minmax(0,0.74fr)_minmax(0,1.08fr)_minmax(0,1.18fr)_minmax(0,1.56fr)_minmax(0,0.78fr)_minmax(12rem,0.92fr)]";
 
@@ -294,6 +302,8 @@ const intakeActionToneClassNames: Record<IntakeActionTone, string> = {
   amber:
     "border-amber-200 bg-[linear-gradient(135deg,#fffbeb,#ffffff)] shadow-[0_18px_40px_-30px_rgba(180,83,9,0.45)]",
   stone: "border-stone-200 bg-white shadow-sm",
+  emerald:
+    "border-emerald-200 bg-[linear-gradient(135deg,#ecfdf5,#ffffff)] shadow-[0_18px_40px_-30px_rgba(5,150,105,0.45)]",
 };
 
 const intakeActionIconClassNames: Record<IntakeActionTone, string> = {
@@ -301,6 +311,7 @@ const intakeActionIconClassNames: Record<IntakeActionTone, string> = {
     "border-primary/15 bg-primary text-white shadow-sm shadow-primary/20",
   amber: "border-amber-200 bg-amber-100 text-amber-700",
   stone: "border-stone-200 bg-stone-100 text-stone-700",
+  emerald: "border-emerald-200 bg-emerald-100 text-emerald-700",
 };
 
 const IntakeActionCard = ({
@@ -317,24 +328,24 @@ const IntakeActionCard = ({
   <article
     data-testid={`professor-intake-${label}`}
     className={clsx(
-      "flex min-h-0 flex-col justify-between gap-3 rounded-[28px] border py-3 px-4 transition hover:-translate-y-0.5 hover:shadow-md sm:flex-row sm:items-center",
+      "flex min-h-[7.5rem] flex-col justify-between gap-3 rounded-[24px] border px-4 py-4 transition hover:-translate-y-0.5 hover:shadow-md",
       intakeActionToneClassNames[tone],
     )}
   >
     <div className="flex items-center gap-3">
       <div
         className={clsx(
-          "flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border",
+          "flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border",
           intakeActionIconClassNames[tone],
         )}
       >
         {icon}
       </div>
       <div className="min-w-0">
-        <h2 className="text-base font-semibold text-stone-900">{label}</h2>
+        <h2 className="text-base font-semibold leading-6 text-stone-900">{label}</h2>
       </div>
     </div>
-    <div className="flex flex-wrap gap-2 sm:justify-end">{children}</div>
+    <div className="flex w-full flex-wrap gap-2">{children}</div>
   </article>
 );
 
@@ -428,6 +439,9 @@ export const ProfessorsPage = () => {
     storedState.sortKey,
   );
   const [currentPage, setCurrentPage] = useState(storedState.currentPage);
+  const [pageSize, setPageSize] = useState(() =>
+    getStoredPageSize(PROFESSORS_PAGE_SIZE_STORAGE_KEY),
+  );
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(false);
   const [upsertModalOpen, setUpsertModalOpen] = useState(false);
@@ -441,6 +455,7 @@ export const ProfessorsPage = () => {
   const [importingFile, setImportingFile] = useState(false);
   const [importResult, setImportResult] =
     useState<ProfessorImportFileResultDTO | null>(null);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
   const [crawlerModalOpen, setCrawlerModalOpen] = useState(false);
   const [crawlerFormState, setCrawlerFormState] = useState<CrawlerJobFormState>(
     emptyCrawlerJobForm(),
@@ -545,14 +560,12 @@ export const ProfessorsPage = () => {
     setSortKey("latest");
   };
 
-  const totalPages = Math.max(
-    1,
-    Math.ceil(visibleProfessors.length / PROFESSORS_PER_PAGE),
-  );
+  const totalPages = getTotalPages(visibleProfessors.length, pageSize);
   const safeCurrentPage = Math.min(currentPage, totalPages);
-  const paginatedProfessors = visibleProfessors.slice(
-    (safeCurrentPage - 1) * PROFESSORS_PER_PAGE,
-    safeCurrentPage * PROFESSORS_PER_PAGE,
+  const paginatedProfessors = getPageItems(
+    visibleProfessors,
+    safeCurrentPage,
+    pageSize,
   );
   const isProfessorSelectable = (professor: ProfessorManagementItemDTO) => {
     if (archiveFilter === "archived") {
@@ -574,6 +587,12 @@ export const ProfessorsPage = () => {
     setEditingProfessor(null);
     setFormState(emptyProfessorForm());
     setUpsertModalOpen(true);
+  };
+
+  const handlePageSizeChange = (nextPageSize: number) => {
+    setPageSize(nextPageSize);
+    setStoredPageSize(PROFESSORS_PAGE_SIZE_STORAGE_KEY, nextPageSize);
+    setCurrentPage(1);
   };
 
   const handleToggleFilteredSelection = () => {
@@ -737,6 +756,10 @@ export const ProfessorsPage = () => {
     triggerDownload(getProfessorTemplateDownloadUrl(format));
   };
 
+  const handleDownloadExport = (format: "xlsx" | "csv") => {
+    triggerDownload(getProfessorExportDownloadUrl(format));
+  };
+
   const handleChooseImportFile = (event: ChangeEvent<HTMLInputElement>) => {
     const nextFile = event.target.files?.[0] ?? null;
     setImportFile(nextFile);
@@ -893,19 +916,19 @@ export const ProfessorsPage = () => {
             <section
               data-testid="professor-intake-panel"
               aria-labelledby="professor-intake-title"
-              className="rounded-[30px] border border-stone-200 bg-white/86 p-3 shadow-sm"
+              className="grid gap-3"
             >
-              <div className="mb-3 mt-1 pl-1 flex flex-wrap items-end justify-between gap-3">
+              <div className="pl-1 flex flex-wrap items-end justify-between gap-3">
                 <div>
                   <h2
                     id="professor-intake-title"
                     className="text-lg font-semibold text-stone-900"
                   >
-                    导师录入方式
+                    导师导入与导出方式
                   </h2>
                 </div>
               </div>
-              <div className="grid gap-3 lg:grid-cols-3">
+              <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-4">
                 <IntakeActionCard
                   label="智能抓取"
                   icon={<Bot className="h-5 w-5" />}
@@ -919,7 +942,7 @@ export const ProfessorsPage = () => {
                       });
                       setCrawlerModalOpen(true);
                     }}
-                    className="ui-btn-primary h-10 rounded-2xl px-4"
+                    className="ui-btn-primary h-10 w-full rounded-2xl px-4"
                   >
                     <Bot className="h-4 w-4" />
                     智能抓取
@@ -938,7 +961,7 @@ export const ProfessorsPage = () => {
                       setImportResult(null);
                       setImportModalOpen(true);
                     }}
-                    className="ui-btn-secondary h-10 rounded-2xl"
+                    className="ui-btn-secondary h-10 w-full rounded-2xl"
                   >
                     <Upload className="h-4 w-4" />
                     模板导入
@@ -953,10 +976,25 @@ export const ProfessorsPage = () => {
                   <button
                     type="button"
                     onClick={openCreateModal}
-                    className="ui-btn-secondary h-10 rounded-2xl"
+                    className="ui-btn-secondary h-10 w-full rounded-2xl"
                   >
                     <Plus className="h-4 w-4" />
                     新增导师
+                  </button>
+                </IntakeActionCard>
+
+                <IntakeActionCard
+                  label="导出导师信息"
+                  icon={<Download className="h-5 w-5" />}
+                  tone="emerald"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setExportModalOpen(true)}
+                    className="ui-btn-secondary h-10 w-full rounded-2xl border-emerald-200 bg-emerald-600 text-white shadow-sm shadow-emerald-900/15 hover:border-emerald-300 hover:bg-emerald-700 hover:text-white"
+                  >
+                    <Download className="h-4 w-4" />
+                    导出导师信息
                   </button>
                 </IntakeActionCard>
               </div>
@@ -1112,7 +1150,7 @@ export const ProfessorsPage = () => {
       <section className="mt-6 overflow-hidden rounded-[32px] border border-stone-200 bg-white shadow-sm">
         <div className="flex flex-col gap-3 border-b border-stone-100 px-6 py-4">
           <div className="text-sm text-stone-600">
-            共 {visibleProfessors.length} 位符合筛选条件，当前第 {safeCurrentPage} / {totalPages} 页，每页最多 {PROFESSORS_PER_PAGE} 位
+            共 {visibleProfessors.length} 位符合筛选条件，当前第 {safeCurrentPage} / {totalPages} 页，每页最多 {pageSize} 位
           </div>
           {filteredSelectableIds.length > 0 ? (
             <button
@@ -1327,7 +1365,11 @@ export const ProfessorsPage = () => {
             <div className="text-sm text-stone-500">
               共 {visibleProfessors.length} 位符合筛选条件，当前第 {safeCurrentPage} / {totalPages} 页，已选中 {selectedIds.size} 位
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <PageSizeSelector
+                value={pageSize}
+                onChange={handlePageSizeChange}
+              />
               <button
                 type="button"
                 onClick={() => setCurrentPage(safeCurrentPage - 1)}
@@ -1699,6 +1741,46 @@ export const ProfessorsPage = () => {
               </button>
             </div>
           </div>
+        </div>
+      </ModalShell>
+
+      <ModalShell
+        open={exportModalOpen}
+        title="导出导师信息"
+        description="将全部正常导师导出为表格文件。字段顺序与导入模板保持一致，便于备份、外部整理或修改后再次导入。"
+        onClose={() => setExportModalOpen(false)}
+      >
+        <div className="mt-6 rounded-[28px] border border-stone-200 bg-white p-5 shadow-sm">
+          <div className="text-sm font-semibold text-stone-900">
+            选择导出格式
+          </div>
+          <p className="mt-2 text-sm leading-6 text-stone-500">
+            推荐使用 XLSX 直接在表格软件中查看；CSV 适合脚本处理和跨工具交换。
+          </p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => handleDownloadExport("xlsx")}
+              className="ui-btn-primary"
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              导出 XLSX
+            </button>
+            <button
+              type="button"
+              onClick={() => handleDownloadExport("csv")}
+              className="ui-btn-secondary"
+            >
+              <Download className="h-4 w-4" />
+              导出 CSV
+            </button>
+          </div>
+          <ul className="mt-5 space-y-2 text-sm leading-6 text-stone-600">
+            <li>导出范围：全部正常导师，不包含回收站导师。</li>
+            <li>当前搜索、筛选、分页和勾选状态不会影响导出结果。</li>
+            <li>字段顺序与导入模板一致，未修改即可重新导入系统。</li>
+            <li>空值会保留为空单元格，CSV 使用 UTF-8 编码。</li>
+          </ul>
         </div>
       </ModalShell>
 

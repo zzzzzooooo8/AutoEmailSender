@@ -527,7 +527,8 @@ export const CreateTaskPage = () => {
                     }}
                   />
                   <p className="text-xs leading-6 text-stone-500">
-                    支持 {'{{name}}'}、{'{{university}}'}、{'{{sender_name}}'} 等占位符。
+                    支持 {'{{name}}'}、{'{{university}}'}、{'{{sender_name}}'}、
+                    {'{{year}}'}、{'{{month}}'}、{'{{day}}'} 等占位符。
                   </p>
                 </div>
               )}

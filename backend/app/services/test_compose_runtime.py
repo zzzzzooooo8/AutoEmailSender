@@ -32,6 +32,7 @@ from app.services.operation_logs import record_operation_log
 from app.services.outreach_templates import (
     OUTREACH_GENERATION_MODE_TEMPLATE,
     TEST_RECIPIENT_NAME,
+    build_test_compose_send_template_context,
     build_test_compose_template_context,
     get_identity_sender_name,
     get_outreach_template_defaults_validation_error,
@@ -51,6 +52,8 @@ async def build_test_compose_thread(
     identity = await _get_identity(session, identity_id)
     llm_profile = await _get_llm_profile(session, llm_profile_id)
     compose_session = await _get_or_create_test_compose_session(session, identity_id, llm_profile_id, identity)
+    if _synchronize_selected_material_ids(compose_session, identity):
+        await session.commit()
     history = await _list_test_compose_messages(session, compose_session.id)
     return _serialize_test_compose_thread(identity, llm_profile, compose_session, history)
 
@@ -159,7 +162,7 @@ async def send_test_compose_message(
     else:
         draft_rendered = text_to_email_html(payload.body_text)
 
-    context = build_test_compose_template_context(identity)
+    context = build_test_compose_send_template_context(identity)
     subject = render_template_with_context(payload.subject, context).strip()
     rendered_body_text = render_template_with_context(payload.body_text, context)
     rendered_body_html = render_template_with_context(payload.body_html, context)
@@ -472,4 +475,20 @@ def _serialize_test_compose_thread(
             for message in history
         ],
     )
+
+
+def _synchronize_selected_material_ids(
+    compose_session: TestComposeSession,
+    identity: IdentityProfile,
+) -> bool:
+    current_material_ids = {material.id for material in identity.materials}
+    existing_ids = compose_session.selected_material_ids or []
+    filtered_ids = [
+        material_id for material_id in existing_ids if material_id in current_material_ids
+    ]
+    if filtered_ids == existing_ids:
+        return False
+    compose_session.selected_material_ids = filtered_ids
+    compose_session.updated_at = datetime.now(UTC)
+    return True
 

@@ -50,6 +50,7 @@ from app.services.materials import (
 from app.services.operation_logs import record_operation_log
 from app.services.outreach_templates import (
     OUTREACH_GENERATION_MODE_TEMPLATE,
+    build_send_template_context,
     build_template_context,
     get_outreach_template_defaults_validation_error,
     render_outreach_template,
@@ -1077,6 +1078,7 @@ async def approve_and_send_task(
         _ensure_batch_task_has_future_window(task)
         await _snapshot_approval(session, task, payload)
         task.status = EmailTaskStatus.APPROVED.value
+        task.scheduled_at = None
         await _record_email_task_log(
             session,
             task,
@@ -1104,8 +1106,11 @@ async def approve_draft_task(
         _ensure_task_allows_legacy_manual_actions(task)
         _ensure_batch_task_has_future_window(task)
         await _snapshot_approval(session, task, payload)
-        task.status = EmailTaskStatus.APPROVED.value
-        task.scheduled_at = None
+        if _is_scheduled_batch_task(task) and task.scheduled_at is not None:
+            task.status = EmailTaskStatus.SCHEDULED.value
+        else:
+            task.status = EmailTaskStatus.APPROVED.value
+            task.scheduled_at = None
         await _record_email_task_log(
             session,
             task,
@@ -1259,11 +1264,17 @@ async def dispatch_email_task(
             return task_identity
 
         claimed_at = datetime.now(UTC)
+        if _is_task_scheduled_for_future(task, claimed_at):
+            return task_identity
         claim_result = await session.execute(
             update(EmailTask)
             .where(
                 EmailTask.id == task_id,
                 EmailTask.status.in_(DISPATCHABLE_EMAIL_TASK_STATUSES),
+                or_(
+                    EmailTask.scheduled_at.is_(None),
+                    EmailTask.scheduled_at <= claimed_at,
+                ),
             )
             .values(
                 status=EmailTaskStatus.SENDING.value,
@@ -1296,7 +1307,11 @@ async def dispatch_email_task(
         subject_template = task.approved_subject or task.generated_subject
         body_text_template = task.approved_body_text or task.generated_content_text
         body_html_template = task.approved_body_html or task.generated_content_html
-        context = build_template_context(task.identity, task.professor)
+        context = build_send_template_context(
+            task.identity,
+            task.professor,
+            local_timezone=datetime.now().astimezone().tzinfo,
+        )
         subject = render_template_with_context(subject_template, context).strip()
         body_text = render_template_with_context(body_text_template, context).strip()
         body_html = (
@@ -1930,6 +1945,17 @@ def _ensure_batch_task_has_future_window(task: EmailTask) -> None:
         window_end_time=batch_task.window_end_time,
     ):
         raise ValueError("当前批量任务的发送窗口已全部过期，请重新安排发送时间后再审核发送。")
+
+
+def _is_scheduled_batch_task(task: EmailTask) -> bool:
+    return task.batch_task is not None and task.batch_task.schedule_type == "scheduled"
+
+
+def _is_task_scheduled_for_future(task: EmailTask, now: datetime) -> bool:
+    if task.scheduled_at is None:
+        return False
+    scheduled_at = task.scheduled_at.replace(tzinfo=UTC) if task.scheduled_at.tzinfo is None else task.scheduled_at
+    return scheduled_at.astimezone(UTC) > now.astimezone(UTC)
 
 
 def _resolve_task_outreach_config(task: EmailTask):

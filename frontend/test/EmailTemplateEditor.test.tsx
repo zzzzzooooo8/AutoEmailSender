@@ -97,13 +97,16 @@ describe("EmailTemplateEditor", () => {
     render(
       <EmailTemplateEditor
         label="邮件正文"
-        html="<p>{{name}}老师您好，我是{{sender_name}}。</p>"
+        html="<p>{{name}}老师您好，我是{{sender_name}}。{{year}}年{{month}}月{{day}}日</p>"
         onChange={vi.fn()}
       />,
     );
 
     expect(screen.getByText("导师姓名")).toBeInTheDocument();
     expect(screen.getByText("发件人姓名")).toBeInTheDocument();
+    expect(screen.getByText("发送年份")).toBeInTheDocument();
+    expect(screen.getByText("发送月份")).toBeInTheDocument();
+    expect(screen.getByText("发送日期")).toBeInTheDocument();
     expect(screen.queryByText("{{name}}")).not.toBeInTheDocument();
   });
 
@@ -173,13 +176,16 @@ describe("EmailTemplateEditor", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "占位符菜单" }));
-    fireEvent.click(screen.getByRole("button", { name: "导师姓名" }));
+    expect(screen.getByRole("button", { name: "发送年份" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "发送月份" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "发送日期" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "发送日期" }));
 
-    expect(screen.getByText("导师姓名")).toBeInTheDocument();
+    expect(screen.getByText("发送日期")).toBeInTheDocument();
     expect(handleChange).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        html: expect.stringContaining("{{name}}"),
-        text: expect.stringContaining("{{name}}"),
+        html: expect.stringContaining("{{day}}"),
+        text: expect.stringContaining("{{day}}"),
       }),
     );
   });

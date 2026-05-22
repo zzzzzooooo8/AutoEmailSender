@@ -861,6 +861,76 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(wang_professor["university"], "Updated University")
         self.assertEqual(wang_professor["recent_papers"], ["Paper 8", "Paper 9"])
 
+    def test_professor_export_downloads_active_records_that_can_be_reimported(self) -> None:
+        active = self.client.post(
+            "/api/professors",
+            json={
+                "name": "导出导师",
+                "email": "export@example.edu",
+                "title": "教授",
+                "university": "导出大学",
+                "school": "计算机学院",
+                "department": "人工智能系",
+                "research_direction": "智能体",
+                "recent_papers": ["Paper A", "Paper B"],
+                "profile_url": "https://example.edu/export",
+                "source_url": None,
+            },
+        )
+        self.assertEqual(active.status_code, 201, msg=active.text)
+        archived = self.client.post(
+            "/api/professors",
+            json={"name": "回收站导师", "email": "archived-export@example.edu"},
+        )
+        self.assertEqual(archived.status_code, 201, msg=archived.text)
+        self.client.post(f"/api/professors/{archived.json()['id']}/archive")
+
+        csv_export = self.client.get("/api/professors/export", params={"format": "csv"})
+        self.assertEqual(csv_export.status_code, 200, msg=csv_export.text)
+        self.assertEqual(csv_export.content[:3], b"\xef\xbb\xbf")
+        self.assertIn("text/csv", csv_export.headers["content-type"])
+        self.assertIn("professors_export.csv", csv_export.headers["content-disposition"])
+        decoded = csv_export.content.decode("utf-8-sig")
+        self.assertIn("export@example.edu", decoded)
+        self.assertIn("Paper A|Paper B", decoded)
+        self.assertNotIn("archived-export@example.edu", decoded)
+
+        csv_reimport = self.client.post(
+            "/api/professors/import-file",
+            files={"file": ("professors_export.csv", io.BytesIO(csv_export.content), "text/csv")},
+        )
+        self.assertEqual(csv_reimport.status_code, 200, msg=csv_reimport.text)
+        self.assertEqual(csv_reimport.json()["inserted_count"], 0)
+        self.assertEqual(csv_reimport.json()["updated_count"], 1)
+        self.assertEqual(csv_reimport.json()["failed_count"], 0)
+
+        xlsx_export = self.client.get("/api/professors/export", params={"format": "xlsx"})
+        self.assertEqual(xlsx_export.status_code, 200, msg=xlsx_export.text)
+        self.assertIn("professors_export.xlsx", xlsx_export.headers["content-disposition"])
+        workbook = load_workbook(io.BytesIO(xlsx_export.content), read_only=True, data_only=True)
+        rows = list(workbook.active.iter_rows(values_only=True))
+        self.assertEqual(rows[0][0], "name")
+        self.assertEqual(rows[1][1], "export@example.edu")
+
+        xlsx_reimport = self.client.post(
+            "/api/professors/import-file",
+            files={
+                "file": (
+                    "professors_export.xlsx",
+                    io.BytesIO(xlsx_export.content),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+            },
+        )
+        self.assertEqual(xlsx_reimport.status_code, 200, msg=xlsx_reimport.text)
+        self.assertEqual(xlsx_reimport.json()["inserted_count"], 0)
+        self.assertEqual(xlsx_reimport.json()["updated_count"], 1)
+        self.assertEqual(xlsx_reimport.json()["failed_count"], 0)
+
+        bad_format = self.client.get("/api/professors/export", params={"format": "json"})
+        self.assertEqual(bad_format.status_code, 400)
+        self.assertEqual(bad_format.json()["detail"], "仅支持 csv 或 xlsx 导出")
+
     def test_workspace_endpoint_without_existing_task_returns_empty_thread(self) -> None:
         identity_id = self._create_identity(with_imap=False)
         llm_id = self._create_llm()
@@ -1465,13 +1535,22 @@ class ApiEndpointTests(unittest.TestCase):
         with patch(
             "app.services.task_runtime.mail_runtime.send_email",
             AsyncMock(return_value=self._build_send_result(message_id="<subject-render@example.com>", provider_payload={})),
-        ) as mocked_send:
+        ) as mocked_send, patch(
+            "app.services.outreach_templates.datetime",
+        ) as mocked_datetime:
+            from datetime import UTC, datetime
+
+            mocked_datetime.now.return_value = datetime(2026, 5, 19, 16, 30, tzinfo=UTC)
+            expected_local_date = mocked_datetime.now.return_value.astimezone()
+            expected_date = (
+                f"{expected_local_date.year}年{expected_local_date.month}月{expected_local_date.day}日"
+            )
             response = self.client.post(
                 f"/api/email-tasks/{task_id}/approve-and-send",
                 json={
                     "subject": "申请与{{name}}老师交流",
-                    "body_text": "{{name}}老师您好，我是{{sender_name}}。",
-                    "body_html": "<p>{{name}}老师您好，我是{{sender_name}}。</p>",
+                    "body_text": "{{name}}老师您好，我是{{sender_name}}。发送日期：{{year}}年{{month}}月{{day}}日。",
+                    "body_html": "<p>{{name}}老师您好，我是{{sender_name}}。发送日期：{{year}}年{{month}}月{{day}}日。</p>",
                     "selected_material_ids": [],
                 },
             )
@@ -1480,8 +1559,12 @@ class ApiEndpointTests(unittest.TestCase):
         kwargs = mocked_send.await_args.kwargs
         self.assertEqual(kwargs["subject"], "申请与主题导师老师交流")
         self.assertIn("主题导师老师您好", kwargs["body_text"])
+        self.assertIn(f"发送日期：{expected_date}", kwargs["body_text"])
         self.assertNotIn("{{name}}", kwargs["body_html"])
+        self.assertNotIn("{{year}}", kwargs["body_html"])
+        self.assertIn(f"发送日期：{expected_date}", kwargs["body_html"])
         self.assertEqual(response.json()["current_task"]["approved_subject"], "申请与{{name}}老师交流")
+        self.assertIn("{{year}}年{{month}}月{{day}}日", response.json()["current_task"]["approved_body_text"])
 
     def test_approve_draft_snapshots_content_without_immediate_send(self) -> None:
         identity_id = self._create_identity(with_imap=False)
@@ -5328,6 +5411,39 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(send_payload["history"][0]["status"], "sent")
         self.assertEqual(send_payload["history"][0]["rfc_message_id"], "<self-test@example.com>")
         mocked_send.assert_awaited_once()
+
+    def test_delete_material_removes_stale_test_compose_attachment_selection(self) -> None:
+        identity_id = self._create_identity(with_imap=False)
+        llm_id = self._create_llm()
+        material_id = self._upload_material(
+            identity_id,
+            filename="resume.txt",
+            content=b"My research background is in information extraction.",
+            material_type="resume",
+        )
+
+        save_response = self.client.post(
+            f"/api/test-compose/{identity_id}/{llm_id}/draft",
+            json={
+                "subject": "测试主题",
+                "body_text": "测试正文",
+                "body_html": "<p>测试正文</p>",
+                "selected_material_ids": [material_id],
+            },
+        )
+        self.assertEqual(save_response.status_code, 200, msg=save_response.text)
+        self.assertEqual(save_response.json()["draft"]["selected_material_ids"], [material_id])
+
+        delete_response = self.client.delete(f"/api/materials/{material_id}")
+
+        self.assertEqual(delete_response.status_code, 204, msg=delete_response.text)
+
+        thread_response = self.client.get(f"/api/test-compose/{identity_id}/{llm_id}")
+
+        self.assertEqual(thread_response.status_code, 200, msg=thread_response.text)
+        payload = thread_response.json()
+        self.assertEqual(payload["draft"]["selected_material_ids"], [])
+        self.assertEqual(payload["material_options"], [])
 
     def test_test_compose_generate_draft_returns_bad_gateway_when_llm_fails(self) -> None:
         identity_id = self._create_identity(with_imap=False)
