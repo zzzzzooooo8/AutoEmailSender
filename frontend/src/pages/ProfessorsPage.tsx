@@ -538,16 +538,6 @@ export const ProfessorsPage = () => {
     });
   };
 
-  const clearAdvancedFilters = () => {
-    setCurrentPage(1);
-    setFilters((previous) => ({
-      ...previous,
-      universities: [],
-      schools: [],
-      departments: [],
-      titles: [],
-    }));
-  };
 
   const resetAllFilters = () => {
     setCurrentPage(1);
@@ -1073,13 +1063,6 @@ export const ProfessorsPage = () => {
                   <div className="text-sm font-semibold text-stone-800">
                     高级筛选
                   </div>
-                  <button
-                    type="button"
-                    onClick={clearAdvancedFilters}
-                    className="ui-btn-secondary px-3 py-1.5 text-sm"
-                  >
-                    清空高级筛选
-                  </button>
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -1495,7 +1478,7 @@ export const ProfessorsPage = () => {
             />
           </label>
           <label className="block">
-            {renderFieldLabel("院系")}
+            {renderFieldLabel("系所")}
             <input
               value={formState.department}
               onChange={(event) =>

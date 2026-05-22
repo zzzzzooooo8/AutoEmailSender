@@ -32,7 +32,8 @@ const addNonEmpty = (set: Set<string>, value: string | null | undefined) => {
 const matchesAny = (
   value: string | null | undefined,
   selectedValues: string[],
-): boolean => selectedValues.length === 0 || selectedValues.includes(value ?? "");
+): boolean =>
+  selectedValues.length === 0 || selectedValues.includes(value?.trim() ?? "");
 
 const filterTitleMatches = (
   title: string | null | undefined,

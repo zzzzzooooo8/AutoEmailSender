@@ -130,6 +130,28 @@ describe("filterManagementProfessors", () => {
     ]);
   });
 
+  it("matches selected options against trimmed management fields", () => {
+    const professorsWithWhitespace = [
+      buildProfessor({
+        id: 4,
+        name: "Whitespace",
+        title: " 教授 ",
+        university: " MIT ",
+        school: " AI Institute ",
+        department: " Robotics ",
+      }),
+    ];
+
+    expect(
+      namesFor(professorsWithWhitespace, {
+        universities: ["MIT"],
+        schools: ["AI Institute"],
+        departments: ["Robotics"],
+        titles: ["教授"],
+      }),
+    ).toEqual(["Whitespace"]);
+  });
+
   it("counts active advanced filters", () => {
     expect(
       getActiveManagementAdvancedFilterCount({
