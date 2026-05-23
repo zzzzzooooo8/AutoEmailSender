@@ -595,6 +595,7 @@ async def generate_task_draft(
                     draft_rewrite_length=runtime_settings.draft_rewrite_length,
                     draft_rewrite_specificity=runtime_settings.draft_rewrite_specificity,
                     draft_template_preservation=runtime_settings.draft_template_preservation,
+                    draft_custom_instruction=runtime_settings.draft_custom_instruction,
                 )
                 generation = await llm_runtime.generate_draft_content(
                     identity=task.identity,
@@ -910,6 +911,7 @@ async def preview_task_draft(
             draft_rewrite_length=runtime_settings.draft_rewrite_length,
             draft_rewrite_specificity=runtime_settings.draft_rewrite_specificity,
             draft_template_preservation=runtime_settings.draft_template_preservation,
+            draft_custom_instruction=runtime_settings.draft_custom_instruction,
         )
         return await llm_runtime.generate_draft_content(
             identity=task.identity,
