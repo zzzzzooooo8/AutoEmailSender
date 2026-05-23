@@ -1195,10 +1195,10 @@ def _build_base_generation_prompt(
             },
         },
         "input": {
+            "草稿改写偏好": extra_requirements,
+            "学生材料文本": primary_material_text,
             "套磁信模板主题": _non_empty_text(custom_subject),
             "套磁信模板正文": template_body_text,
-            "导师信息": _build_draft_rewrite_professor_context(professor),
-            "学生材料文本": primary_material_text,
             "可选材料": [
                 {
                     "id": material.id,
@@ -1207,7 +1207,6 @@ def _build_base_generation_prompt(
                 }
                 for material in available_materials
             ],
-            "任务要求": extra_requirements,
         },
     }
     if current_match is not None:
@@ -1218,6 +1217,7 @@ def _build_base_generation_prompt(
             "risk_points": current_match.risk_points,
             "keywords": current_match.keywords,
         }
+    payload["input"]["导师信息"] = _build_draft_rewrite_professor_context(professor)
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 def build_draft_rewrite_prompt(
@@ -1267,7 +1267,10 @@ def build_draft_rewrite_prompt(
             ],
         },
         "input": {
-            "professor": _build_draft_rewrite_professor_context(professor),
+            "rewrite_preferences": _serialize_draft_rewrite_preferences(preferences),
+            "user_custom_instruction": _serialize_draft_custom_instruction(
+                preferences.draft_custom_instruction,
+            ),
             "student_material_text": primary_material_text,
             "available_materials": [
                 {
@@ -1285,6 +1288,10 @@ def build_draft_rewrite_prompt(
     }
     prompt_input = payload["input"]
     if isinstance(prompt_input, dict):
+        if not prompt_input["rewrite_preferences"]:
+            del prompt_input["rewrite_preferences"]
+        if not prompt_input["user_custom_instruction"]:
+            del prompt_input["user_custom_instruction"]
         if current_match is not None:
             prompt_input["current_match"] = {
                 "match_score": current_match.match_score,
@@ -1293,14 +1300,7 @@ def build_draft_rewrite_prompt(
                 "risk_points": current_match.risk_points,
                 "keywords": current_match.keywords,
             }
-        preferences_payload = _serialize_draft_rewrite_preferences(preferences)
-        if preferences_payload:
-            prompt_input["rewrite_preferences"] = preferences_payload
-        custom_instruction_payload = _serialize_draft_custom_instruction(
-            preferences.draft_custom_instruction,
-        )
-        if custom_instruction_payload:
-            prompt_input["user_custom_instruction"] = custom_instruction_payload
+        prompt_input["professor"] = _build_draft_rewrite_professor_context(professor)
 
     return json.dumps(payload, ensure_ascii=False, indent=2)
 

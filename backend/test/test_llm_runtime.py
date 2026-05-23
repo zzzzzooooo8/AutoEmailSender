@@ -864,6 +864,62 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("加粗", prompt)
         self.assertIn("链接", prompt)
 
+    def test_build_draft_prompt_places_stable_batch_context_before_professor(self) -> None:
+        from app.models import IdentityMaterial, IdentityProfile, Professor
+        from app.services.llm_runtime import MatchEvaluationResult
+
+        identity = IdentityProfile(
+            id=1,
+            name="张三",
+            email_address="sender@example.com",
+            smtp_host="smtp.example.com",
+            smtp_port=465,
+            smtp_username="sender@example.com",
+            smtp_password="secret",
+            default_language="zh-CN",
+            outreach_generation_mode="llm",
+        )
+        primary_material = IdentityMaterial(
+            id=12,
+            identity_id=1,
+            display_name="简历",
+            file_path="data/materials/resume.txt",
+            original_filename="resume.txt",
+            material_type="resume",
+            extracted_text="稳定学生材料：信息抽取与智能体经验。",
+        )
+        professor = Professor(
+            id=7,
+            name="李老师",
+            email="prof@example.edu",
+            research_direction="导师变量：医学 NLP",
+        )
+
+        prompt = build_draft_prompt(
+            identity=identity,
+            primary_material=primary_material,
+            professor=professor,
+            available_materials=[primary_material],
+            custom_subject="稳定模板主题",
+            custom_body="稳定模板正文",
+            current_match=MatchEvaluationResult(
+                match_score=88,
+                match_reason="匹配变量：方向接近",
+                fit_points=["匹配变量：信息抽取"],
+                risk_points=[],
+                keywords=["匹配变量"],
+            ),
+            rewrite_preferences=DraftRewritePreferences(
+                draft_custom_instruction="稳定自定义要求：少用套话。",
+            ),
+        )
+
+        self.assertLess(prompt.index("稳定自定义要求"), prompt.index("导师变量"))
+        self.assertLess(prompt.index("稳定学生材料"), prompt.index("导师变量"))
+        self.assertLess(prompt.index("稳定模板主题"), prompt.index("导师变量"))
+        self.assertLess(prompt.index("稳定模板正文"), prompt.index("导师变量"))
+        self.assertLess(prompt.index("匹配变量"), prompt.index("导师变量"))
+
     def test_build_draft_rewrite_prompt_uses_source_blocks_and_style_spans(self) -> None:
         from app.models import IdentityMaterial, IdentityProfile, Professor
         from app.services.outreach_templates import build_template_context
@@ -945,6 +1001,55 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("{{name}}", prompt)
         self.assertFalse(payload["input"]["source_blocks"][0]["locked"])
         self.assertTrue(payload["input"]["source_blocks"][1]["locked"])
+
+    def test_build_draft_rewrite_prompt_places_stable_batch_context_before_professor(self) -> None:
+        from app.models import IdentityMaterial, IdentityProfile, Professor
+        from app.services.template_draft_rewrite import build_draft_rewrite_document
+
+        identity = IdentityProfile(
+            id=1,
+            name="张三",
+            email_address="sender@example.com",
+            smtp_host="smtp.example.com",
+            smtp_port=465,
+            smtp_username="sender@example.com",
+            smtp_password="secret",
+            default_language="zh-CN",
+            outreach_generation_mode="llm",
+        )
+        primary_material = IdentityMaterial(
+            id=12,
+            identity_id=1,
+            display_name="简历",
+            file_path="data/materials/resume.txt",
+            original_filename="resume.txt",
+            material_type="resume",
+            extracted_text="稳定学生材料：信息抽取与智能体经验。",
+        )
+        professor = Professor(
+            id=7,
+            name="李老师",
+            email="prof@example.edu",
+            research_direction="导师变量：医学 NLP",
+        )
+        document = build_draft_rewrite_document("<p>稳定模板正文</p>", {})
+
+        prompt = build_draft_rewrite_prompt(
+            identity=identity,
+            primary_material=primary_material,
+            professor=professor,
+            available_materials=[primary_material],
+            subject_template="稳定模板主题",
+            source_blocks=document.blocks,
+            current_match=None,
+            rewrite_preferences=DraftRewritePreferences(
+                draft_custom_instruction="稳定自定义要求：少用套话。",
+            ),
+        )
+
+        self.assertLess(prompt.index("稳定自定义要求"), prompt.index("导师变量"))
+        self.assertLess(prompt.index("稳定学生材料"), prompt.index("导师变量"))
+        self.assertLess(prompt.index("稳定模板正文"), prompt.index("导师变量"))
 
     def test_draft_rewrite_prompts_preserve_user_written_dates(self) -> None:
         from app.models import IdentityMaterial, IdentityProfile, Professor
