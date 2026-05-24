@@ -175,7 +175,9 @@ async function createWindow(): Promise<void> {
 
   if (!app.isPackaged && process.argv.includes("--dev")) {
     await mainWindow.loadURL("http://127.0.0.1:5173");
-    mainWindow.webContents.openDevTools({ mode: "detach" });
+    if (process.env.AUTO_EMAIL_SENDER_OPEN_DEVTOOLS === "true") {
+      mainWindow.webContents.openDevTools({ mode: "detach" });
+    }
     return;
   }
 
