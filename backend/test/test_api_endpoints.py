@@ -20,7 +20,7 @@ from test.migrated_database import create_migrated_sqlite_database
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "a1b2c3d4e5f6"
+HEAD_REVISION = "d2c4e6f8a0b1"
 
 
 class ApiEndpointTests(unittest.TestCase):

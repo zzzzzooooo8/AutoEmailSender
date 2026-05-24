@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import os
 import sqlite3
@@ -14,8 +15,36 @@ from test.migrated_database import create_migrated_sqlite_database
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "a1b2c3d4e5f6"
+HEAD_REVISION = "d2c4e6f8a0b1"
 LEGACY_RUNTIME_REVISION = "7a1d5e42c9bd"
+
+
+class MigrationScriptTests(unittest.TestCase):
+    def test_alembic_revision_ids_are_unique(self) -> None:
+        revision_ids: dict[str, list[Path]] = {}
+        for migration_path in (BACKEND_DIR / "alembic" / "versions").glob("*.py"):
+            tree = ast.parse(migration_path.read_text(encoding="utf-8-sig"))
+            revision = None
+            for node in tree.body:
+                if isinstance(node, ast.Assign):
+                    target_names = [target.id for target in node.targets if isinstance(target, ast.Name)]
+                elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                    target_names = [node.target.id]
+                else:
+                    continue
+                if "revision" in target_names and isinstance(node.value, ast.Constant):
+                    revision = node.value.value
+                    break
+            self.assertIsInstance(revision, str, migration_path.name)
+            revision_ids.setdefault(revision, []).append(migration_path)
+
+        duplicates = {
+            revision: [path.name for path in paths]
+            for revision, paths in revision_ids.items()
+            if len(paths) > 1
+        }
+
+        self.assertEqual({}, duplicates)
 
 
 class DatabaseSchemaTests(unittest.TestCase):
