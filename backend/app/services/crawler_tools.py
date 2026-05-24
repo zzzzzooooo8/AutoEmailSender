@@ -10,6 +10,7 @@ import ipaddress
 import platform
 import re
 import socket
+from datetime import datetime, timezone
 from typing import Any, Literal, NotRequired, TypedDict
 from urllib.parse import urljoin, urlparse
 
@@ -67,6 +68,7 @@ _DEFAULT_BROWSER_WAIT_FOR = object()
 
 
 class PageSnapshot(BaseModel):
+    page_id: int | None = None
     url: str
     title: str | None = None
     text: str = ""
@@ -130,6 +132,13 @@ class ProfessorCandidatePayload(BaseModel):
         default=None,
         validation_alias=AliasChoices("evidence", "证据"),
     )
+    source_chunk_id: str | None = None
+    source_kind: str | None = None
+    boundary_risk: bool = False
+    identity_key: str | None = None
+    merge_history: list[dict[str, object]] | None = None
+    field_sources: dict[str, object] | None = None
+    conflicts: dict[str, object] | None = None
 
     @field_validator("research_direction", mode="before")
     @classmethod
@@ -202,17 +211,22 @@ class CandidateBatchFailure(TypedDict):
 
 
 class CandidateBatchSaveResult(TypedDict):
-    batch_status: Literal["saved", "rejected"]
+    batch_status: Literal["saved", "rejected", "duplicate_loop"]
     attempted_count: int
     saved_count: int
+    merged_count: int
+    skipped_duplicate_count: int
+    rejected_count: int
     failed_count: int
     failed_items: list[CandidateBatchFailure]
+    rejected_items: list[CandidateBatchFailure]
     total_saved_count: int
     retry_allowed: NotRequired[bool]
     failure_fingerprint: NotRequired[str | None]
     consecutive_same_batch_failures: NotRequired[int]
     total_save_failures: NotRequired[int]
     terminal_reason: NotRequired[str | None]
+    next_instruction: NotRequired[str]
 
 
 class SaveFailureBudgetFields(TypedDict):
@@ -230,10 +244,214 @@ class SaveFailureBudgetState:
     total_save_failures: int = 0
     last_save_failure_summary: str | None = None
 
+@dataclass(frozen=True)
+class CandidatePersistenceResult:
+    saved: list[CrawlCandidate]
+    merged_count: int = 0
+    skipped_duplicate_count: int = 0
+
+@dataclass
+class DuplicateSaveLoopState:
+    consecutive_duplicate_batches: int = 0
+
 
 def _normalize_page_cache_url(url: str) -> str:
     parsed = urlparse(url.strip())
     return parsed._replace(fragment="").geturl()
+
+
+def normalize_candidate_profile_url(value: object, *, base_url: str | None = None) -> str | None:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    absolute = urljoin(base_url or "", raw) if base_url else raw
+    parsed = urlparse(absolute)
+    normalized = parsed._replace(fragment="").geturl().rstrip("/")
+    return normalized or None
+
+
+def _candidate_missing_contact_path(payload: dict[str, Any]) -> bool:
+    email = str(payload.get("email") or "").strip()
+    profile_url = str(payload.get("profile_url") or "").strip()
+    return not email and not profile_url
+
+_MERGEABLE_TEXT_FIELDS = (
+    "email",
+    "title",
+    "university",
+    "school",
+    "department",
+    "research_direction",
+    "profile_url",
+    "source_url",
+)
+
+
+def _merge_json_dict(current: object, incoming: object) -> dict[str, object]:
+    merged: dict[str, object] = {}
+    if isinstance(current, dict):
+        merged.update(current)
+    if isinstance(incoming, dict):
+        merged.update(incoming)
+    return merged
+
+
+def _append_json_list(current: object, item: dict[str, object], *, limit: int = 20) -> list[dict[str, object]]:
+    entries = list(current) if isinstance(current, list) else []
+    entries.append(item)
+    return entries[-limit:]
+
+
+def _field_source_entry(payload: dict[str, Any], field_name: str) -> dict[str, object]:
+    return {
+        "source_kind": payload.get("source_kind"),
+        "source_chunk_id": payload.get("source_chunk_id"),
+        "source_url": payload.get("source_url"),
+        "confidence": _field_confidence(payload.get("field_confidence"), field_name),
+        "boundary_risk": bool(payload.get("boundary_risk")),
+    }
+
+
+_SOURCE_PRIORITY = {"profile_page": 3, "list_chunk": 2, None: 1}
+
+
+def should_replace_field(
+    *,
+    old_value: object,
+    new_value: object,
+    old_source_kind: str | None,
+    new_source_kind: str | None,
+    old_confidence: float | None,
+    new_confidence: float | None,
+    old_boundary_risk: bool,
+    new_boundary_risk: bool,
+) -> bool:
+    if new_value in (None, ""):
+        return False
+    if old_value in (None, ""):
+        return True
+    if _SOURCE_PRIORITY.get(new_source_kind, 1) > _SOURCE_PRIORITY.get(old_source_kind, 1):
+        return True
+    if old_boundary_risk and not new_boundary_risk:
+        return True
+    return (new_confidence or 0) > (old_confidence or 0) + 0.2
+
+
+def _field_confidence(value: object, field_name: str) -> float | None:
+    if not isinstance(value, dict):
+        return None
+    raw = value.get(field_name)
+    return float(raw) if isinstance(raw, (int, float)) else None
+
+
+def _merge_candidate_payload(existing: CrawlCandidate, payload: dict[str, Any]) -> bool:
+    changed = False
+    field_sources = dict(existing.field_sources) if isinstance(existing.field_sources, dict) else {}
+    conflicts = dict(existing.conflicts) if isinstance(existing.conflicts, dict) else {}
+    merge_event: dict[str, object] = {
+        "merged_at": datetime.now(timezone.utc).isoformat(),
+        "source_kind": payload.get("source_kind"),
+        "source_chunk_id": payload.get("source_chunk_id"),
+        "source_url": payload.get("source_url"),
+        "updated_fields": [],
+        "conflict_fields": [],
+    }
+
+    for field_name in _MERGEABLE_TEXT_FIELDS:
+        new_value = payload.get(field_name)
+        if new_value in (None, ""):
+            continue
+        old_value = getattr(existing, field_name)
+        replace = should_replace_field(
+            old_value=old_value,
+            new_value=new_value,
+            old_source_kind=getattr(existing, "source_kind", None),
+            new_source_kind=payload.get("source_kind"),
+            old_confidence=_field_confidence(existing.field_confidence, field_name),
+            new_confidence=_field_confidence(payload.get("field_confidence"), field_name),
+            old_boundary_risk=bool(getattr(existing, "boundary_risk", False)),
+            new_boundary_risk=bool(payload.get("boundary_risk")),
+        )
+        if replace:
+            setattr(existing, field_name, new_value)
+            field_sources[field_name] = _field_source_entry(payload, field_name)
+            merge_event["updated_fields"].append(field_name)  # type: ignore[index]
+            changed = True
+        elif field_name != "source_url" and old_value not in (None, "") and old_value != new_value:
+            conflicts[field_name] = {
+                "kept": old_value,
+                "incoming": new_value,
+                "incoming_source": _field_source_entry(payload, field_name),
+            }
+            merge_event["conflict_fields"].append(field_name)  # type: ignore[index]
+            changed = True
+
+    if payload.get("recent_papers") and not existing.recent_papers:
+        existing.recent_papers = payload["recent_papers"]
+        field_sources["recent_papers"] = _field_source_entry(payload, "recent_papers")
+        merge_event["updated_fields"].append("recent_papers")  # type: ignore[index]
+        changed = True
+    if payload.get("field_confidence"):
+        existing.field_confidence = _merge_json_dict(existing.field_confidence, payload["field_confidence"])
+        changed = True
+    if payload.get("evidence"):
+        existing.evidence = _merge_json_dict(existing.evidence, payload["evidence"])
+        changed = True
+
+    if (
+        payload.get("source_kind")
+        and payload.get("source_kind") != existing.source_kind
+        and _SOURCE_PRIORITY.get(payload.get("source_kind"), 1) >= _SOURCE_PRIORITY.get(existing.source_kind, 1)
+    ):
+        existing.source_kind = payload["source_kind"]
+        changed = True
+    if payload.get("source_chunk_id") and not existing.source_chunk_id:
+        existing.source_chunk_id = payload["source_chunk_id"]
+        changed = True
+    if bool(existing.boundary_risk) and not bool(payload.get("boundary_risk")):
+        existing.boundary_risk = False
+        changed = True
+
+    if field_sources != (existing.field_sources or {}):
+        existing.field_sources = field_sources
+        changed = True
+    if conflicts != (existing.conflicts or {}):
+        existing.conflicts = conflicts
+        changed = True
+    if merge_event["updated_fields"] or merge_event["conflict_fields"]:
+        existing.merge_history = _append_json_list(existing.merge_history, merge_event)
+        changed = True
+    return changed
+
+
+async def _find_existing_candidate_for_payload(
+    session: AsyncSession,
+    *,
+    job_id: int,
+    email: str | None,
+    profile_url: str | None,
+) -> CrawlCandidate | None:
+    if email:
+        row = await session.scalar(
+            select(CrawlCandidate).where(
+                CrawlCandidate.job_id == job_id,
+                func.lower(CrawlCandidate.email) == email.lower(),
+            )
+        )
+        if row is not None:
+            return row
+    if profile_url:
+        row = await session.scalar(
+            select(CrawlCandidate).where(
+                CrawlCandidate.job_id == job_id,
+                CrawlCandidate.profile_url == profile_url,
+            )
+        )
+        if row is not None:
+            return row
+    return None
 
 
 @dataclass(frozen=True)
@@ -246,6 +464,7 @@ class CrawlToolContext:
     http_blocked_hosts: set[str] = field(default_factory=set)
     denied_urls: dict[str, str] = field(default_factory=dict)
     save_failure_budget: SaveFailureBudgetState = field(default_factory=SaveFailureBudgetState)
+    duplicate_save_loop: DuplicateSaveLoopState = field(default_factory=DuplicateSaveLoopState)
     page_snapshot_cache: OrderedDict[str, PageSnapshot] = field(default_factory=OrderedDict)
     thinking_extra_body: dict[str, object] | None = None
 
@@ -639,6 +858,13 @@ def normalize_candidate_payload(
         "confidence": _clamp_confidence(candidate.confidence),
         "field_confidence": field_confidence,
         "evidence": candidate.evidence,
+        "source_chunk_id": getattr(candidate, "source_chunk_id", None),
+        "source_kind": getattr(candidate, "source_kind", None),
+        "boundary_risk": bool(getattr(candidate, "boundary_risk", False)),
+        "identity_key": getattr(candidate, "identity_key", None),
+        "merge_history": getattr(candidate, "merge_history", None),
+        "field_sources": getattr(candidate, "field_sources", None),
+        "conflicts": getattr(candidate, "conflicts", None),
     }
 
 
@@ -1300,9 +1526,9 @@ async def save_candidates(
         )
         for candidate in candidates
     ]
-    saved = await _save_normalized_candidate_payloads(ctx, payloads)
+    persistence = await _save_normalized_candidate_payloads(ctx, payloads)
     await _ensure_crawl_job_can_continue_for_context(ctx)
-    return saved
+    return persistence.saved
 
 
 async def save_candidate_batch(
@@ -1337,22 +1563,44 @@ async def save_candidate_batch(
             "batch_status": "rejected",
             "attempted_count": len(candidates),
             "saved_count": 0,
+            "merged_count": 0,
+            "skipped_duplicate_count": 0,
+            "rejected_count": 0,
             "failed_count": len(failed_items),
             "failed_items": failed_items,
+            "rejected_items": [],
             "total_saved_count": await count_saved_candidates(ctx),
             **budget_fields,
         }
         await _ensure_crawl_job_can_continue_for_context(ctx)
         return result
 
-    saved = await _save_normalized_candidate_payloads(ctx, payloads)
+    accepted_payloads: list[dict[str, Any]] = []
+    rejected_items: list[CandidateBatchFailure] = []
+    for index, payload in enumerate(payloads):
+        if _candidate_missing_contact_path(payload):
+            rejected_items.append(
+                {
+                    "index": index,
+                    "name": _clean_optional(payload.get("name")),
+                    "reason": "缺少邮箱和详情页链接，无法用于联系或后续补全",
+                }
+            )
+            continue
+        accepted_payloads.append(payload)
+
+    persistence = await _save_normalized_candidate_payloads(ctx, accepted_payloads)
     record_save_batch_success(ctx)
     result = {
         "batch_status": "saved",
         "attempted_count": len(candidates),
-        "saved_count": len(saved),
+        "saved_count": len(persistence.saved),
+        "merged_count": persistence.merged_count,
+        "skipped_duplicate_count": persistence.skipped_duplicate_count,
+        "rejected_count": len(rejected_items),
         "failed_count": 0,
         "failed_items": [],
+        "rejected_items": rejected_items,
         "total_saved_count": await count_saved_candidates(ctx),
         "retry_allowed": True,
         "failure_fingerprint": None,
@@ -1360,6 +1608,18 @@ async def save_candidate_batch(
         "total_save_failures": ctx.save_failure_budget.total_save_failures,
         "terminal_reason": None,
     }
+    if (
+        result["saved_count"] == 0
+        and result["merged_count"] == 0
+        and result["skipped_duplicate_count"] > 0
+    ):
+        ctx.duplicate_save_loop.consecutive_duplicate_batches += 1
+    else:
+        ctx.duplicate_save_loop.consecutive_duplicate_batches = 0
+
+    if ctx.duplicate_save_loop.consecutive_duplicate_batches >= 3:
+        result["batch_status"] = "duplicate_loop"
+        result["next_instruction"] = "连续多个批次均为重复候选，请停止保存当前内容，获取下一个 chunk 或结束任务。"
     await _ensure_crawl_job_can_continue_for_context(ctx)
     return result
 
@@ -1375,33 +1635,62 @@ async def count_saved_candidates(ctx: CrawlToolContext) -> int:
 async def _save_normalized_candidate_payloads(
     ctx: CrawlToolContext,
     payloads: Sequence[dict[str, Any]],
-) -> list[CrawlCandidate]:
+) -> CandidatePersistenceResult:
     saved: list[CrawlCandidate] = []
+    merged_count = 0
+    skipped_duplicate_count = 0
     async with ctx.session_factory() as session:
         if await _is_crawl_job_stopped(session, ctx.job_id):
-            return []
+            return CandidatePersistenceResult(saved=[])
 
-        existing_emails = await _load_existing_candidate_emails(session, ctx.job_id)
-        seen_emails = set(existing_emails)
         for payload in payloads:
             email = payload["email"]
-            if email and str(email).lower() in seen_emails:
+            normalized_email = str(email).lower() if email else None
+            normalized_profile_url = normalize_candidate_profile_url(
+                payload.get("profile_url"),
+                base_url=ctx.start_url,
+            )
+            if normalized_profile_url:
+                payload["profile_url"] = normalized_profile_url
+
+            existing = await _find_existing_candidate_for_payload(
+                session,
+                job_id=ctx.job_id,
+                email=normalized_email,
+                profile_url=normalized_profile_url,
+            )
+            if existing is not None:
+                if _merge_candidate_payload(existing, payload):
+                    merged_count += 1
+                else:
+                    skipped_duplicate_count += 1
                 continue
+
+            if not payload.get("identity_key"):
+                payload["identity_key"] = normalized_email or normalized_profile_url
+            if not payload.get("field_sources"):
+                payload["field_sources"] = {
+                    field_name: _field_source_entry(payload, field_name)
+                    for field_name in (*_MERGEABLE_TEXT_FIELDS, "recent_papers")
+                    if payload.get(field_name) not in (None, "", [])
+                }
 
             row = CrawlCandidate(job_id=ctx.job_id, **payload)
             session.add(row)
             saved.append(row)
-            if email:
-                seen_emails.add(str(email).lower())
 
         if await _is_crawl_job_stopped(session, ctx.job_id):
             await session.rollback()
-            return []
+            return CandidatePersistenceResult(saved=[])
 
         await session.commit()
         for row in saved:
             await session.refresh(row)
-    return saved
+    return CandidatePersistenceResult(
+        saved=saved,
+        merged_count=merged_count,
+        skipped_duplicate_count=skipped_duplicate_count,
+    )
 
 
 async def record_page_snapshot(ctx: CrawlToolContext, snapshot: PageSnapshot) -> CrawlPage | None:
@@ -1427,6 +1716,7 @@ async def record_page_snapshot(ctx: CrawlToolContext, snapshot: PageSnapshot) ->
 
         await session.commit()
         await session.refresh(row)
+        snapshot.page_id = row.id
         return row
 
 
@@ -1553,6 +1843,20 @@ async def _load_existing_candidate_emails(session: AsyncSession, job_id: int) ->
         )
     )
     return {email.lower() for email in result if email}
+
+
+async def _load_existing_candidate_profile_urls(session: AsyncSession, job_id: int) -> set[str]:
+    result = await session.scalars(
+        select(CrawlCandidate.profile_url).where(
+            CrawlCandidate.job_id == job_id,
+            CrawlCandidate.profile_url.is_not(None),
+        )
+    )
+    return {
+        normalized
+        for profile_url in result
+        if (normalized := normalize_candidate_profile_url(profile_url))
+    }
 
 
 async def ensure_crawl_job_can_continue(session: AsyncSession, job_id: int) -> None:

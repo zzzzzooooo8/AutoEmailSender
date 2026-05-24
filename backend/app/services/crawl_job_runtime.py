@@ -11,8 +11,10 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import get_settings
-from app.models import CrawlCandidate, CrawlJob, CrawlJobStatus, CrawlPage, LLMProfile
+from app.models import CrawlCandidate, CrawlJob, CrawlJobRun, CrawlJobStatus, CrawlPage, CrawlPageChunk, CrawlPageChunkStatus, LLMProfile
 from app.services.crawler_debug import append_crawler_debug_event
+from app.services.crawler_chunking import ChunkingConfig, build_page_chunks
+from app.services.crawler_chunk_runtime import create_chunks_for_page
 from app.services.crawl_job_events import normalize_agent_trace_event
 from app.services.crawl_job_runs import (
     accumulate_crawl_job_run_tokens,
@@ -36,6 +38,7 @@ from app.services.crawler_tools import (
     CrawlToolContext,
     CandidateEnrichmentPayload,
     ProfessorCandidatePayload,
+    PageSnapshot,
     build_candidate_enrichment_prompt,
     build_profile_candidate_prompt,
     crawl_page_with_crawl4ai,
@@ -48,6 +51,53 @@ NO_LLM_PROFILE_ERROR = "请先配置可用的 LLM Profile"
 WORKER_CANCELLED_ERROR = "抓取任务被后台 worker 取消"
 INTERRUPTED_JOB_ERROR = "抓取任务因桌面端进程中断而停止"
 NO_CANDIDATES_SAVED_ERROR = "抓取结束但未成功保存任何候选导师"
+
+
+async def crawl_job_has_pending_work(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    job_id: int,
+) -> bool:
+    async with session_factory() as session:
+        return await _crawl_job_has_pending_work_in_session(session, job_id=job_id)
+
+
+async def _crawl_job_has_pending_work_in_session(session: AsyncSession, *, job_id: int) -> bool:
+    pending_chunk = await session.scalar(
+        select(CrawlPageChunk.id)
+        .where(
+            CrawlPageChunk.job_id == job_id,
+            CrawlPageChunk.status.in_(
+                [
+                    CrawlPageChunkStatus.PENDING.value,
+                    CrawlPageChunkStatus.PROCESSING.value,
+                    CrawlPageChunkStatus.SPLIT_REQUIRED.value,
+                ]
+            ),
+        )
+        .limit(1)
+    )
+    return pending_chunk is not None
+
+
+async def create_chunks_for_successful_page_snapshot(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    job_id: int,
+    page_id: int | None,
+    snapshot: PageSnapshot,
+) -> int:
+    if snapshot.status != "succeeded":
+        return 0
+    if not snapshot.text.strip() and not snapshot.html.strip():
+        return 0
+    drafts = build_page_chunks(
+        source_url=snapshot.url,
+        html=snapshot.html,
+        text=snapshot.text,
+        config=ChunkingConfig(),
+    )
+    return await create_chunks_for_page(session_factory, job_id=job_id, page_id=page_id, drafts=drafts)
 PROFILE_EXTRACTION_FAILED_ERROR = "未能从详情页识别导师信息"
 INVALID_SAVE_TOOL_CALL_ERROR = (
     "抓取结果未成功保存：Agent 生成了无效的 save_professor_candidates 调用"
@@ -325,6 +375,16 @@ async def _recover_interrupted_crawl_job(
         if job is None or job.status != CrawlJobStatus.RUNNING.value:
             return
 
+        if await _crawl_job_has_pending_work_in_session(session, job_id=job_id):
+            now = datetime.now(UTC)
+            job.updated_at = now
+            if job.current_run_id is not None:
+                run = await session.get(CrawlJobRun, job.current_run_id)
+                if run is not None and run.status == CrawlJobStatus.RUNNING.value:
+                    run.updated_at = now
+            await session.commit()
+            return
+
         candidate_count = await session.scalar(
             select(func.count()).select_from(CrawlCandidate).where(CrawlCandidate.job_id == job_id)
         )
@@ -442,6 +502,16 @@ async def _complete_running_job(
     async with session_factory() as session:
         job = await session.get(CrawlJob, job_id)
         if job is None or job.status != CrawlJobStatus.RUNNING.value:
+            return
+
+        if await _crawl_job_has_pending_work_in_session(session, job_id=job_id):
+            now = datetime.now(UTC)
+            job.updated_at = now
+            if job.current_run_id is not None:
+                run = await session.get(CrawlJobRun, job.current_run_id)
+                if run is not None and run.status == CrawlJobStatus.RUNNING.value:
+                    run.updated_at = now
+            await session.commit()
             return
 
         candidate_count = await session.scalar(
