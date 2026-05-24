@@ -7,9 +7,11 @@ from unittest.mock import patch
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.agents.faculty_crawler_agent import (
+    CONTROLLED_CRAWLER_TOOL_NAMES,
     FACULTY_CRAWLER_SYSTEM_PROMPT,
     SaveHistoryCompactionMiddleware,
     build_faculty_crawler_model,
+    build_trace_event,
     compact_save_tool_history,
     _format_save_batch_result_for_model,
     _validate_professor_candidate_batch,
@@ -24,8 +26,12 @@ class FacultyCrawlerAgentSaveResultTests(unittest.TestCase):
                 "batch_status": "saved",
                 "attempted_count": 10,
                 "saved_count": 10,
+                "merged_count": 0,
+                "skipped_duplicate_count": 0,
+                "rejected_count": 0,
                 "failed_count": 0,
                 "failed_items": [],
+                "rejected_items": [],
                 "total_saved_count": 50,
             }
         )
@@ -36,8 +42,12 @@ class FacultyCrawlerAgentSaveResultTests(unittest.TestCase):
                 "batch_status": "saved",
                 "attempted_count": 10,
                 "saved_count": 10,
+                "merged_count": 0,
+                "skipped_duplicate_count": 0,
+                "rejected_count": 0,
                 "failed_count": 0,
                 "failed_items": [],
+                "rejected_items": [],
                 "total_saved_count": 50,
             },
         )
@@ -66,6 +76,29 @@ class FacultyCrawlerAgentSaveResultTests(unittest.TestCase):
         self.assertEqual(result["consecutive_same_batch_failures"], 1)
         self.assertEqual(result["total_save_failures"], 1)
         self.assertIsNone(result["terminal_reason"])
+
+
+    def test_format_save_batch_result_for_model_includes_duplicate_feedback(self) -> None:
+        result = _format_save_batch_result_for_model(
+            {
+                "batch_status": "duplicate_loop",
+                "attempted_count": 10,
+                "saved_count": 0,
+                "merged_count": 0,
+                "skipped_duplicate_count": 10,
+                "rejected_count": 0,
+                "failed_count": 0,
+                "failed_items": [],
+                "rejected_items": [],
+                "total_saved_count": 20,
+                "next_instruction": "连续多个批次均为重复候选，请停止保存当前内容，获取下一个 chunk 或结束任务。",
+            }
+        )
+
+        self.assertEqual(result["merged_count"], 0)
+        self.assertEqual(result["skipped_duplicate_count"], 10)
+        self.assertEqual(result["rejected_count"], 0)
+        self.assertIn("获取下一个 chunk", result["next_instruction"])
 
     def test_validate_professor_candidate_batch_collects_schema_failures(self) -> None:
         payloads, failed_items = _validate_professor_candidate_batch(
@@ -231,6 +264,16 @@ class FacultyCrawlerAgentCompactionTests(unittest.TestCase):
 
 
 class FacultyCrawlerAgentMiddlewareTests(unittest.TestCase):
+    def test_build_trace_event_truncates_large_chunk_content(self) -> None:
+        event = {"data": {"tools": {"messages": [{"content": "x" * 2000}]}}}
+        trace = build_trace_event(event)
+        self.assertNotIn("x" * 1500, str(trace))
+        self.assertIn("chunk 内容已截断", str(trace))
+
+    def test_controlled_tool_names_include_chunk_tools(self) -> None:
+        self.assertIn("claim_next_page_chunk", CONTROLLED_CRAWLER_TOOL_NAMES)
+        self.assertIn("submit_chunk_candidates", CONTROLLED_CRAWLER_TOOL_NAMES)
+
     def test_save_history_compaction_middleware_overrides_messages(self) -> None:
         original_messages = [
             HumanMessage(content="入口任务"),
