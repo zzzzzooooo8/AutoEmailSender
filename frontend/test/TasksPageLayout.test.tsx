@@ -2,9 +2,8 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TasksPage } from "@/pages/TasksPage";
-import { listBatchTaskItems, listBatchTasks } from "@/lib/api/batchTasksApi";
+import { getBatchTaskItemThread, listBatchTaskItems, listBatchTasks } from "@/lib/api/batchTasksApi";
 import { listMatchAnalysisJobs } from "@/lib/api/matchAnalysisJobsApi";
-import { ensureWorkspaceTask, getWorkspaceThread } from "@/lib/api/workspacesApi";
 import type { WorkspaceThreadDTO } from "@/types";
 
 const mockedUseSelectionContext = vi.hoisted(() => vi.fn());
@@ -27,6 +26,7 @@ vi.mock("@/lib/useConfirmDialog", () => ({
 }));
 
 vi.mock("@/lib/api/batchTasksApi", () => ({
+  getBatchTaskItemThread: vi.fn(),
   listBatchTaskItems: vi.fn(),
   listBatchTasks: vi.fn(),
   pauseBatchTask: vi.fn(),
@@ -39,11 +39,6 @@ vi.mock("@/lib/api/matchAnalysisJobsApi", () => ({
   listMatchAnalysisJobs: vi.fn(),
   cancelMatchAnalysisJob: vi.fn(),
   retryFailedMatchAnalysisJob: vi.fn(),
-}));
-
-vi.mock("@/lib/api/workspacesApi", () => ({
-  ensureWorkspaceTask: vi.fn(),
-  getWorkspaceThread: vi.fn(),
 }));
 
 const renderPage = () =>
@@ -253,8 +248,7 @@ describe("TasksPage layout", () => {
     vi.mocked(listBatchTasks).mockResolvedValue([]);
     vi.mocked(listBatchTaskItems).mockResolvedValue([]);
     vi.mocked(listMatchAnalysisJobs).mockResolvedValue([]);
-    vi.mocked(getWorkspaceThread).mockResolvedValue(buildWorkspaceThread());
-    vi.mocked(ensureWorkspaceTask).mockResolvedValue(buildWorkspaceThread());
+    vi.mocked(getBatchTaskItemThread).mockResolvedValue(buildWorkspaceThread());
   });
 
   it("uses the same wide page shell as the other primary pages", async () => {
@@ -397,26 +391,13 @@ describe("TasksPage layout", () => {
     });
   });
 
-  it("bootstraps a fresh manual workspace task before reviewing an expired batch draft", async () => {
+  it("loads the batch draft review thread from the selected batch item", async () => {
     vi.mocked(listBatchTasks).mockResolvedValue([runningTask]);
     vi.mocked(listBatchTaskItems).mockResolvedValue([pendingTaskItem]);
-    vi.mocked(getWorkspaceThread).mockResolvedValueOnce(
+    vi.mocked(getBatchTaskItemThread).mockResolvedValueOnce(
       buildWorkspaceThread({
-        id: 701,
-        status: "canceled",
-        cancellation_reason: "schedule_expired",
-        generated_subject: "过期草稿主题",
-      }),
-    );
-    vi.mocked(ensureWorkspaceTask).mockResolvedValueOnce(
-      buildWorkspaceThread({
-        id: 802,
-        source: "manual",
-        batch_task_id: null,
-        parent_task_id: 701,
-        status: "matched",
-        cancellation_reason: null,
-        generated_subject: "新手动草稿主题",
+        id: pendingTaskItem.id,
+        generated_subject: "批量草稿主题",
       }),
     );
 
@@ -426,12 +407,10 @@ describe("TasksPage layout", () => {
     fireEvent.click(await screen.findByRole("button", { name: "审核草稿" }));
 
     await waitFor(() => {
-      expect(getWorkspaceThread).toHaveBeenCalledWith(102, 1, 2);
-      expect(ensureWorkspaceTask).toHaveBeenCalledWith(102, 1, 2);
+      expect(getBatchTaskItemThread).toHaveBeenCalledWith(runningTask.id, pendingTaskItem.id);
     });
     expect(
       screen.getByRole("textbox", { name: "邮件主题" }),
-    ).toHaveTextContent("新手动草稿主题");
-    expect(screen.queryByText("过期草稿主题")).not.toBeInTheDocument();
+    ).toHaveTextContent("批量草稿主题");
   });
 });

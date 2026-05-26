@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NotificationProvider } from "@/context/NotificationContext";
 import { formatApiDateTime } from "@/lib/dateTime";
@@ -73,9 +74,11 @@ const buildProfessor = (id: number): ProfessorManagementItemDTO => ({
 
 const renderPage = () =>
   render(
-    <NotificationProvider>
-      <ProfessorsPage />
-    </NotificationProvider>,
+    <MemoryRouter>
+      <NotificationProvider>
+        <ProfessorsPage />
+      </NotificationProvider>
+    </MemoryRouter>,
   );
 
 const expectToAppearBefore = (first: HTMLElement, second: HTMLElement) => {

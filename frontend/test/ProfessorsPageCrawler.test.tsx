@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NotificationProvider } from "@/context/NotificationContext";
 import { clearDiagnosticEvents, getDiagnosticEvents } from "@/lib/diagnostics";
@@ -34,9 +35,11 @@ vi.mock("@/lib/api/crawlJobsApi", () => ({
 
 const renderPage = () =>
   render(
-    <NotificationProvider>
-      <ProfessorsPage />
-    </NotificationProvider>,
+    <MemoryRouter>
+      <NotificationProvider>
+        <ProfessorsPage />
+      </NotificationProvider>
+    </MemoryRouter>,
   );
 
 describe("ProfessorsPage crawler job entry", () => {
