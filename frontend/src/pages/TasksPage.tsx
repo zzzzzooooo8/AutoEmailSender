@@ -24,14 +24,16 @@ import { useNotification } from "@/context/NotificationContext";
 import { useSelectionContext } from "@/context/SelectionContext";
 import { useConfirmDialog } from "@/lib/useConfirmDialog";
 import { safeRecordUserAction } from "@/lib/diagnosticUserActions";
-import { approveAndSend, approveDraft, regenerateDraft } from "@/lib/api/emailTasksApi";
-import { openWorkspaceThread } from "@/features/workspace/client/openWorkspaceThread";
 import {
+  approveAndSendBatchTaskItemDraft,
+  approveBatchTaskItemDraft,
   deleteBatchTask,
   deleteBatchTaskItem,
+  getBatchTaskItemThread,
   listBatchTasks,
   listBatchTaskItems,
   pauseBatchTask,
+  regenerateBatchTaskItemDraft,
   retryBatchTaskItemDraft,
   restoreBatchTask,
   resumeBatchTask,
@@ -1818,6 +1820,19 @@ const selectedCrawlJobCanReview =
     setBatchReviewSelectedMaterialIds(draft.selectedMaterialIds);
   };
 
+  const ensureBatchReviewThreadMatchesItem = (
+    thread: WorkspaceThreadDTO,
+    item: BatchTaskItemDTO,
+    task: BatchTaskCardDTO,
+  ) => {
+    if (
+      thread.current_task.id !== item.id ||
+      thread.current_task.batch_task_id !== task.id
+    ) {
+      throw new Error("草稿任务与当前批量任务不一致，请刷新后重试");
+    }
+  };
+
   const openBatchDraftReview = async (item: BatchTaskItemDTO) => {
     if (!selectedBatchTask) {
       return;
@@ -1829,14 +1844,11 @@ const selectedCrawlJobCanReview =
     setBatchReviewThread(null);
     setBatchReviewLoading(true);
     try {
-      const thread = await openWorkspaceThread(
-        item.professor_id,
-        selectedBatchTask.identity_id,
-        selectedBatchTask.llm_profile_id,
-      );
+      const thread = await getBatchTaskItemThread(selectedBatchTask.id, item.id);
       if (latestBatchReviewRequestIdRef.current !== requestId) {
         return;
       }
+      ensureBatchReviewThreadMatchesItem(thread, item, selectedBatchTask);
       syncBatchDraftReview(thread);
     } catch (actionError) {
       if (latestBatchReviewRequestIdRef.current !== requestId) {
@@ -1890,9 +1902,8 @@ const selectedCrawlJobCanReview =
   };
 
   const handleRegenerateBatchDraft = async () => {
-    const taskId = batchReviewThread?.current_task.id;
     const itemId = batchReviewItemId;
-    if (!taskId || itemId === null) {
+    if (!selectedBatchTask || !activeBatchReviewItem || itemId === null) {
       return;
     }
     const confirmed = await confirm({
@@ -1906,7 +1917,8 @@ const selectedCrawlJobCanReview =
     }
     setBatchReviewItemAction(itemId, "regenerate");
     try {
-      const thread = await regenerateDraft(taskId);
+      const thread = await regenerateBatchTaskItemDraft(selectedBatchTask.id, itemId);
+      ensureBatchReviewThreadMatchesItem(thread, activeBatchReviewItem, selectedBatchTask);
       setBatchReviewItemId((currentItemId) => {
         if (currentItemId === itemId) {
           syncBatchDraftReview(thread);
@@ -1927,8 +1939,7 @@ const selectedCrawlJobCanReview =
   };
 
   const handleApproveBatchDraft = async () => {
-    const taskId = batchReviewThread?.current_task.id;
-    if (!taskId || !selectedBatchTask || !activeBatchReviewItem) {
+    if (!batchReviewThread?.current_task.id || !selectedBatchTask || !activeBatchReviewItem) {
       return;
     }
     const nextItem =
@@ -1937,7 +1948,12 @@ const selectedCrawlJobCanReview =
     const itemId = activeBatchReviewItem.id;
     setBatchReviewItemAction(itemId, "submit");
     try {
-      await approveDraft(taskId, buildBatchReviewPayload());
+      const thread = await approveBatchTaskItemDraft(
+        selectedBatchTask.id,
+        itemId,
+        buildBatchReviewPayload(),
+      );
+      ensureBatchReviewThreadMatchesItem(thread, activeBatchReviewItem, selectedBatchTask);
       notifySuccess("草稿已审核通过");
       setSelectedBatchTaskItems((current) =>
         current.map((item) =>
@@ -2027,8 +2043,7 @@ const selectedCrawlJobCanReview =
   };
 
   const handleSendBatchDraftNow = async () => {
-    const taskId = batchReviewThread?.current_task.id;
-    if (!taskId || !selectedBatchTask || !activeBatchReviewItem) {
+    if (!batchReviewThread?.current_task.id || !selectedBatchTask || !activeBatchReviewItem) {
       return;
     }
     const confirmed = await confirm({
@@ -2047,7 +2062,12 @@ const selectedCrawlJobCanReview =
     const itemId = activeBatchReviewItem.id;
     setBatchReviewItemAction(itemId, "submit");
     try {
-      await approveAndSend(taskId, buildBatchReviewPayload());
+      const thread = await approveAndSendBatchTaskItemDraft(
+        selectedBatchTask.id,
+        itemId,
+        buildBatchReviewPayload(),
+      );
+      ensureBatchReviewThreadMatchesItem(thread, activeBatchReviewItem, selectedBatchTask);
       notifySuccess("邮件已提交发送");
       setSelectedBatchTaskItems((current) =>
         current.map((item) =>
