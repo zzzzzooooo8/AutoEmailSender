@@ -253,6 +253,9 @@ class CandidatePersistenceResult:
 @dataclass
 class DuplicateSaveLoopState:
     consecutive_duplicate_batches: int = 0
+    last_merged_batch_fingerprint: str | None = None
+    consecutive_merged_duplicate_batches: int = 0
+    consecutive_chunk_required_tool_calls: int = 0
 
 
 def _normalize_page_cache_url(url: str) -> str:
@@ -314,7 +317,7 @@ def _field_source_entry(payload: dict[str, Any], field_name: str) -> dict[str, o
     }
 
 
-_SOURCE_PRIORITY = {"profile_page": 3, "list_chunk": 2, None: 1}
+_SOURCE_PRIORITY = {"profile_page": 4, "page_chunk": 3, "list_chunk": 2, None: 1}
 
 
 def should_replace_field(
@@ -585,6 +588,29 @@ def record_save_batch_success(ctx: CrawlToolContext) -> None:
     state.same_batch_save_failures = 0
     state.last_save_failure_summary = None
 
+
+
+def update_duplicate_merge_loop_state(
+    ctx: CrawlToolContext,
+    candidates: Sequence[object],
+    result: CandidateBatchSaveResult,
+) -> None:
+    state = ctx.duplicate_save_loop
+    if (
+        result["saved_count"] == 0
+        and result["merged_count"] > 0
+        and result["failed_count"] == 0
+        and result["rejected_count"] == 0
+    ):
+        fingerprint = save_candidate_batch_fingerprint(candidates)
+        if state.last_merged_batch_fingerprint == fingerprint:
+            state.consecutive_merged_duplicate_batches += 1
+        else:
+            state.last_merged_batch_fingerprint = fingerprint
+            state.consecutive_merged_duplicate_batches = 1
+    else:
+        state.last_merged_batch_fingerprint = None
+        state.consecutive_merged_duplicate_batches = 0
 
 def _candidate_identity(candidate: object) -> str:
     return "|".join(
@@ -1616,10 +1642,14 @@ async def save_candidate_batch(
         ctx.duplicate_save_loop.consecutive_duplicate_batches += 1
     else:
         ctx.duplicate_save_loop.consecutive_duplicate_batches = 0
+    update_duplicate_merge_loop_state(ctx, candidates, result)
 
     if ctx.duplicate_save_loop.consecutive_duplicate_batches >= 3:
         result["batch_status"] = "duplicate_loop"
         result["next_instruction"] = "连续多个批次均为重复候选，请停止保存当前内容，获取下一个 chunk 或结束任务。"
+    elif ctx.duplicate_save_loop.consecutive_merged_duplicate_batches >= 2:
+        result["batch_status"] = "duplicate_loop"
+        result["next_instruction"] = "连续重复合并同一批候选，未产生新增候选。请停止保存当前内容；如果没有明确未访问的新候选列表页，请结束任务。"
     await _ensure_crawl_job_can_continue_for_context(ctx)
     return result
 

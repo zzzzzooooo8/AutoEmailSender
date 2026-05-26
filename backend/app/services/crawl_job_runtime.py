@@ -100,10 +100,10 @@ async def create_chunks_for_successful_page_snapshot(
     return await create_chunks_for_page(session_factory, job_id=job_id, page_id=page_id, drafts=drafts)
 PROFILE_EXTRACTION_FAILED_ERROR = "未能从详情页识别导师信息"
 INVALID_SAVE_TOOL_CALL_ERROR = (
-    "抓取结果未成功保存：Agent 生成了无效的 save_professor_candidates 调用"
+    "抓取结果未成功保存：Agent 生成了无效的 submit_page_chunk_candidates 调用"
 )
 TRUNCATED_SAVE_TOOL_CALL_ERROR = (
-    "抓取结果未成功保存：模型在调用 save_professor_candidates 时输出被截断"
+    "抓取结果未成功保存：模型在调用 submit_page_chunk_candidates 时输出被截断"
 )
 MAX_AGENT_TRACE_EVENTS = 100
 DIRECT_LLM_STRUCTURED_MAX_ATTEMPTS = 2
@@ -377,10 +377,12 @@ async def _recover_interrupted_crawl_job(
 
         if await _crawl_job_has_pending_work_in_session(session, job_id=job_id):
             now = datetime.now(UTC)
+            job.status = CrawlJobStatus.QUEUED.value
             job.updated_at = now
             if job.current_run_id is not None:
                 run = await session.get(CrawlJobRun, job.current_run_id)
                 if run is not None and run.status == CrawlJobStatus.RUNNING.value:
+                    run.status = CrawlJobStatus.QUEUED.value
                     run.updated_at = now
             await session.commit()
             return
@@ -506,10 +508,12 @@ async def _complete_running_job(
 
         if await _crawl_job_has_pending_work_in_session(session, job_id=job_id):
             now = datetime.now(UTC)
+            job.status = CrawlJobStatus.QUEUED.value
             job.updated_at = now
             if job.current_run_id is not None:
                 run = await session.get(CrawlJobRun, job.current_run_id)
                 if run is not None and run.status == CrawlJobStatus.RUNNING.value:
+                    run.status = CrawlJobStatus.QUEUED.value
                     run.updated_at = now
             await session.commit()
             return
@@ -1442,7 +1446,7 @@ def _derive_candidate_save_failure(agent_trace: Any) -> str:
     trace_events = _normalize_trace(agent_trace)
     for event in reversed(trace_events):
         haystack = _stringify_trace_payload(event)
-        if "save_professor_candidates" not in haystack:
+        if "submit_page_chunk_candidates" not in haystack:
             continue
         if "invalid_tool_call" in haystack or "invalid_tool_calls" in haystack:
             if "finish_reason='length'" in haystack or '"finish_reason": "length"' in haystack:

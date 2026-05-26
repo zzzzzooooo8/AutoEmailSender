@@ -20,8 +20,7 @@ TOOL_MESSAGES = {
     "crawl_page": "Agent 调用 crawl_page 抓取页面",
     "investigate_with_browser": "Agent 调用浏览器调查页面",
     "claim_next_page_chunk": "Agent 领取待处理页面片段",
-    "submit_chunk_candidates": "Agent 提交页面片段候选",
-    "save_professor_candidates": "Agent 保存候选导师",
+    "submit_page_chunk_candidates": "Agent 提交页面片段候选",
 }
 KNOWN_TOOL_NAMES = frozenset(TOOL_MESSAGES)
 EVENT_TYPE_MESSAGES = {
@@ -32,6 +31,11 @@ GENERIC_AGENT_MESSAGES = {
     "Agent 事件：updates",
     "Agent 事件：dict",
     "Agent 更新了执行状态",
+}
+LOW_VALUE_AGENT_MESSAGES = {
+    "Agent 调用 crawl_page 抓取页面",
+    "Agent 领取待处理页面片段",
+    "Agent 提交页面片段候选",
 }
 TOOL_NAME_PATTERN = re.compile(r"['\"]name['\"]\s*:\s*['\"]([^'\"]+)['\"]")
 
@@ -213,6 +217,8 @@ def _find_nested_tool_name(value: object) -> str | None:
 def _should_include_agent_trace_event(event: dict[str, object]) -> bool:
     message = event.get("message")
     if isinstance(message, str) and message.strip() in GENERIC_AGENT_MESSAGES:
+        return False
+    if isinstance(message, str) and message.strip() in LOW_VALUE_AGENT_MESSAGES:
         return False
     return True
 

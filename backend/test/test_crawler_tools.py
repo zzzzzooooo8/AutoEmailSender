@@ -1162,6 +1162,57 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(row.research_direction, "数据库与大数据管理")
                 self.assertIn("后续 chunk", str(row.evidence))
 
+    async def test_repeated_same_merge_returns_duplicate_loop_after_two_batches(self) -> None:
+        async with _RealCrawlerSessionHarness() as harness:
+            job_id = await harness.create_job()
+            ctx = CrawlToolContext(
+                job_id=job_id,
+                start_url="https://cs.example.edu/faculty",
+                university="示例大学",
+                school="计算机学院",
+                session_factory=harness.session_factory,
+            )
+            await save_candidate_batch(
+                ctx,
+                [
+                    ProfessorCandidatePayload(
+                        name="张三",
+                        email="zhang@example.edu",
+                        profile_url="https://cs.example.edu/teachers/zhang",
+                        source_url="https://cs.example.edu/faculty",
+                    )
+                ],
+            )
+            first_merge = await save_candidate_batch(
+                ctx,
+                [
+                    ProfessorCandidatePayload(
+                        name="张三",
+                        email="zhang@example.edu",
+                        profile_url="https://cs.example.edu/teachers/zhang",
+                        source_url="https://cs.example.edu/faculty?page=2",
+                        evidence={"summary": "第一次重复补充"},
+                    )
+                ],
+            )
+            second_merge = await save_candidate_batch(
+                ctx,
+                [
+                    ProfessorCandidatePayload(
+                        name="张三",
+                        email="zhang@example.edu",
+                        profile_url="https://cs.example.edu/teachers/zhang",
+                        source_url="https://cs.example.edu/faculty?page=2",
+                        evidence={"summary": "第二次重复补充"},
+                    )
+                ],
+            )
+
+            self.assertEqual(first_merge["batch_status"], "saved")
+            self.assertEqual(first_merge["merged_count"], 1)
+            self.assertEqual(second_merge["batch_status"], "duplicate_loop")
+            self.assertIn("重复合并", second_merge["next_instruction"])
+
     async def test_save_candidate_batch_does_not_replace_existing_email_with_empty_value(self) -> None:
         async with _RealCrawlerSessionHarness() as harness:
             job_id = await harness.create_job()

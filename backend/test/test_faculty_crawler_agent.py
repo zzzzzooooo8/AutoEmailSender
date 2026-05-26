@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
@@ -12,11 +12,16 @@ from app.agents.faculty_crawler_agent import (
     SaveHistoryCompactionMiddleware,
     build_faculty_crawler_model,
     build_trace_event,
+    compact_completed_chunk_history,
     compact_save_tool_history,
+    run_faculty_crawler_agent,
+    _format_chunked_crawl_page_response,
     _format_save_batch_result_for_model,
     _validate_professor_candidate_batch,
 )
 from app.models import LLMProfile
+from app.services.crawler_tools import CrawlToolContext
+from app.services.crawler_tools import PageSnapshot
 
 
 class FacultyCrawlerAgentSaveResultTests(unittest.TestCase):
@@ -133,6 +138,23 @@ class FacultyCrawlerAgentCompactionTests(unittest.TestCase):
         self.assertIn("confidence 必须是 0 到 1 的数字", FACULTY_CRAWLER_SYSTEM_PROMPT)
         self.assertIn("evidence 保持简短", FACULTY_CRAWLER_SYSTEM_PROMPT)
 
+    def test_system_prompt_makes_chunk_save_path_mandatory(self) -> None:
+        self.assertIn("页面正文中的候选必须通过 submit_page_chunk_candidates 提交", FACULTY_CRAWLER_SYSTEM_PROMPT)
+        self.assertIn("不要尝试使用其他保存入口", FACULTY_CRAWLER_SYSTEM_PROMPT)
+        self.assertIn("返回 status=chunked", FACULTY_CRAWLER_SYSTEM_PROMPT)
+        self.assertIn("必须立即调用 claim_next_page_chunk", FACULTY_CRAWLER_SYSTEM_PROMPT)
+
+    def test_system_prompt_requires_finishing_current_chunk_before_new_page(self) -> None:
+        self.assertIn("领取 chunk 后必须先完成当前 chunk", FACULTY_CRAWLER_SYSTEM_PROMPT)
+        self.assertIn("发现新的候选列表页、分页或详情页链接时，先记住该 URL", FACULTY_CRAWLER_SYSTEM_PROMPT)
+        self.assertIn("当前 chunk 完成后再调用 crawl_page", FACULTY_CRAWLER_SYSTEM_PROMPT)
+        self.assertIn("不要在同一轮同时调用 submit_page_chunk_candidates 和 crawl_page", FACULTY_CRAWLER_SYSTEM_PROMPT)
+        self.assertIn("has_unsubmitted_candidates_in_current_chunk", FACULTY_CRAWLER_SYSTEM_PROMPT)
+        self.assertIn("刚好提交 10 个候选不代表需要拆分", FACULTY_CRAWLER_SYSTEM_PROMPT)
+        self.assertIn("investigate_with_browser 不能用于绕过 chunk", FACULTY_CRAWLER_SYSTEM_PROMPT)
+        self.assertIn("当前存在待处理 chunk 时，必须先 claim_next_page_chunk", FACULTY_CRAWLER_SYSTEM_PROMPT)
+        self.assertIn("只有当前 chunk 正文中明确还有超过 10 个已看见候选", FACULTY_CRAWLER_SYSTEM_PROMPT)
+
     def test_compact_save_tool_history_keeps_saved_candidate_identities(self) -> None:
         messages = [
             HumanMessage(content="入口任务"),
@@ -140,7 +162,7 @@ class FacultyCrawlerAgentCompactionTests(unittest.TestCase):
                 content="",
                 tool_calls=[
                     {
-                        "name": "save_professor_candidates",
+                        "name": "submit_page_chunk_candidates",
                         "args": {
                             "candidates": [
                                 {
@@ -162,7 +184,7 @@ class FacultyCrawlerAgentCompactionTests(unittest.TestCase):
                 content="",
                 tool_calls=[
                     {
-                        "name": "save_professor_candidates",
+                        "name": "submit_page_chunk_candidates",
                         "args": {"candidates": [{"name": "王五"}]},
                         "id": "call_2",
                     }
@@ -192,7 +214,7 @@ class FacultyCrawlerAgentCompactionTests(unittest.TestCase):
                 content="",
                 tool_calls=[
                     {
-                        "name": "save_professor_candidates",
+                        "name": "submit_page_chunk_candidates",
                         "args": {"candidates": [{"name": ""}]},
                         "id": "call_bad",
                     }
@@ -218,7 +240,7 @@ class FacultyCrawlerAgentCompactionTests(unittest.TestCase):
                 content="",
                 tool_calls=[
                     {
-                        "name": "save_professor_candidates",
+                        "name": "submit_page_chunk_candidates",
                         "args": {"candidates": [{"name": "张三"}]},
                         "id": "call_1",
                     }
@@ -262,8 +284,115 @@ class FacultyCrawlerAgentCompactionTests(unittest.TestCase):
         self.assertIn("crawl_1", tool_ids)
         self.assertIn("crawl_1", ai_tool_ids)
 
+    def test_compact_completed_chunk_history_summarizes_old_completed_chunks(self) -> None:
+        messages = [
+            HumanMessage(content="入口任务"),
+            AIMessage(
+                content="领取第一页片段",
+                tool_calls=[{"name": "claim_next_page_chunk", "args": {}, "id": "claim_1"}],
+            ),
+            ToolMessage(
+                content='{"status":"ok","chunk_id":"chunk-1","source_url":"https://example.edu/list","chunk_index":0,"content":"很长的第一页片段正文 张三 李四"}',
+                tool_call_id="claim_1",
+            ),
+            AIMessage(
+                content="提交第一页片段",
+                tool_calls=[
+                    {
+                        "name": "submit_page_chunk_candidates",
+                        "args": {
+                            "chunk_id": "chunk-1",
+                            "candidates": [
+                                {"name": "张三", "email": "zhang@example.edu"},
+                                {"name": "李四", "profile_url": "https://example.edu/li"},
+                            ],
+                        },
+                        "id": "submit_1",
+                    }
+                ],
+            ),
+            ToolMessage(
+                content='{"batch_status":"saved","attempted_count":2,"saved_count":2,"merged_count":0,"rejected_count":0,"failed_count":0,"total_saved_count":2,"chunk_status":"completed"}',
+                tool_call_id="submit_1",
+            ),
+            AIMessage(
+                content="领取第二页片段",
+                tool_calls=[{"name": "claim_next_page_chunk", "args": {}, "id": "claim_2"}],
+            ),
+            ToolMessage(
+                content='{"status":"ok","chunk_id":"chunk-2","source_url":"https://example.edu/list?page=2","chunk_index":0,"content":"当前片段正文 王五"}',
+                tool_call_id="claim_2",
+            ),
+            AIMessage(
+                content="提交第二页片段",
+                tool_calls=[
+                    {
+                        "name": "submit_page_chunk_candidates",
+                        "args": {
+                            "chunk_id": "chunk-2",
+                            "candidates": [{"name": "王五"}],
+                        },
+                        "id": "submit_2",
+                    }
+                ],
+            ),
+            ToolMessage(
+                content='{"batch_status":"saved","attempted_count":1,"saved_count":1,"merged_count":0,"rejected_count":0,"failed_count":0,"total_saved_count":3,"chunk_status":"completed"}',
+                tool_call_id="submit_2",
+            ),
+        ]
+
+        compacted = compact_completed_chunk_history(messages, keep_recent_completed_chunks=1)
+        serialized = "\n".join(str(message.content) for message in compacted)
+        tool_ids = {
+            getattr(message, "tool_call_id", None)
+            for message in compacted
+            if getattr(message, "tool_call_id", None)
+        }
+        ai_tool_ids = {
+            tool_call["id"]
+            for message in compacted
+            for tool_call in (getattr(message, "tool_calls", []) or [])
+            if isinstance(tool_call, dict) and "id" in tool_call
+        }
+
+        self.assertIn("已完成页面片段历史已压缩", serialized)
+        self.assertIn("chunk-1", serialized)
+        self.assertIn("张三 (zhang@example.edu)", serialized)
+        self.assertIn("李四 (https://example.edu/li)", serialized)
+        self.assertNotIn("很长的第一页片段正文", serialized)
+        self.assertIn("当前片段正文 王五", serialized)
+        self.assertNotIn("claim_1", tool_ids)
+        self.assertNotIn("submit_1", tool_ids)
+        self.assertNotIn("claim_1", ai_tool_ids)
+        self.assertNotIn("submit_1", ai_tool_ids)
+        self.assertIn("claim_2", tool_ids)
+        self.assertIn("submit_2", tool_ids)
+        self.assertIn("claim_2", ai_tool_ids)
+        self.assertIn("submit_2", ai_tool_ids)
+
 
 class FacultyCrawlerAgentMiddlewareTests(unittest.TestCase):
+    def test_chunked_crawl_page_response_omits_full_page_text(self) -> None:
+        snapshot = PageSnapshot(
+            page_id=123,
+            url="https://cs.example.edu/faculty",
+            title="师资队伍",
+            text="张三\n李四" * 100,
+            html="<main>大量页面正文</main>",
+            links=["https://cs.example.edu/zhang"],
+            fetch_method="http",
+            status="succeeded",
+        )
+
+        result = _format_chunked_crawl_page_response(snapshot, created_chunks=2)
+
+        self.assertEqual(result["status"], "chunked")
+        self.assertEqual(result["created_chunks"], 2)
+        self.assertNotIn("text", result)
+        self.assertNotIn("html", result)
+        self.assertIn("claim_next_page_chunk", result["message"])
+
     def test_build_trace_event_truncates_large_chunk_content(self) -> None:
         event = {"data": {"tools": {"messages": [{"content": "x" * 2000}]}}}
         trace = build_trace_event(event)
@@ -272,7 +401,7 @@ class FacultyCrawlerAgentMiddlewareTests(unittest.TestCase):
 
     def test_controlled_tool_names_include_chunk_tools(self) -> None:
         self.assertIn("claim_next_page_chunk", CONTROLLED_CRAWLER_TOOL_NAMES)
-        self.assertIn("submit_chunk_candidates", CONTROLLED_CRAWLER_TOOL_NAMES)
+        self.assertIn("submit_page_chunk_candidates", CONTROLLED_CRAWLER_TOOL_NAMES)
 
     def test_save_history_compaction_middleware_overrides_messages(self) -> None:
         original_messages = [
@@ -281,7 +410,7 @@ class FacultyCrawlerAgentMiddlewareTests(unittest.TestCase):
                 content="",
                 tool_calls=[
                     {
-                        "name": "save_professor_candidates",
+                        "name": "submit_page_chunk_candidates",
                         "args": {"candidates": [{"name": "张三"}]},
                         "id": "call_1",
                     }
@@ -314,6 +443,306 @@ class FacultyCrawlerAgentMiddlewareTests(unittest.TestCase):
         assert isinstance(result, list)
         self.assertEqual(len(result), 2)
         self.assertIn("1", result[1].content)
+
+    def test_save_history_compaction_middleware_compacts_completed_chunks(self) -> None:
+        original_messages = [
+            HumanMessage(content="入口任务"),
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "claim_next_page_chunk", "args": {}, "id": "claim_1"}],
+            ),
+            ToolMessage(
+                content='{"status":"ok","chunk_id":"chunk-1","source_url":"https://example.edu/list","chunk_index":0,"content":"旧片段正文"}',
+                tool_call_id="claim_1",
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_page_chunk_candidates",
+                        "args": {"chunk_id": "chunk-1", "candidates": [{"name": "张三"}]},
+                        "id": "submit_1",
+                    }
+                ],
+            ),
+            ToolMessage(
+                content='{"batch_status":"saved","saved_count":1,"merged_count":0,"rejected_count":0,"failed_count":0,"total_saved_count":1,"chunk_status":"completed"}',
+                tool_call_id="submit_1",
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "claim_next_page_chunk", "args": {}, "id": "claim_2"}],
+            ),
+            ToolMessage(
+                content='{"status":"ok","chunk_id":"chunk-2","source_url":"https://example.edu/list?page=2","chunk_index":0,"content":"保留最近片段正文"}',
+                tool_call_id="claim_2",
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_page_chunk_candidates",
+                        "args": {"chunk_id": "chunk-2", "candidates": [{"name": "李四"}]},
+                        "id": "submit_2",
+                    }
+                ],
+            ),
+            ToolMessage(
+                content='{"batch_status":"saved","saved_count":1,"merged_count":0,"rejected_count":0,"failed_count":0,"total_saved_count":2,"chunk_status":"completed"}',
+                tool_call_id="submit_2",
+            ),
+        ]
+        captured: dict[str, object] = {}
+
+        class Request:
+            messages = original_messages
+            tools: list[object] = []
+
+            def override(self, **kwargs: object) -> object:
+                captured.update(kwargs)
+                return SimpleNamespace(
+                    messages=kwargs.get("messages", self.messages),
+                    tools=self.tools,
+                )
+
+        def handler(request: object) -> object:
+            return request.messages
+
+        result = SaveHistoryCompactionMiddleware().wrap_model_call(Request(), handler)
+        serialized = "\n".join(str(message.content) for message in result)
+
+        self.assertEqual(result, captured["messages"])
+        self.assertIn("已完成页面片段历史已压缩", serialized)
+        self.assertNotIn("旧片段正文", serialized)
+        self.assertIn("保留最近片段正文", serialized)
+
+    def test_run_agent_starts_with_claim_prompt_when_chunks_are_pending(self) -> None:
+        async def run() -> str:
+            captured: dict[str, object] = {}
+
+            class FakeAgent:
+                async def astream(self, input_payload: object, **kwargs: object):
+                    captured["input_payload"] = input_payload
+                    captured["kwargs"] = kwargs
+                    yield {"event_type": "done"}
+
+            ctx = CrawlToolContext(
+                job_id=1,
+                start_url="https://cs.example.edu/faculty",
+                university="示例大学",
+                school="计算机学院",
+                session_factory=object(),  # type: ignore[arg-type]
+            )
+            profile = LLMProfile(name="test", provider="openai", api_key="sk-test", model_name="gpt-test")
+
+            with (
+                patch("app.agents.faculty_crawler_agent.crawl_job_has_pending_work", AsyncMock(return_value=True)),
+                patch("app.agents.faculty_crawler_agent.create_faculty_crawler_agent", return_value=FakeAgent()),
+                patch("app.agents.faculty_crawler_agent._ensure_agent_job_can_continue", AsyncMock()),
+            ):
+                await run_faculty_crawler_agent(ctx, profile)
+
+            payload = captured["input_payload"]
+            assert isinstance(payload, dict)
+            return str(payload["messages"][0]["content"])
+
+        prompt = __import__("asyncio").run(run())
+
+        self.assertIn("已有待处理页面片段", prompt)
+        self.assertIn("立即调用 claim_next_page_chunk", prompt)
+        self.assertIn("不要重新抓取入口页", prompt)
+
+    def test_legacy_save_tool_is_not_exposed_to_agent(self) -> None:
+        captured_tools: dict[str, object] = {}
+
+        def fake_create_deep_agent(**kwargs: object) -> object:
+            captured_tools["tools"] = kwargs["tools"]
+            return SimpleNamespace()
+
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://cs.example.edu/faculty",
+            university="示例大学",
+            school="计算机学院",
+            session_factory=object(),  # type: ignore[arg-type]
+        )
+        profile = LLMProfile(name="test", provider="openai", api_key="sk-test", model_name="gpt-test")
+
+        with (
+            patch("app.agents.faculty_crawler_agent.create_deep_agent", side_effect=fake_create_deep_agent),
+            patch("app.agents.faculty_crawler_agent.build_faculty_crawler_model", return_value=object()),
+        ):
+            from app.agents.faculty_crawler_agent import create_faculty_crawler_agent
+
+            create_faculty_crawler_agent(ctx, profile)
+
+        tool_names = {getattr(tool, "name", "") for tool in captured_tools["tools"]}
+        self.assertEqual(
+            tool_names,
+            {
+                "crawl_page",
+                "investigate_with_browser",
+                "claim_next_page_chunk",
+                "submit_page_chunk_candidates",
+            },
+        )
+        self.assertNotIn("save_professor_candidates", tool_names)
+        self.assertNotIn("submit_chunk_candidates", tool_names)
+
+    def test_browser_investigate_chunks_successful_page_snapshot(self) -> None:
+        async def run() -> dict[str, object]:
+            captured_tools: dict[str, object] = {}
+
+            def fake_create_deep_agent(**kwargs: object) -> object:
+                captured_tools["tools"] = kwargs["tools"]
+                return SimpleNamespace()
+
+            snapshot = PageSnapshot(
+                page_id=123,
+                url="https://cs.example.edu/faculty",
+                title="师资队伍",
+                text="张三\n教授\n机器学习",
+                html="<main>张三</main>",
+                links=[],
+                fetch_method="browser",
+                status="succeeded",
+            )
+            ctx = CrawlToolContext(
+                job_id=1,
+                start_url="https://cs.example.edu/faculty",
+                university="示例大学",
+                school="计算机学院",
+                session_factory=object(),  # type: ignore[arg-type]
+            )
+            profile = LLMProfile(name="test", provider="openai", api_key="sk-test", model_name="gpt-test")
+
+            with (
+                patch("app.agents.faculty_crawler_agent.crawl_job_has_pending_work", AsyncMock(return_value=False)),
+                patch("app.agents.faculty_crawler_agent.get_source_url_chunk_state", AsyncMock(return_value=None)),
+                patch("app.agents.faculty_crawler_agent.browser_investigate", AsyncMock(return_value=snapshot)),
+                patch("app.agents.faculty_crawler_agent.create_chunks_for_successful_page_snapshot", AsyncMock(return_value=1)),
+                patch("app.agents.faculty_crawler_agent.create_deep_agent", side_effect=fake_create_deep_agent),
+                patch("app.agents.faculty_crawler_agent.build_faculty_crawler_model", return_value=object()),
+            ):
+                from app.agents.faculty_crawler_agent import create_faculty_crawler_agent
+
+                create_faculty_crawler_agent(ctx, profile)
+                browser_tool = next(tool for tool in captured_tools["tools"] if getattr(tool, "name", "") == "investigate_with_browser")
+                return await browser_tool.ainvoke({"url": "https://cs.example.edu/faculty", "goal": "查看导师列表"})
+
+        result = __import__("asyncio").run(run())
+
+        self.assertEqual(result["status"], "chunked")
+        self.assertEqual(result["created_chunks"], 1)
+        self.assertNotIn("text", result)
+        self.assertNotIn("html", result)
+
+    def test_browser_investigate_returns_chunk_instruction_when_chunks_are_pending(self) -> None:
+        async def run() -> dict[str, object]:
+            captured_tools: dict[str, object] = {}
+
+            def fake_create_deep_agent(**kwargs: object) -> object:
+                captured_tools["tools"] = kwargs["tools"]
+                return SimpleNamespace()
+
+            ctx = CrawlToolContext(
+                job_id=1,
+                start_url="https://cs.example.edu/faculty",
+                university="示例大学",
+                school="计算机学院",
+                session_factory=object(),  # type: ignore[arg-type]
+            )
+            profile = LLMProfile(name="test", provider="openai", api_key="sk-test", model_name="gpt-test")
+
+            with (
+                patch("app.agents.faculty_crawler_agent.crawl_job_has_pending_work", AsyncMock(return_value=True)),
+                patch("app.agents.faculty_crawler_agent.browser_investigate", AsyncMock()) as browser_mock,
+                patch("app.agents.faculty_crawler_agent.create_deep_agent", side_effect=fake_create_deep_agent),
+                patch("app.agents.faculty_crawler_agent.build_faculty_crawler_model", return_value=object()),
+            ):
+                from app.agents.faculty_crawler_agent import create_faculty_crawler_agent
+
+                create_faculty_crawler_agent(ctx, profile)
+                browser_tool = next(tool for tool in captured_tools["tools"] if getattr(tool, "name", "") == "investigate_with_browser")
+                result = await browser_tool.ainvoke({"url": "https://cs.example.edu/faculty", "goal": "查看导师列表"})
+
+            browser_mock.assert_not_awaited()
+            return result
+
+        result = __import__("asyncio").run(run())
+
+        self.assertEqual(result["status"], "chunk_required")
+        self.assertIn("claim_next_page_chunk", result["next_instruction"])
+        self.assertNotIn("content", result)
+
+    def test_submit_page_chunk_candidates_requires_chunk_id(self) -> None:
+        captured_tools: dict[str, object] = {}
+
+        def fake_create_deep_agent(**kwargs: object) -> object:
+            captured_tools["tools"] = kwargs["tools"]
+            return SimpleNamespace()
+
+        ctx = CrawlToolContext(
+            job_id=1,
+            start_url="https://cs.example.edu/faculty",
+            university="示例大学",
+            school="计算机学院",
+            session_factory=object(),  # type: ignore[arg-type]
+        )
+        profile = LLMProfile(name="test", provider="openai", api_key="sk-test", model_name="gpt-test")
+
+        with (
+            patch("app.agents.faculty_crawler_agent.create_deep_agent", side_effect=fake_create_deep_agent),
+            patch("app.agents.faculty_crawler_agent.build_faculty_crawler_model", return_value=object()),
+        ):
+            from app.agents.faculty_crawler_agent import create_faculty_crawler_agent
+
+            create_faculty_crawler_agent(ctx, profile)
+
+        submit_tool = next(tool for tool in captured_tools["tools"] if getattr(tool, "name", "") == "submit_page_chunk_candidates")
+        schema = submit_tool.args_schema.model_json_schema()
+        self.assertIn("chunk_id", schema["required"])
+        self.assertIn("chunk_status", schema["required"])
+        self.assertIn("candidates", schema["required"])
+
+    def test_crawl_page_returns_already_completed_for_finished_chunk_page(self) -> None:
+        async def run() -> dict[str, object]:
+            captured_tools: dict[str, object] = {}
+
+            def fake_create_deep_agent(**kwargs: object) -> object:
+                captured_tools["tools"] = kwargs["tools"]
+                return SimpleNamespace()
+
+            ctx = CrawlToolContext(
+                job_id=1,
+                start_url="https://cs.example.edu/faculty",
+                university="示例大学",
+                school="计算机学院",
+                session_factory=object(),  # type: ignore[arg-type]
+            )
+            profile = LLMProfile(name="test", provider="openai", api_key="sk-test", model_name="gpt-test")
+
+            with (
+                patch("app.agents.faculty_crawler_agent.get_source_url_chunk_state", AsyncMock(return_value="completed")),
+                patch("app.agents.faculty_crawler_agent.crawl_page_with_crawl4ai", AsyncMock()) as crawl_page_mock,
+                patch("app.agents.faculty_crawler_agent.create_deep_agent", side_effect=fake_create_deep_agent),
+                patch("app.agents.faculty_crawler_agent.build_faculty_crawler_model", return_value=object()),
+            ):
+                from app.agents.faculty_crawler_agent import create_faculty_crawler_agent
+
+                create_faculty_crawler_agent(ctx, profile)
+                tools = captured_tools["tools"]
+                crawl_tool = next(tool for tool in tools if getattr(tool, "name", "") == "crawl_page")
+                result = await crawl_tool.ainvoke({"url": "https://cs.example.edu/faculty"})
+
+            crawl_page_mock.assert_not_awaited()
+            return result
+
+        result = __import__("asyncio").run(run())
+
+        self.assertEqual(result["status"], "already_completed")
+        self.assertIn("不返回页面内容", result["message"])
+        self.assertNotIn("content", result)
 
 
 class FacultyCrawlerAgentModelTests(unittest.TestCase):

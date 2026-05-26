@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import distinct, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models import CrawlPageChunk, CrawlPageChunkStatus
@@ -21,6 +21,14 @@ class ClaimedChunk:
     content: str | None = None
     max_candidates: int = 10
     message: str | None = None
+
+ACTIVE_CHUNK_STATUSES = frozenset(
+    {
+        CrawlPageChunkStatus.PENDING.value,
+        CrawlPageChunkStatus.PROCESSING.value,
+        CrawlPageChunkStatus.SPLIT_REQUIRED.value,
+    }
+)
 
 
 async def create_chunks_for_page(
@@ -102,7 +110,13 @@ async def claim_next_page_chunk(
             .limit(1)
         )
         if chunk is None:
-            return ClaimedChunk(status="empty", message="当前没有待处理页面片段。请探索新页面或结束任务。")
+            return ClaimedChunk(
+                status="empty",
+                message=(
+                    "当前没有待处理页面片段。如已完成入口页及其明确分页/候选列表页，请结束任务并总结。"
+                    "只有当你在最近处理内容中明确发现尚未访问的候选列表页 URL 时，才调用 crawl_page；不要重新访问已完成页面。"
+                ),
+            )
         chunk.status = CrawlPageChunkStatus.PROCESSING.value
         chunk.attempt_count += 1
         await session.commit()
@@ -117,13 +131,14 @@ async def claim_next_page_chunk(
         )
 
 
-async def submit_chunk_candidates(
+async def submit_page_chunk_candidates(
     ctx: CrawlToolContext,
     *,
     chunk_id: str,
     chunk_status: str,
-    has_more_candidates_in_chunk: bool,
     candidates: list[dict[str, object]],
+    has_unsubmitted_candidates_in_current_chunk: bool = False,
+    has_more_candidates_in_chunk: bool | None = None,
 ) -> dict[str, Any]:
     if len(candidates) > 10:
         return await _mark_chunk_split_required(ctx, chunk_id, "candidate_count_exceeded")
@@ -169,7 +184,7 @@ async def submit_chunk_candidates(
         {
             **candidate,
             "source_chunk_id": chunk_id,
-            "source_kind": "list_chunk",
+            "source_kind": "page_chunk",
             "boundary_risk": bool(candidate.get("boundary_risk", False)),
         }
         for candidate in candidates
@@ -180,7 +195,9 @@ async def submit_chunk_candidates(
         return {"chunk_status": "failed", "message": str(exc)}
 
     save_result = await save_candidate_batch(ctx, payloads)
-    if has_more_candidates_in_chunk or chunk_status == "too_many_candidates":
+    should_split = chunk_status == "too_many_candidates"
+    legacy_more_flag = bool(has_more_candidates_in_chunk)
+    if should_split:
         split_result = await _mark_chunk_split_required(ctx, chunk_id, "too_many_candidates")
         return {**save_result, **split_result}
 
@@ -194,7 +211,11 @@ async def submit_chunk_candidates(
         if chunk is not None:
             chunk.status = CrawlPageChunkStatus.COMPLETED.value
             await session.commit()
-    return {**save_result, "chunk_status": CrawlPageChunkStatus.COMPLETED.value}
+    result = {**save_result, "chunk_status": CrawlPageChunkStatus.COMPLETED.value}
+    if legacy_more_flag or has_unsubmitted_candidates_in_current_chunk:
+        result["warning"] = "只有 chunk_status=too_many_candidates 才会拆分当前 chunk；本次已按 completed 处理。"
+    return result
+
 
 
 async def _mark_chunk_split_required(ctx: CrawlToolContext, chunk_id: str, reason: str) -> dict[str, Any]:
@@ -305,3 +326,51 @@ async def has_chunks_for_source_url(
             .limit(1)
         )
         return chunk_id is not None
+
+async def get_source_url_chunk_state(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    job_id: int,
+    source_url: str,
+) -> str | None:
+    async with session_factory() as session:
+        statuses = list(
+            await session.scalars(
+                select(distinct(CrawlPageChunk.status)).where(
+                    CrawlPageChunk.job_id == job_id,
+                    CrawlPageChunk.source_url == source_url,
+                )
+            )
+        )
+    if not statuses:
+        return None
+    if any(status in ACTIVE_CHUNK_STATUSES for status in statuses):
+        return "active"
+    if all(
+        status
+        in {
+            CrawlPageChunkStatus.COMPLETED.value,
+            CrawlPageChunkStatus.NO_CANDIDATES.value,
+            CrawlPageChunkStatus.SUPERSEDED.value,
+        }
+        for status in statuses
+    ):
+        return "completed"
+    return "active"
+
+async def source_urls_have_chunks(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    job_id: int,
+    source_urls: set[str],
+) -> set[str]:
+    if not source_urls:
+        return set()
+    async with session_factory() as session:
+        rows = await session.scalars(
+            select(distinct(CrawlPageChunk.source_url)).where(
+                CrawlPageChunk.job_id == job_id,
+                CrawlPageChunk.source_url.in_(source_urls),
+            )
+        )
+        return set(rows)

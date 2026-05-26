@@ -109,7 +109,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
         async with self.session_factory() as session:
             self.assertGreaterEqual(len(list(await session.scalars(select(CrawlPageChunk)))), 1)
 
-    async def test_run_keeps_job_running_when_chunks_remain_after_candidate_save(self) -> None:
+    async def test_run_requeues_job_when_chunks_remain_after_candidate_save(self) -> None:
         job_id = await self._create_default_profile_and_job()
 
         async def fake_run(
@@ -150,9 +150,9 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(processed, 1)
         job = await self._get_job(job_id)
-        self.assertEqual(job.status, CrawlJobStatus.RUNNING.value)
+        self.assertEqual(job.status, CrawlJobStatus.QUEUED.value)
         current_run = await self._get_current_run(job_id)
-        self.assertEqual(current_run.status, CrawlJobStatus.RUNNING.value)
+        self.assertEqual(current_run.status, CrawlJobStatus.QUEUED.value)
 
     async def asyncSetUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -218,7 +218,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
                         "data": {
                             "model": {
                                 "messages": [
-                                    "tool_calls=[{'name': 'save_professor_candidates'}]",
+                                    "tool_calls=[{'name': 'submit_page_chunk_candidates'}]",
                                 ]
                             }
                         },
@@ -520,7 +520,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
                         "data": {
                             "model": {
                                 "messages": [
-                                    "tool_calls=[{'name': 'save_professor_candidates'}]",
+                                    "tool_calls=[{'name': 'submit_page_chunk_candidates'}]",
                                 ]
                             }
                         },
@@ -921,7 +921,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
                         "data": {
                             "model": {
                                 "messages": [
-                                    "invalid_tool_calls=[{'name': 'save_professor_candidates'}] finish_reason='length'",
+                                    "invalid_tool_calls=[{'name': 'submit_page_chunk_candidates'}] finish_reason='length'",
                                 ]
                             }
                         },
@@ -939,7 +939,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
         job = await self._get_job(job_id)
         self.assertEqual(job.status, CrawlJobStatus.FAILED.value)
         self.assertIsNotNone(job.error_message)
-        self.assertIn("save_professor_candidates", job.error_message)
+        self.assertIn("submit_page_chunk_candidates", job.error_message)
         self.assertEqual(await self._count_candidates(job_id), 0)
         run = await self._get_current_run(job_id)
         self.assertEqual(run.status, CrawlJobStatus.FAILED.value)
@@ -1108,7 +1108,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
                         "data": {
                             "model": {
                                 "messages": [
-                                    "tool_calls=[{'name': 'save_professor_candidates'}]",
+                                    "tool_calls=[{'name': 'submit_page_chunk_candidates'}]",
                                 ]
                             }
                         },
@@ -1517,7 +1517,7 @@ class CrawlJobRuntimeTests(unittest.IsolatedAsyncioTestCase):
                         "data": {
                             "model": {
                                 "messages": [
-                                    "tool_calls=[{'name': 'save_professor_candidates'}]",
+                                    "tool_calls=[{'name': 'submit_page_chunk_candidates'}]",
                                 ]
                             }
                         },

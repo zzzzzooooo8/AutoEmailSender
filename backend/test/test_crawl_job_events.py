@@ -14,8 +14,67 @@ from app.services.crawl_job_events import (
 class CrawlJobEventsTests(unittest.TestCase):
     def test_chunk_tool_events_are_human_readable(self) -> None:
         self.assertEqual(summarize_agent_trace_event({"name": "claim_next_page_chunk"}), "Agent 领取待处理页面片段")
-        self.assertEqual(summarize_agent_trace_event({"name": "submit_chunk_candidates"}), "Agent 提交页面片段候选")
+        self.assertEqual(summarize_agent_trace_event({"name": "submit_page_chunk_candidates"}), "Agent 提交页面片段候选")
         self.assertEqual(summarize_agent_trace_event({"event_type": "chunk_split_required"}), "页面片段候选过密，已触发拆分")
+
+    def test_build_events_omits_low_value_chunk_tool_messages(self) -> None:
+        job = CrawlJob(
+            id=6,
+            university="示例大学",
+            school="计算机学院",
+            start_url="https://example.edu/faculty",
+            status=CrawlJobStatus.RUNNING.value,
+            progress_current=0,
+            progress_total=0,
+            agent_trace=[
+                {
+                    "type": "updates",
+                    "data": {
+                        "model": {
+                            "messages": [
+                                "tool_calls=[{'name': 'claim_next_page_chunk', 'args': {}}]",
+                            ],
+                        },
+                    },
+                    "created_at": "2026-04-26T10:01:00+00:00",
+                },
+                {
+                    "type": "updates",
+                    "data": {
+                        "model": {
+                            "messages": [
+                                "tool_calls=[{'name': 'submit_page_chunk_candidates', 'args': {}}]",
+                            ],
+                        },
+                    },
+                    "created_at": "2026-04-26T10:02:00+00:00",
+                },
+                {
+                    "event_type": "chunk_split_required",
+                    "created_at": "2026-04-26T10:03:00+00:00",
+                },
+                {
+                    "type": "updates",
+                    "data": {
+                        "model": {
+                            "messages": [
+                                "tool_calls=[{'name': 'crawl_page', 'args': {'url': 'https://example.edu'}}]",
+                            ],
+                        },
+                    },
+                    "created_at": "2026-04-26T10:04:00+00:00",
+                },
+            ],
+            created_at=datetime(2026, 4, 26, 10, 0, tzinfo=UTC),
+            updated_at=datetime(2026, 4, 26, 10, 4, tzinfo=UTC),
+        )
+
+        messages = [event["message"] for event in build_crawl_job_events(job, pages=[], candidates=[])]
+
+        self.assertNotIn("Agent 领取待处理页面片段", messages)
+        self.assertNotIn("Agent 提交页面片段候选", messages)
+        self.assertNotIn("Agent 调用 crawl_page 抓取页面", messages)
+        self.assertIn("页面片段候选过密，已触发拆分", messages)
 
     def test_build_events_includes_status_trace_page_and_candidate(self) -> None:
         job = CrawlJob(
@@ -187,7 +246,7 @@ class CrawlJobEventsTests(unittest.TestCase):
                     "data": {
                         "model": {
                             "messages": [
-                                "tool_calls=[{'name': 'save_professor_candidates', 'args': {}}]",
+                                "tool_calls=[{'name': 'submit_page_chunk_candidates', 'args': {}}]",
                             ],
                         },
                     },
@@ -200,7 +259,7 @@ class CrawlJobEventsTests(unittest.TestCase):
 
         messages = [event["message"] for event in build_crawl_job_events(job, pages=[], candidates=[])]
 
-        self.assertIn("Agent 保存候选导师", messages)
+        self.assertNotIn("Agent 提交页面片段候选", messages)
         self.assertNotIn("Agent 事件：updates", messages)
 
     def test_naive_datetime_event_times_are_marked_as_utc(self) -> None:

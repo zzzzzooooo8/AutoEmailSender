@@ -38,6 +38,69 @@ class CrawlerChunkingTests(unittest.TestCase):
         self.assertTrue(chunks[1].overlap_prefix)
         self.assertLessEqual(max(chunk.token_estimate for chunk in chunks), 220)
 
+    def test_build_page_chunks_balances_medium_page_into_even_chunks(self) -> None:
+        blocks = "\n".join(
+            f"教师{i} 研究方向 数据库 人工智能 机器学习 [详情](https://cs.example.edu/t{i}.htm)"
+            for i in range(60)
+        )
+        chunks = build_page_chunks(
+            source_url="https://cs.example.edu/faculty/index.htm",
+            html=f"<main>{''.join(f'<p>{line}</p>' for line in blocks.splitlines())}</main>",
+            text=blocks,
+            config=ChunkingConfig(
+                target_tokens=1000,
+                soft_max_tokens=1400,
+                hard_max_tokens=1800,
+                overlap_tokens=0,
+                single_chunk_max_tokens=1100,
+                min_balanced_target_tokens=600,
+                max_balanced_target_tokens=1200,
+            ),
+        )
+        token_sizes = [chunk.token_estimate for chunk in chunks]
+
+        self.assertEqual(len(chunks), 2)
+        self.assertLessEqual(max(token_sizes) - min(token_sizes), 250)
+
+    def test_build_page_chunks_keeps_small_page_single_chunk(self) -> None:
+        blocks = "\n".join(f"教师{i} [详情](https://cs.example.edu/t{i}.htm)" for i in range(20))
+        chunks = build_page_chunks(
+            source_url="https://cs.example.edu/faculty/index.htm",
+            html=f"<main>{''.join(f'<p>{line}</p>' for line in blocks.splitlines())}</main>",
+            text=blocks,
+            config=ChunkingConfig(
+                target_tokens=300,
+                soft_max_tokens=500,
+                hard_max_tokens=700,
+                single_chunk_max_tokens=1000,
+            ),
+        )
+
+        self.assertEqual(len(chunks), 1)
+
+    def test_build_page_chunks_balanced_target_respects_hard_max(self) -> None:
+        blocks = "\n".join(
+            f"教师{i} 研究方向 数据库 人工智能 机器学习 大数据治理 [详情](https://cs.example.edu/t{i}.htm)"
+            for i in range(120)
+        )
+        chunks = build_page_chunks(
+            source_url="https://cs.example.edu/faculty/index.htm",
+            html=f"<main>{''.join(f'<p>{line}</p>' for line in blocks.splitlines())}</main>",
+            text=blocks,
+            config=ChunkingConfig(
+                target_tokens=900,
+                soft_max_tokens=1100,
+                hard_max_tokens=1300,
+                overlap_tokens=20,
+                single_chunk_max_tokens=1000,
+                min_balanced_target_tokens=500,
+                max_balanced_target_tokens=1000,
+            ),
+        )
+
+        self.assertGreater(len(chunks), 2)
+        self.assertLessEqual(max(chunk.token_estimate for chunk in chunks), 1300)
+
     def test_fingerprint_page_is_stable(self) -> None:
         self.assertEqual(fingerprint_page("  张三\n李四  "), fingerprint_page("张三 李四"))
 
