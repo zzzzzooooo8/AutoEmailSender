@@ -7,7 +7,8 @@ export const shouldBootstrapWorkspaceTask = (
   Boolean(
     task?.id == null ||
       (task.status === "canceled" &&
-        task.cancellation_reason === "schedule_expired"),
+        task.cancellation_reason === "schedule_expired") ||
+      (task.source === "batch" && task.batch_task_id != null),
   );
 
 export const bootstrapWorkspaceThread = async (
