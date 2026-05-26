@@ -4,6 +4,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
+from math import ceil
 from urllib.parse import urljoin
 
 
@@ -15,6 +16,9 @@ class ChunkingConfig:
     overlap_tokens: int = 180
     min_split_tokens: int = 500
     max_split_depth: int = 4
+    single_chunk_max_tokens: int = 2200
+    min_balanced_target_tokens: int = 1200
+    max_balanced_target_tokens: int = 2200
 
 
 @dataclass(frozen=True)
@@ -130,12 +134,13 @@ def build_page_chunks(
     selected_config = config or ChunkingConfig()
     enriched = html_to_link_enriched_text(source_url, html, text)
     page_fingerprint = fingerprint_page(enriched)
+    target_tokens = balanced_target_tokens(enriched, selected_config)
     lines = enriched.splitlines()
     chunks: list[str] = []
     current: list[str] = []
     for line in lines:
         candidate = "\n".join([*current, line]) if current else line
-        if current and estimate_tokens(candidate) > selected_config.target_tokens:
+        if current and estimate_tokens(candidate) > target_tokens:
             chunks.append("\n".join(current))
             current = _overlap_tail(current, selected_config.overlap_tokens)
         current.append(line)
@@ -145,6 +150,7 @@ def build_page_chunks(
             current = _overlap_tail(current[:midpoint], selected_config.overlap_tokens) + current[midpoint:]
     if current:
         chunks.append("\n".join(current))
+    chunks = _merge_small_tail_chunks(chunks, selected_config)
 
     drafts: list[PageChunkDraft] = []
     for index, content in enumerate(chunks):
@@ -167,6 +173,30 @@ def build_page_chunks(
             )
         )
     return drafts
+
+def _merge_small_tail_chunks(chunks: list[str], config: ChunkingConfig) -> list[str]:
+    merged = list(chunks)
+    while len(merged) > 1:
+        tail_tokens = estimate_tokens(merged[-1])
+        combined = "\n".join([merged[-2], merged[-1]])
+        if tail_tokens >= config.min_balanced_target_tokens:
+            break
+        if estimate_tokens(combined) > config.hard_max_tokens:
+            break
+        merged[-2:] = [combined]
+    return merged
+
+def balanced_target_tokens(content: str, config: ChunkingConfig | None = None) -> int:
+    selected_config = config or ChunkingConfig()
+    total_tokens = estimate_tokens(content)
+    if total_tokens <= selected_config.single_chunk_max_tokens:
+        return max(total_tokens, 1)
+    chunk_count = max(1, ceil(total_tokens / selected_config.target_tokens))
+    balanced = ceil(total_tokens / chunk_count)
+    return min(
+        selected_config.max_balanced_target_tokens,
+        max(selected_config.min_balanced_target_tokens, balanced),
+    )
 
 
 def split_chunk_content(

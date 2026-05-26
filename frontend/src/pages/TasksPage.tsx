@@ -23,15 +23,18 @@ import { SubjectTemplateInput } from "@/components/molecules/SubjectTemplateInpu
 import { useNotification } from "@/context/NotificationContext";
 import { useSelectionContext } from "@/context/SelectionContext";
 import { useConfirmDialog } from "@/lib/useConfirmDialog";
+import { useDismissableLayerClick } from "@/lib/useDismissableLayerClick";
 import { safeRecordUserAction } from "@/lib/diagnosticUserActions";
-import { approveAndSend, approveDraft, regenerateDraft } from "@/lib/api/emailTasksApi";
-import { openWorkspaceThread } from "@/features/workspace/client/openWorkspaceThread";
 import {
+  approveAndSendBatchTaskItemDraft,
+  approveBatchTaskItemDraft,
   deleteBatchTask,
   deleteBatchTaskItem,
+  getBatchTaskItemThread,
   listBatchTasks,
   listBatchTaskItems,
   pauseBatchTask,
+  regenerateBatchTaskItemDraft,
   retryBatchTaskItemDraft,
   restoreBatchTask,
   resumeBatchTask,
@@ -1818,6 +1821,19 @@ const selectedCrawlJobCanReview =
     setBatchReviewSelectedMaterialIds(draft.selectedMaterialIds);
   };
 
+  const ensureBatchReviewThreadMatchesItem = (
+    thread: WorkspaceThreadDTO,
+    item: BatchTaskItemDTO,
+    task: BatchTaskCardDTO,
+  ) => {
+    if (
+      thread.current_task.id !== item.id ||
+      thread.current_task.batch_task_id !== task.id
+    ) {
+      throw new Error("草稿任务与当前批量任务不一致，请刷新后重试");
+    }
+  };
+
   const openBatchDraftReview = async (item: BatchTaskItemDTO) => {
     if (!selectedBatchTask) {
       return;
@@ -1829,14 +1845,11 @@ const selectedCrawlJobCanReview =
     setBatchReviewThread(null);
     setBatchReviewLoading(true);
     try {
-      const thread = await openWorkspaceThread(
-        item.professor_id,
-        selectedBatchTask.identity_id,
-        selectedBatchTask.llm_profile_id,
-      );
+      const thread = await getBatchTaskItemThread(selectedBatchTask.id, item.id);
       if (latestBatchReviewRequestIdRef.current !== requestId) {
         return;
       }
+      ensureBatchReviewThreadMatchesItem(thread, item, selectedBatchTask);
       syncBatchDraftReview(thread);
     } catch (actionError) {
       if (latestBatchReviewRequestIdRef.current !== requestId) {
@@ -1890,9 +1903,8 @@ const selectedCrawlJobCanReview =
   };
 
   const handleRegenerateBatchDraft = async () => {
-    const taskId = batchReviewThread?.current_task.id;
     const itemId = batchReviewItemId;
-    if (!taskId || itemId === null) {
+    if (!selectedBatchTask || !activeBatchReviewItem || itemId === null) {
       return;
     }
     const confirmed = await confirm({
@@ -1906,7 +1918,8 @@ const selectedCrawlJobCanReview =
     }
     setBatchReviewItemAction(itemId, "regenerate");
     try {
-      const thread = await regenerateDraft(taskId);
+      const thread = await regenerateBatchTaskItemDraft(selectedBatchTask.id, itemId);
+      ensureBatchReviewThreadMatchesItem(thread, activeBatchReviewItem, selectedBatchTask);
       setBatchReviewItemId((currentItemId) => {
         if (currentItemId === itemId) {
           syncBatchDraftReview(thread);
@@ -1927,8 +1940,7 @@ const selectedCrawlJobCanReview =
   };
 
   const handleApproveBatchDraft = async () => {
-    const taskId = batchReviewThread?.current_task.id;
-    if (!taskId || !selectedBatchTask || !activeBatchReviewItem) {
+    if (!batchReviewThread?.current_task.id || !selectedBatchTask || !activeBatchReviewItem) {
       return;
     }
     const nextItem =
@@ -1937,7 +1949,12 @@ const selectedCrawlJobCanReview =
     const itemId = activeBatchReviewItem.id;
     setBatchReviewItemAction(itemId, "submit");
     try {
-      await approveDraft(taskId, buildBatchReviewPayload());
+      const thread = await approveBatchTaskItemDraft(
+        selectedBatchTask.id,
+        itemId,
+        buildBatchReviewPayload(),
+      );
+      ensureBatchReviewThreadMatchesItem(thread, activeBatchReviewItem, selectedBatchTask);
       notifySuccess("草稿已审核通过");
       setSelectedBatchTaskItems((current) =>
         current.map((item) =>
@@ -2027,8 +2044,7 @@ const selectedCrawlJobCanReview =
   };
 
   const handleSendBatchDraftNow = async () => {
-    const taskId = batchReviewThread?.current_task.id;
-    if (!taskId || !selectedBatchTask || !activeBatchReviewItem) {
+    if (!batchReviewThread?.current_task.id || !selectedBatchTask || !activeBatchReviewItem) {
       return;
     }
     const confirmed = await confirm({
@@ -2047,7 +2063,12 @@ const selectedCrawlJobCanReview =
     const itemId = activeBatchReviewItem.id;
     setBatchReviewItemAction(itemId, "submit");
     try {
-      await approveAndSend(taskId, buildBatchReviewPayload());
+      const thread = await approveAndSendBatchTaskItemDraft(
+        selectedBatchTask.id,
+        itemId,
+        buildBatchReviewPayload(),
+      );
+      ensureBatchReviewThreadMatchesItem(thread, activeBatchReviewItem, selectedBatchTask);
       notifySuccess("邮件已提交发送");
       setSelectedBatchTaskItems((current) =>
         current.map((item) =>
@@ -2133,6 +2154,13 @@ const selectedCrawlJobCanReview =
     setMatchJobDetailsLoading(false);
     lastMatchJobDetailsLoadErrorRef.current = null;
   };
+  const closeSelectedCandidateDetail = useCallback(() => {
+    setSelectedCandidateDetail(null);
+  }, []);
+  const batchTaskDetailsLayer = useDismissableLayerClick(closeBatchTaskDetails);
+  const matchJobDetailsLayer = useDismissableLayerClick(closeMatchJobDetails);
+  const crawlJobDetailsLayer = useDismissableLayerClick(closeCrawlJobDetails);
+  const candidateDetailLayer = useDismissableLayerClick(closeSelectedCandidateDetail);
 
   const handleDeleteBatchTask = async (task: BatchTaskCardDTO) => {
     const confirmed = await confirm({
@@ -2728,7 +2756,8 @@ const selectedCrawlJobCanReview =
       {selectedBatchTask ? (
         <div
           className="fixed inset-0 z-50 flex items-stretch justify-end bg-stone-950/30 p-0 sm:p-6"
-          onClick={closeBatchTaskDetails}
+          onClick={batchTaskDetailsLayer.onBackdropClick}
+          onMouseDown={batchTaskDetailsLayer.onBackdropMouseDown}
         >
           <section
             role="dialog"
@@ -2738,7 +2767,8 @@ const selectedCrawlJobCanReview =
                 ? "flex h-full w-full flex-col overflow-hidden bg-white shadow-xl sm:max-w-7xl sm:rounded-3xl"
                 : "flex h-full w-full flex-col overflow-hidden bg-white shadow-xl sm:max-w-4xl sm:rounded-3xl"
             }
-            onClick={(event) => event.stopPropagation()}
+            onClick={batchTaskDetailsLayer.onContentClick}
+            onMouseDown={batchTaskDetailsLayer.onContentMouseDown}
           >
             <div className="flex items-start justify-between gap-4 border-b border-stone-200 bg-[#fcfbf8] px-6 py-5">
               <div>
@@ -3339,13 +3369,15 @@ const selectedCrawlJobCanReview =
       {selectedMatchJob ? (
         <div
           className="fixed inset-0 z-50 flex items-stretch justify-end bg-stone-950/30 p-0 sm:p-6"
-          onClick={closeMatchJobDetails}
+          onClick={matchJobDetailsLayer.onBackdropClick}
+          onMouseDown={matchJobDetailsLayer.onBackdropMouseDown}
         >
           <section
             role="dialog"
             aria-label="匹配分析任务详情"
             className="flex h-full w-full flex-col overflow-hidden bg-white shadow-xl sm:max-w-4xl sm:rounded-3xl"
-            onClick={(event) => event.stopPropagation()}
+            onClick={matchJobDetailsLayer.onContentClick}
+            onMouseDown={matchJobDetailsLayer.onContentMouseDown}
           >
             <div className="flex items-start justify-between gap-4 border-b border-stone-200 bg-[#fcfbf8] px-6 py-5">
               <div>
@@ -3480,13 +3512,15 @@ const selectedCrawlJobCanReview =
       {selectedCrawlJob ? (
         <div
           className="fixed inset-0 z-50 flex items-stretch justify-center bg-stone-950/30 p-0 sm:p-6"
-          onClick={closeCrawlJobDetails}
+          onClick={crawlJobDetailsLayer.onBackdropClick}
+          onMouseDown={crawlJobDetailsLayer.onBackdropMouseDown}
         >
           <section
             role="dialog"
             aria-label="抓取任务详情"
             className="flex h-full w-full flex-col overflow-hidden bg-white shadow-xl sm:max-w-[min(94vw,1280px)] sm:rounded-3xl"
-            onClick={(event) => event.stopPropagation()}
+            onClick={crawlJobDetailsLayer.onContentClick}
+            onMouseDown={crawlJobDetailsLayer.onContentMouseDown}
           >
             <div className="flex items-start justify-between gap-4 border-b border-stone-200 bg-[#fcfbf8] px-6 py-5">
               <div>
@@ -3860,13 +3894,15 @@ const selectedCrawlJobCanReview =
       {selectedCandidateDetail ? (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center bg-stone-950/35 p-4"
-          onClick={() => setSelectedCandidateDetail(null)}
+          onClick={candidateDetailLayer.onBackdropClick}
+          onMouseDown={candidateDetailLayer.onBackdropMouseDown}
         >
           <section
             role="dialog"
             aria-label="候选导师详情"
             className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
+            onClick={candidateDetailLayer.onContentClick}
+            onMouseDown={candidateDetailLayer.onContentMouseDown}
           >
             <div className="flex items-start justify-between gap-4 border-b border-stone-200 px-6 py-5">
               <div>
@@ -3882,7 +3918,7 @@ const selectedCrawlJobCanReview =
               </div>
               <button
                 type="button"
-                onClick={() => setSelectedCandidateDetail(null)}
+                onClick={closeSelectedCandidateDetail}
                 className="ui-btn-secondary shrink-0"
                 aria-label="关闭候选导师详情"
               >
