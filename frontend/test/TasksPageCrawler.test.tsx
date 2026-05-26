@@ -365,9 +365,11 @@ describe("TasksPage crawler jobs tab", () => {
     fireEvent.click(await screen.findByRole("button", { name: "查看详情" }));
 
     const crawlDialog = await screen.findByRole("dialog", { name: "抓取任务详情" });
+    expect(crawlDialog).toHaveTextContent("暂无邮箱（可尝试进行补全）");
     fireEvent.click(within(crawlDialog).getByRole("button", { name: "查看详情" }));
 
     const candidateDialog = await screen.findByRole("dialog", { name: "候选导师详情" });
+    expect(candidateDialog).toHaveTextContent("暂无邮箱（可尝试进行补全）");
     expect(candidateDialog).toHaveTextContent("补全失败原因");
     expect(candidateDialog).toHaveTextContent("WinError 2");
   });

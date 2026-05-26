@@ -3840,7 +3840,7 @@ const selectedCrawlJobCanReview =
                                 {candidate.name}
                               </p>
                               <p className="mt-1 text-sm text-stone-500">
-                                {candidate.email ?? "暂无邮箱"}
+                                {candidate.email ?? "暂无邮箱（可尝试进行补全）"}
                               </p>
                             </div>
                           </div>
@@ -3913,7 +3913,7 @@ const selectedCrawlJobCanReview =
                   {selectedCandidateDetail.name}
                 </h3>
                 <p className="mt-1 text-sm text-stone-500">
-                  {selectedCandidateDetail.email ?? "暂无邮箱"}
+                  {selectedCandidateDetail.email ?? "暂无邮箱（可尝试进行补全）"}
                 </p>
               </div>
               <button
