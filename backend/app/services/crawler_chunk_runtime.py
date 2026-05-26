@@ -30,6 +30,21 @@ ACTIVE_CHUNK_STATUSES = frozenset(
     }
 )
 
+AFTER_CHUNK_DONE_INSTRUCTION = (
+    "不要再提交这个 chunk。请立即调用 claim_next_page_chunk 获取下一个待处理 chunk；"
+    "如果 claim_next_page_chunk 返回 empty，再访问你刚才已明确发现的新分页 URL，或结束任务。"
+)
+
+RECLAIM_CHUNK_INSTRUCTION = (
+    "不要猜测或复用 chunk_id。请立即调用 claim_next_page_chunk 重新领取当前可处理的 chunk，"
+    "并只提交 claim_next_page_chunk 返回的 chunk_id。"
+)
+
+FIX_CURRENT_CANDIDATES_INSTRUCTION = (
+    "请修正当前 candidates 的字段格式后，对同一个 chunk_id 重试 submit_page_chunk_candidates 一次；"
+    "不要更换 chunk_id。若无法从当前 chunk 正文确认有效候选，请用 chunk_status=\"no_candidates\" 标记当前 chunk。"
+)
+
 
 async def create_chunks_for_page(
     session_factory: async_sessionmaker[AsyncSession],
@@ -151,15 +166,27 @@ async def submit_page_chunk_candidates(
             )
         )
         if chunk is None:
-            return {"chunk_status": "failed", "message": "chunk 不存在"}
+            return {
+                "chunk_status": "failed",
+                "message": "chunk 不存在，当前提交没有对应的已领取页面片段。",
+                "next_instruction": RECLAIM_CHUNK_INSTRUCTION,
+            }
         if chunk.status in {
             CrawlPageChunkStatus.COMPLETED.value,
             CrawlPageChunkStatus.NO_CANDIDATES.value,
             CrawlPageChunkStatus.SUPERSEDED.value,
         }:
-            return {"chunk_status": "already_processed", "message": "该页面片段已处理，请获取下一个未处理 chunk。"}
+            return {
+                "chunk_status": "already_processed",
+                "message": "当前 chunk 已经处理完成，重复调用 submit_page_chunk_candidates 不会产生任何效果。",
+                "next_instruction": AFTER_CHUNK_DONE_INSTRUCTION,
+            }
         if chunk.status != CrawlPageChunkStatus.PROCESSING.value:
-            return {"chunk_status": "failed", "message": "该页面片段尚未领取或当前不可提交，请先调用 claim_next_page_chunk。"}
+            return {
+                "chunk_status": "failed",
+                "message": "该页面片段尚未领取或当前不可提交。",
+                "next_instruction": RECLAIM_CHUNK_INSTRUCTION,
+            }
 
     if chunk_status == "no_candidates":
         async with ctx.session_factory() as session:
@@ -178,6 +205,7 @@ async def submit_page_chunk_candidates(
             "merged_count": 0,
             "skipped_duplicate_count": 0,
             "rejected_count": 0,
+            "next_instruction": AFTER_CHUNK_DONE_INSTRUCTION,
         }
 
     enriched_candidates = [
@@ -192,7 +220,11 @@ async def submit_page_chunk_candidates(
     try:
         payloads = [ProfessorCandidatePayload.model_validate(candidate) for candidate in enriched_candidates]
     except ValidationError as exc:
-        return {"chunk_status": "failed", "message": str(exc)}
+        return {
+            "chunk_status": "failed",
+            "message": str(exc),
+            "next_instruction": FIX_CURRENT_CANDIDATES_INSTRUCTION,
+        }
 
     save_result = await save_candidate_batch(ctx, payloads)
     should_split = chunk_status == "too_many_candidates"
@@ -211,7 +243,7 @@ async def submit_page_chunk_candidates(
         if chunk is not None:
             chunk.status = CrawlPageChunkStatus.COMPLETED.value
             await session.commit()
-    result = {**save_result, "chunk_status": CrawlPageChunkStatus.COMPLETED.value}
+    result = {**save_result, "chunk_status": CrawlPageChunkStatus.COMPLETED.value, "next_instruction": AFTER_CHUNK_DONE_INSTRUCTION}
     if legacy_more_flag or has_unsubmitted_candidates_in_current_chunk:
         result["warning"] = "只有 chunk_status=too_many_candidates 才会拆分当前 chunk；本次已按 completed 处理。"
     return result
@@ -231,6 +263,8 @@ async def _mark_chunk_split_required(ctx: CrawlToolContext, chunk_id: str, reaso
                 "chunk_status": "failed",
                 "split_reason": reason,
                 "created_child_chunks": 0,
+                "message": "chunk 不存在，无法拆分。",
+                "next_instruction": RECLAIM_CHUNK_INSTRUCTION,
             }
         child_count = await _split_chunk_in_session(session, ctx.job_id, chunk, reason)
         await session.commit()
@@ -240,12 +274,13 @@ async def _mark_chunk_split_required(ctx: CrawlToolContext, chunk_id: str, reaso
                 "split_reason": reason,
                 "created_child_chunks": 0,
                 "last_error": chunk.last_error,
-                "next_instruction": "该 chunk 无法继续拆分，请跳过当前 chunk，获取下一个页面片段。",
+                "next_instruction": "该 chunk 无法继续拆分。不要再提交这个 chunk；请立即调用 claim_next_page_chunk 获取下一个待处理 chunk。如果 claim_next_page_chunk 返回 empty，请访问已明确发现的新分页 URL，或结束任务。",
             }
         return {
             "chunk_status": CrawlPageChunkStatus.SPLIT_REQUIRED.value,
             "split_reason": reason,
             "created_child_chunks": child_count,
+            "next_instruction": "父 chunk 已拆分并不再可提交；不要再提交父 chunk。请立即调用 claim_next_page_chunk 领取拆分后的子 chunk。",
         }
 
 

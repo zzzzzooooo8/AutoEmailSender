@@ -258,12 +258,16 @@ class DuplicateSaveLoopState:
     consecutive_chunk_required_tool_calls: int = 0
 
 
-def _normalize_page_cache_url(url: str) -> str:
+def _is_spa_route_fragment(fragment: str) -> bool:
+    return fragment.startswith("/") or fragment.startswith("!/")
+
+def _normalize_url_for_deduplication(url: str) -> str:
     parsed = urlparse(url.strip())
-    return parsed._replace(fragment="").geturl()
+    if not _is_spa_route_fragment(parsed.fragment):
+        parsed = parsed._replace(fragment="")
+    return parsed.geturl()
 
-
-def normalize_candidate_profile_url(value: object, *, base_url: str | None = None) -> str | None:
+def normalize_navigable_url(value: object, *, base_url: str | None = None) -> str | None:
     if value is None:
         return None
     raw = str(value).strip()
@@ -271,8 +275,17 @@ def normalize_candidate_profile_url(value: object, *, base_url: str | None = Non
         return None
     absolute = urljoin(base_url or "", raw) if base_url else raw
     parsed = urlparse(absolute)
-    normalized = parsed._replace(fragment="").geturl().rstrip("/")
+    if not _is_spa_route_fragment(parsed.fragment):
+        parsed = parsed._replace(fragment="")
+    normalized = parsed.geturl().rstrip("/")
     return normalized or None
+
+def _normalize_page_cache_url(url: str) -> str:
+    return _normalize_url_for_deduplication(url)
+
+
+def normalize_candidate_profile_url(value: object, *, base_url: str | None = None) -> str | None:
+    return normalize_navigable_url(value, base_url=base_url)
 
 
 def _candidate_missing_contact_path(payload: dict[str, Any]) -> bool:
@@ -1646,10 +1659,10 @@ async def save_candidate_batch(
 
     if ctx.duplicate_save_loop.consecutive_duplicate_batches >= 3:
         result["batch_status"] = "duplicate_loop"
-        result["next_instruction"] = "连续多个批次均为重复候选，请停止保存当前内容，获取下一个 chunk 或结束任务。"
+        result["next_instruction"] = "连续多个批次均为重复候选，请停止保存当前内容；立即调用 claim_next_page_chunk 获取下一个 chunk。如果 claim_next_page_chunk 返回 empty，再访问已明确发现的新分页 URL，或结束任务。"
     elif ctx.duplicate_save_loop.consecutive_merged_duplicate_batches >= 2:
         result["batch_status"] = "duplicate_loop"
-        result["next_instruction"] = "连续重复合并同一批候选，未产生新增候选。请停止保存当前内容；如果没有明确未访问的新候选列表页，请结束任务。"
+        result["next_instruction"] = "连续重复合并同一批候选，未产生新增候选。请停止保存当前内容；立即调用 claim_next_page_chunk 获取下一个 chunk。如果 claim_next_page_chunk 返回 empty，再访问已明确发现的新分页 URL，或结束任务。"
     await _ensure_crawl_job_can_continue_for_context(ctx)
     return result
 

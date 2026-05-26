@@ -30,6 +30,7 @@ from app.services.crawler_tools import (
     is_allowed_crawl_url,
     is_safe_public_crawl_url,
     normalize_candidate_payload,
+    normalize_candidate_profile_url,
     record_save_batch_failure,
     record_save_batch_success,
     record_page_snapshot,
@@ -70,6 +71,45 @@ class CrawlerToolTests(unittest.TestCase):
         )
         self.assertFalse(ctx.is_denied_url("https://cs.example.edu/news/b.htm"))
         self.assertFalse(ctx.is_denied_url("https://cs.example.edu/news/"))
+
+    def test_normalize_candidate_profile_url_preserves_spa_hash_route(self) -> None:
+        self.assertEqual(
+            normalize_candidate_profile_url("http://sim.jxufe.edu.cn/#/staff/detail/5"),
+            "http://sim.jxufe.edu.cn/#/staff/detail/5",
+        )
+
+    def test_normalize_candidate_profile_url_drops_plain_document_anchor(self) -> None:
+        self.assertEqual(
+            normalize_candidate_profile_url("https://cs.example.edu/teachers/zhang#bio"),
+            "https://cs.example.edu/teachers/zhang",
+        )
+
+    def test_page_snapshot_cache_distinguishes_spa_hash_routes(self) -> None:
+        ctx = self._budget_test_ctx()
+        staff = PageSnapshot(
+            url="http://sim.jxufe.edu.cn/#/staff/detail/5",
+            title="万常选",
+            text="万常选",
+            html="<html>staff</html>",
+            links=[],
+            fetch_method="browser",
+            status="succeeded",
+        )
+        home = PageSnapshot(
+            url="http://sim.jxufe.edu.cn/#/home",
+            title="首页",
+            text="首页",
+            html="<html>home</html>",
+            links=[],
+            fetch_method="browser",
+            status="succeeded",
+        )
+
+        ctx.remember_page_snapshot(staff)
+        ctx.remember_page_snapshot(home)
+
+        self.assertIs(ctx.get_cached_page_snapshot(staff.url), staff)
+        self.assertIs(ctx.get_cached_page_snapshot(home.url), home)
 
     def test_save_candidate_batch_fingerprint_ignores_order_and_non_identity_fields(self) -> None:
         first = save_candidate_batch_fingerprint(
@@ -1212,6 +1252,8 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(first_merge["merged_count"], 1)
             self.assertEqual(second_merge["batch_status"], "duplicate_loop")
             self.assertIn("重复合并", second_merge["next_instruction"])
+            self.assertIn("claim_next_page_chunk", second_merge["next_instruction"])
+            self.assertIn("返回 empty", second_merge["next_instruction"])
 
     async def test_save_candidate_batch_does_not_replace_existing_email_with_empty_value(self) -> None:
         async with _RealCrawlerSessionHarness() as harness:
@@ -1265,6 +1307,8 @@ class CrawlerHttpToolTests(unittest.IsolatedAsyncioTestCase):
             third = await save_candidate_batch(ctx, [candidate])
 
             self.assertEqual(third["batch_status"], "duplicate_loop")
+            self.assertIn("claim_next_page_chunk", third["next_instruction"])
+            self.assertIn("返回 empty", third["next_instruction"])
 
     async def test_profile_page_email_overrides_list_boundary_email(self) -> None:
         async with _RealCrawlerSessionHarness() as harness:

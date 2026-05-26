@@ -9,11 +9,8 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from app.agents.faculty_crawler_agent import (
     CONTROLLED_CRAWLER_TOOL_NAMES,
     FACULTY_CRAWLER_SYSTEM_PROMPT,
-    SaveHistoryCompactionMiddleware,
     build_faculty_crawler_model,
     build_trace_event,
-    compact_completed_chunk_history,
-    compact_save_tool_history,
     run_faculty_crawler_agent,
     _format_chunked_crawl_page_response,
     _format_save_batch_result_for_model,
@@ -130,7 +127,7 @@ class FacultyCrawlerAgentSaveResultTests(unittest.TestCase):
         self.assertIn("name", failed_items[0]["reason"])
 
 
-class FacultyCrawlerAgentCompactionTests(unittest.TestCase):
+class FacultyCrawlerAgentPromptTests(unittest.TestCase):
     def test_system_prompt_requires_structured_numeric_constraints(self) -> None:
         self.assertIn("每个候选对象都必须使用英文键", FACULTY_CRAWLER_SYSTEM_PROMPT)
         self.assertIn("字段值尽量保持页面原文", FACULTY_CRAWLER_SYSTEM_PROMPT)
@@ -144,233 +141,24 @@ class FacultyCrawlerAgentCompactionTests(unittest.TestCase):
         self.assertIn("返回 status=chunked", FACULTY_CRAWLER_SYSTEM_PROMPT)
         self.assertIn("必须立即调用 claim_next_page_chunk", FACULTY_CRAWLER_SYSTEM_PROMPT)
 
+    def test_system_prompt_keeps_discovery_round_out_of_profile_detail_pages(self) -> None:
+        self.assertIn("当前是第一轮候选发现模式，不是详情页补全模式", FACULTY_CRAWLER_SYSTEM_PROMPT)
+        self.assertIn("只从列表页、目录页、分页页中发现候选导师", FACULTY_CRAWLER_SYSTEM_PROMPT)
+        self.assertIn("只把它保存为 profile_url", FACULTY_CRAWLER_SYSTEM_PROMPT)
+        self.assertIn("不要调用 crawl_page 或 investigate_with_browser 进入个人详情页", FACULTY_CRAWLER_SYSTEM_PROMPT)
+        self.assertIn("详情字段可以留空", FACULTY_CRAWLER_SYSTEM_PROMPT)
+        self.assertIn("用户手动选择候选后进入详情页补全模式", FACULTY_CRAWLER_SYSTEM_PROMPT)
+
     def test_system_prompt_requires_finishing_current_chunk_before_new_page(self) -> None:
         self.assertIn("领取 chunk 后必须先完成当前 chunk", FACULTY_CRAWLER_SYSTEM_PROMPT)
-        self.assertIn("发现新的候选列表页、分页或详情页链接时，先记住该 URL", FACULTY_CRAWLER_SYSTEM_PROMPT)
-        self.assertIn("当前 chunk 完成后再调用 crawl_page", FACULTY_CRAWLER_SYSTEM_PROMPT)
+        self.assertIn("发现新的候选列表页或分页页链接时，先记住该 URL", FACULTY_CRAWLER_SYSTEM_PROMPT)
+        self.assertIn("当前 chunk 完成后再调用 crawl_page 探索新列表/分页页面", FACULTY_CRAWLER_SYSTEM_PROMPT)
         self.assertIn("不要在同一轮同时调用 submit_page_chunk_candidates 和 crawl_page", FACULTY_CRAWLER_SYSTEM_PROMPT)
         self.assertIn("has_unsubmitted_candidates_in_current_chunk", FACULTY_CRAWLER_SYSTEM_PROMPT)
         self.assertIn("刚好提交 10 个候选不代表需要拆分", FACULTY_CRAWLER_SYSTEM_PROMPT)
         self.assertIn("investigate_with_browser 不能用于绕过 chunk", FACULTY_CRAWLER_SYSTEM_PROMPT)
         self.assertIn("当前存在待处理 chunk 时，必须先 claim_next_page_chunk", FACULTY_CRAWLER_SYSTEM_PROMPT)
         self.assertIn("只有当前 chunk 正文中明确还有超过 10 个已看见候选", FACULTY_CRAWLER_SYSTEM_PROMPT)
-
-    def test_compact_save_tool_history_keeps_saved_candidate_identities(self) -> None:
-        messages = [
-            HumanMessage(content="入口任务"),
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "submit_page_chunk_candidates",
-                        "args": {
-                            "candidates": [
-                                {
-                                    "name": "张三",
-                                    "profile_url": "https://example.edu/zhang",
-                                },
-                                {"name": "李四"},
-                            ]
-                        },
-                        "id": "call_1",
-                    }
-                ],
-            ),
-            ToolMessage(
-                content='{"batch_status":"saved","attempted_count":2,"saved_count":2,"failed_count":0,"failed_items":[],"total_saved_count":2}',
-                tool_call_id="call_1",
-            ),
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "submit_page_chunk_candidates",
-                        "args": {"candidates": [{"name": "王五"}]},
-                        "id": "call_2",
-                    }
-                ],
-            ),
-            ToolMessage(
-                content='{"batch_status":"saved","attempted_count":1,"saved_count":1,"failed_count":0,"failed_items":[],"total_saved_count":3}',
-                tool_call_id="call_2",
-            ),
-        ]
-
-        compacted = compact_save_tool_history(messages)
-        serialized = "\n".join(str(message.content) for message in compacted)
-
-        self.assertEqual(len(compacted), 2)
-        self.assertIsInstance(compacted[0], HumanMessage)
-        self.assertIsInstance(compacted[1], HumanMessage)
-        self.assertIn("3", serialized)
-        self.assertIn("张三 (https://example.edu/zhang)", serialized)
-        self.assertIn("李四", serialized)
-        self.assertIn("王五", serialized)
-
-    def test_compact_save_tool_history_keeps_rejected_batch_failures(self) -> None:
-        messages = [
-            HumanMessage(content="入口任务"),
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "submit_page_chunk_candidates",
-                        "args": {"candidates": [{"name": ""}]},
-                        "id": "call_bad",
-                    }
-                ],
-            ),
-            ToolMessage(
-                content='{"batch_status":"rejected","attempted_count":1,"saved_count":0,"failed_count":1,"failed_items":[{"index":0,"name":null,"reason":"name 不能为空"}],"total_saved_count":20}',
-                tool_call_id="call_bad",
-            ),
-        ]
-
-        compacted = compact_save_tool_history(messages)
-        serialized = "\n".join(str(message.content) for message in compacted)
-
-        self.assertIn("20", serialized)
-        self.assertIn("index=0", serialized)
-        self.assertIn("name 不能为空", serialized)
-
-    def test_compaction_does_not_leave_orphan_save_tool_messages(self) -> None:
-        messages = [
-            HumanMessage(content="入口任务"),
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "submit_page_chunk_candidates",
-                        "args": {"candidates": [{"name": "张三"}]},
-                        "id": "call_1",
-                    }
-                ],
-            ),
-            ToolMessage(
-                content='{"batch_status":"saved","attempted_count":1,"saved_count":1,"failed_count":0,"failed_items":[],"total_saved_count":1}',
-                tool_call_id="call_1",
-            ),
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "crawl_page",
-                        "args": {"url": "https://example.edu"},
-                        "id": "crawl_1",
-                    }
-                ],
-            ),
-            ToolMessage(
-                content='{"status":"succeeded","text":"页面内容"}',
-                tool_call_id="crawl_1",
-            ),
-        ]
-
-        compacted = compact_save_tool_history(messages)
-        tool_ids = {
-            getattr(message, "tool_call_id", None)
-            for message in compacted
-            if getattr(message, "tool_call_id", None)
-        }
-        ai_tool_ids = {
-            tool_call["id"]
-            for message in compacted
-            for tool_call in (getattr(message, "tool_calls", []) or [])
-            if isinstance(tool_call, dict) and "id" in tool_call
-        }
-
-        self.assertNotIn("call_1", tool_ids)
-        self.assertNotIn("call_1", ai_tool_ids)
-        self.assertIn("crawl_1", tool_ids)
-        self.assertIn("crawl_1", ai_tool_ids)
-
-    def test_compact_completed_chunk_history_summarizes_old_completed_chunks(self) -> None:
-        messages = [
-            HumanMessage(content="入口任务"),
-            AIMessage(
-                content="领取第一页片段",
-                tool_calls=[{"name": "claim_next_page_chunk", "args": {}, "id": "claim_1"}],
-            ),
-            ToolMessage(
-                content='{"status":"ok","chunk_id":"chunk-1","source_url":"https://example.edu/list","chunk_index":0,"content":"很长的第一页片段正文 张三 李四"}',
-                tool_call_id="claim_1",
-            ),
-            AIMessage(
-                content="提交第一页片段",
-                tool_calls=[
-                    {
-                        "name": "submit_page_chunk_candidates",
-                        "args": {
-                            "chunk_id": "chunk-1",
-                            "candidates": [
-                                {"name": "张三", "email": "zhang@example.edu"},
-                                {"name": "李四", "profile_url": "https://example.edu/li"},
-                            ],
-                        },
-                        "id": "submit_1",
-                    }
-                ],
-            ),
-            ToolMessage(
-                content='{"batch_status":"saved","attempted_count":2,"saved_count":2,"merged_count":0,"rejected_count":0,"failed_count":0,"total_saved_count":2,"chunk_status":"completed"}',
-                tool_call_id="submit_1",
-            ),
-            AIMessage(
-                content="领取第二页片段",
-                tool_calls=[{"name": "claim_next_page_chunk", "args": {}, "id": "claim_2"}],
-            ),
-            ToolMessage(
-                content='{"status":"ok","chunk_id":"chunk-2","source_url":"https://example.edu/list?page=2","chunk_index":0,"content":"当前片段正文 王五"}',
-                tool_call_id="claim_2",
-            ),
-            AIMessage(
-                content="提交第二页片段",
-                tool_calls=[
-                    {
-                        "name": "submit_page_chunk_candidates",
-                        "args": {
-                            "chunk_id": "chunk-2",
-                            "candidates": [{"name": "王五"}],
-                        },
-                        "id": "submit_2",
-                    }
-                ],
-            ),
-            ToolMessage(
-                content='{"batch_status":"saved","attempted_count":1,"saved_count":1,"merged_count":0,"rejected_count":0,"failed_count":0,"total_saved_count":3,"chunk_status":"completed"}',
-                tool_call_id="submit_2",
-            ),
-        ]
-
-        compacted = compact_completed_chunk_history(messages, keep_recent_completed_chunks=1)
-        serialized = "\n".join(str(message.content) for message in compacted)
-        tool_ids = {
-            getattr(message, "tool_call_id", None)
-            for message in compacted
-            if getattr(message, "tool_call_id", None)
-        }
-        ai_tool_ids = {
-            tool_call["id"]
-            for message in compacted
-            for tool_call in (getattr(message, "tool_calls", []) or [])
-            if isinstance(tool_call, dict) and "id" in tool_call
-        }
-
-        self.assertIn("已完成页面片段历史已压缩", serialized)
-        self.assertIn("chunk-1", serialized)
-        self.assertIn("张三 (zhang@example.edu)", serialized)
-        self.assertIn("李四 (https://example.edu/li)", serialized)
-        self.assertNotIn("很长的第一页片段正文", serialized)
-        self.assertIn("当前片段正文 王五", serialized)
-        self.assertNotIn("claim_1", tool_ids)
-        self.assertNotIn("submit_1", tool_ids)
-        self.assertNotIn("claim_1", ai_tool_ids)
-        self.assertNotIn("submit_1", ai_tool_ids)
-        self.assertIn("claim_2", tool_ids)
-        self.assertIn("submit_2", tool_ids)
-        self.assertIn("claim_2", ai_tool_ids)
-        self.assertIn("submit_2", ai_tool_ids)
-
 
 class FacultyCrawlerAgentMiddlewareTests(unittest.TestCase):
     def test_chunked_crawl_page_response_omits_full_page_text(self) -> None:
@@ -402,119 +190,6 @@ class FacultyCrawlerAgentMiddlewareTests(unittest.TestCase):
     def test_controlled_tool_names_include_chunk_tools(self) -> None:
         self.assertIn("claim_next_page_chunk", CONTROLLED_CRAWLER_TOOL_NAMES)
         self.assertIn("submit_page_chunk_candidates", CONTROLLED_CRAWLER_TOOL_NAMES)
-
-    def test_save_history_compaction_middleware_overrides_messages(self) -> None:
-        original_messages = [
-            HumanMessage(content="入口任务"),
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "submit_page_chunk_candidates",
-                        "args": {"candidates": [{"name": "张三"}]},
-                        "id": "call_1",
-                    }
-                ],
-            ),
-            ToolMessage(
-                content='{"batch_status":"saved","attempted_count":1,"saved_count":1,"failed_count":0,"failed_items":[],"total_saved_count":1}',
-                tool_call_id="call_1",
-            ),
-        ]
-        captured: dict[str, object] = {}
-
-        class Request:
-            messages = original_messages
-            tools: list[object] = []
-
-            def override(self, **kwargs: object) -> object:
-                captured.update(kwargs)
-                return SimpleNamespace(
-                    messages=kwargs.get("messages", self.messages),
-                    tools=self.tools,
-                )
-
-        def handler(request: object) -> object:
-            return request.messages
-
-        result = SaveHistoryCompactionMiddleware().wrap_model_call(Request(), handler)
-
-        self.assertEqual(result, captured["messages"])
-        assert isinstance(result, list)
-        self.assertEqual(len(result), 2)
-        self.assertIn("1", result[1].content)
-
-    def test_save_history_compaction_middleware_compacts_completed_chunks(self) -> None:
-        original_messages = [
-            HumanMessage(content="入口任务"),
-            AIMessage(
-                content="",
-                tool_calls=[{"name": "claim_next_page_chunk", "args": {}, "id": "claim_1"}],
-            ),
-            ToolMessage(
-                content='{"status":"ok","chunk_id":"chunk-1","source_url":"https://example.edu/list","chunk_index":0,"content":"旧片段正文"}',
-                tool_call_id="claim_1",
-            ),
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "submit_page_chunk_candidates",
-                        "args": {"chunk_id": "chunk-1", "candidates": [{"name": "张三"}]},
-                        "id": "submit_1",
-                    }
-                ],
-            ),
-            ToolMessage(
-                content='{"batch_status":"saved","saved_count":1,"merged_count":0,"rejected_count":0,"failed_count":0,"total_saved_count":1,"chunk_status":"completed"}',
-                tool_call_id="submit_1",
-            ),
-            AIMessage(
-                content="",
-                tool_calls=[{"name": "claim_next_page_chunk", "args": {}, "id": "claim_2"}],
-            ),
-            ToolMessage(
-                content='{"status":"ok","chunk_id":"chunk-2","source_url":"https://example.edu/list?page=2","chunk_index":0,"content":"保留最近片段正文"}',
-                tool_call_id="claim_2",
-            ),
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "submit_page_chunk_candidates",
-                        "args": {"chunk_id": "chunk-2", "candidates": [{"name": "李四"}]},
-                        "id": "submit_2",
-                    }
-                ],
-            ),
-            ToolMessage(
-                content='{"batch_status":"saved","saved_count":1,"merged_count":0,"rejected_count":0,"failed_count":0,"total_saved_count":2,"chunk_status":"completed"}',
-                tool_call_id="submit_2",
-            ),
-        ]
-        captured: dict[str, object] = {}
-
-        class Request:
-            messages = original_messages
-            tools: list[object] = []
-
-            def override(self, **kwargs: object) -> object:
-                captured.update(kwargs)
-                return SimpleNamespace(
-                    messages=kwargs.get("messages", self.messages),
-                    tools=self.tools,
-                )
-
-        def handler(request: object) -> object:
-            return request.messages
-
-        result = SaveHistoryCompactionMiddleware().wrap_model_call(Request(), handler)
-        serialized = "\n".join(str(message.content) for message in result)
-
-        self.assertEqual(result, captured["messages"])
-        self.assertIn("已完成页面片段历史已压缩", serialized)
-        self.assertNotIn("旧片段正文", serialized)
-        self.assertIn("保留最近片段正文", serialized)
 
     def test_run_agent_starts_with_claim_prompt_when_chunks_are_pending(self) -> None:
         async def run() -> str:
