@@ -389,6 +389,8 @@ async def _resolve_and_refresh_crawl_job_llm_profile(
         job.llm_profile_id = llm_profile.id
 
     return llm_profile
+
+
 @router.post("/{job_id}/enrich", response_model=CrawlJobEnrichResult)
 async def enrich_crawl_candidates(
     job_id: int,

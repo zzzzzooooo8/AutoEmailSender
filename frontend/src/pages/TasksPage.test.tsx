@@ -67,12 +67,13 @@ const notificationMocks = vi.hoisted(() => ({
 }));
 
 const confirmMock = vi.hoisted(() => vi.fn().mockResolvedValue(true));
+const selectionMock = vi.hoisted(() => ({
+  selectedIdentityId: 1 as number | null,
+  selectedLlmProfileId: 2 as number | null,
+}));
 
 vi.mock("@/context/SelectionContext", () => ({
-  useSelectionContext: () => ({
-    selectedIdentityId: 1,
-    selectedLlmProfileId: 2,
-  }),
+  useSelectionContext: () => selectionMock,
 }));
 
 vi.mock("@/context/NotificationContext", () => ({
@@ -355,6 +356,53 @@ describe("TasksPage crawl job action copy", () => {
     });
   });
 
+  it("blocks retrying a failed crawl job without a selected LLM profile", async () => {
+    selectionMock.selectedLlmProfileId = null;
+    apiMocks.listCrawlJobs.mockResolvedValue([buildCrawlJob()]);
+
+    render(
+      <MemoryRouter>
+        <TasksPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "教师抓取" }));
+    fireEvent.click(await screen.findByRole("button", { name: "重新抓取" }));
+
+    await waitFor(() => {
+      expect(notificationMocks.notifyError).toHaveBeenCalledWith(
+        "请先选择模型配置",
+        "请选择一个 LLM Profile 后再继续操作。",
+      );
+    });
+    expect(confirmMock).not.toHaveBeenCalled();
+    expect(apiMocks.retryCrawlJob).not.toHaveBeenCalled();
+  });
+
+  it("blocks resuming a paused crawl job without a selected LLM profile", async () => {
+    selectionMock.selectedLlmProfileId = null;
+    apiMocks.listCrawlJobs.mockResolvedValue([
+      buildCrawlJob({ status: "paused" }),
+    ]);
+
+    render(
+      <MemoryRouter>
+        <TasksPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "教师抓取" }));
+    fireEvent.click(await screen.findByRole("button", { name: "继续抓取" }));
+
+    await waitFor(() => {
+      expect(notificationMocks.notifyError).toHaveBeenCalledWith(
+        "请先选择模型配置",
+        "请选择一个 LLM Profile 后再继续操作。",
+      );
+    });
+    expect(apiMocks.resumeCrawlJob).not.toHaveBeenCalled();
+  });
+
   it("uses re-crawl wording after retrying a failed crawl job", async () => {
     apiMocks.listCrawlJobs.mockResolvedValue([buildCrawlJob()]);
     apiMocks.retryCrawlJob.mockResolvedValue(buildCrawlJob({ status: "queued" }));
@@ -524,6 +572,8 @@ const buildWorkspaceThread = (
 beforeEach(() => {
   vi.clearAllMocks();
   confirmMock.mockResolvedValue(true);
+  selectionMock.selectedIdentityId = 1;
+  selectionMock.selectedLlmProfileId = 2;
   apiMocks.listBatchTasks.mockResolvedValue([]);
   apiMocks.listBatchTaskItems.mockResolvedValue([]);
   apiMocks.listCrawlJobs.mockResolvedValue([]);
