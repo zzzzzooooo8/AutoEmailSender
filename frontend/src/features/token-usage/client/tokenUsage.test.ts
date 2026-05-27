@@ -1,15 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildTokenUsageVisualizationQueryParams,
   buildTokenUsageChartQueryParams,
   buildTokenUsageRecordQueryParams,
   calculateStackedBarSegments,
+  formatTokenCompactValue,
   formatTokenRecordStatus,
+  formatTokenShare,
   formatTokenValue,
   formatDateTimeLocalValue,
   formatTokenUsageRecordTime,
   formatTokenUsageBucketLabel,
   getTokenRecordFeatureTone,
   parseDateTimeLocalValue,
+  resolveTokenVisualizationDateRange,
   resolveTokenUsagePageJump,
 } from './tokenUsage';
 
@@ -96,6 +100,46 @@ describe('token usage center helpers', () => {
     });
   });
 
+  it('builds visualization query params for presets and custom ranges', () => {
+    expect(
+      buildTokenUsageVisualizationQueryParams({
+        preset: 'last_30_days',
+        startAt: '2026-05-01T00:00:00.000Z',
+        endAt: '2026-05-25T00:00:00.000Z',
+      }),
+    ).toEqual({
+      preset: 'last_30_days',
+    });
+
+    expect(
+      buildTokenUsageVisualizationQueryParams({
+        preset: 'custom',
+        startAt: '2026-05-01T00:00:00.000Z',
+        endAt: '2026-05-25T00:00:00.000Z',
+      }),
+    ).toEqual({
+      preset: 'custom',
+      start_at: '2026-05-01T00:00:00.000Z',
+      end_at: '2026-05-25T00:00:00.000Z',
+    });
+  });
+
+  it('resolves visualization date ranges for presets', () => {
+    const now = new Date('2026-05-25T12:00:00.000Z');
+
+    expect(resolveTokenVisualizationDateRange('last_24_hours', now)).toEqual({
+      preset: 'last_24_hours',
+      startAt: null,
+      endAt: null,
+    });
+
+    expect(resolveTokenVisualizationDateRange('custom', now)).toEqual({
+      preset: 'custom',
+      startAt: '2026-05-24T12:00:00.000Z',
+      endAt: '2026-05-25T12:00:00.000Z',
+    });
+  });
+
   it('round-trips date hour input values', () => {
     const parsed = parseDateTimeLocalValue('2026-04-30T10:00');
 
@@ -164,5 +208,11 @@ describe('token usage center helpers', () => {
       outputPercent: 0,
       totalPercent: 0,
     });
+  });
+
+  it('formats compact token numbers and shares', () => {
+    expect(formatTokenCompactValue(1200)).toBe('1.2K');
+    expect(formatTokenCompactValue(1_200_000)).toBe('1.2M');
+    expect(formatTokenShare(0.376)).toBe('37.6%');
   });
 });

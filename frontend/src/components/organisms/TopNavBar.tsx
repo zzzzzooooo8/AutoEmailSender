@@ -20,6 +20,7 @@ export const TopNavBar = () => {
     { label: "首页", href: "/" },
     { label: "导师管理", href: "/professors" },
     { label: "任务中心", href: "/tasks" },
+    { label: "统计面板", href: "/dashboard" },
     { label: "个人中心", href: "/profile" },
   ];
 

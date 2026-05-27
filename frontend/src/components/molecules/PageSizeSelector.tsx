@@ -11,6 +11,7 @@ type PageSizeSelectorProps = {
   value: number;
   onChange: (pageSize: number) => void;
   className?: string;
+  unitLabel?: string;
 };
 
 const CUSTOM_VALUE = "custom";
@@ -19,6 +20,7 @@ export const PageSizeSelector = ({
   value,
   onChange,
   className,
+  unitLabel = "位",
 }: PageSizeSelectorProps) => {
   const valueMatchesFixedOption = PAGE_SIZE_OPTIONS.includes(
     value as (typeof PAGE_SIZE_OPTIONS)[number],
@@ -96,7 +98,7 @@ export const PageSizeSelector = ({
           className="h-9 w-20 rounded-2xl border border-stone-200 bg-white px-3 text-sm text-stone-700 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
         />
       ) : null}
-      <span className="text-sm text-stone-500">位</span>
+      <span className="text-sm text-stone-500">{unitLabel}</span>
     </div>
   );
 };

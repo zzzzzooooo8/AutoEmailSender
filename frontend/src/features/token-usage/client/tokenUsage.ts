@@ -77,6 +77,35 @@ export const buildTokenUsageChartQueryParams = ({
   ...(preset === 'custom' && endAt ? { end_at: endAt } : {}),
 });
 
+export const buildTokenUsageVisualizationQueryParams = ({
+  preset,
+  startAt,
+  endAt,
+}: {
+  preset: TokenUsageChartPresetDTO;
+  startAt: string | null;
+  endAt: string | null;
+}) => ({
+  preset,
+  ...(preset === 'custom' && startAt ? { start_at: startAt } : {}),
+  ...(preset === 'custom' && endAt ? { end_at: endAt } : {}),
+});
+
+export const resolveTokenVisualizationDateRange = (
+  preset: TokenUsageChartPresetDTO,
+  now = new Date(),
+): { preset: TokenUsageChartPresetDTO; startAt: string | null; endAt: string | null } => {
+  if (preset !== 'custom') {
+    return { preset, startAt: null, endAt: null };
+  }
+  const start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  return {
+    preset,
+    startAt: start.toISOString(),
+    endAt: now.toISOString(),
+  };
+};
+
 export const parseDateTimeLocalValue = (value: string): string | null => {
   if (!value.trim()) {
     return null;
@@ -192,5 +221,18 @@ export const calculateStackedBarSegments = ({
     totalPercent: inputPercent + outputPercent,
   };
 };
+
+export const formatTokenCompactValue = (value: number): string => {
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
+  }
+  if (value >= 1_000) {
+    return `${(value / 1_000).toFixed(1).replace(/\.0$/, '')}K`;
+  }
+  return value.toLocaleString('zh-CN');
+};
+
+export const formatTokenShare = (value: number): string =>
+  `${(value * 100).toFixed(1).replace(/\.0$/, '')}%`;
 
 const padDatePart = (value: number): string => String(value).padStart(2, '0');

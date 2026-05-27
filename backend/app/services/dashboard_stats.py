@@ -1,0 +1,972 @@
+from __future__ import annotations
+
+from collections import Counter, defaultdict
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.models import EmailDirection, EmailLog, EmailTask, EmailTaskStatus, IdentityProfile, LLMProfile, Professor
+from app.schemas.dashboard import (
+    DashboardEmailFunnelBucketRead,
+    DashboardEmailFollowUpRead,
+    DashboardEmailSectionRead,
+    DashboardEmailStatusBucketRead,
+    DashboardEmailSummaryRead,
+    DashboardEmailTrendBucketRead,
+    DashboardMentorActionItemRead,
+    DashboardMentorFilterRead,
+    DashboardMentorMatchBucketRead,
+    DashboardProfileCompletenessBucketRead,
+    DashboardProfileCompletenessRead,
+    DashboardMentorSectionRead,
+    DashboardMentorSummaryRead,
+    DashboardOverviewRead,
+    DashboardSchoolDistributionRead,
+    DashboardSchoolFilterRead,
+    DashboardSchoolFilterSchoolRead,
+)
+
+
+HIGH_SCORE_DEFAULT = 80
+EmailTrendEvent = tuple[int, int, datetime]
+
+PROFESSOR_STATUS_LABELS: dict[str, str] = {
+    "not_contacted": "未联系",
+    "preparing": "准备中",
+    "ready_to_send": "待发送",
+    "contacted": "已联系",
+    "replied": "已回复",
+    "failed": "失败",
+}
+
+EMAIL_TASK_STATUS_LABELS: dict[str, str] = {
+    EmailTaskStatus.DISCOVERED.value: "已发现",
+    EmailTaskStatus.MATCHED.value: "已匹配",
+    EmailTaskStatus.GENERATING_DRAFT.value: "草稿生成中",
+    EmailTaskStatus.DRAFT_FAILED.value: "草稿失败",
+    EmailTaskStatus.REVIEW_REQUIRED.value: "待审核",
+    EmailTaskStatus.APPROVED.value: "已批准",
+    EmailTaskStatus.SCHEDULED.value: "已排程",
+    EmailTaskStatus.SENDING.value: "发送中",
+    EmailTaskStatus.SENT.value: "已发送",
+    EmailTaskStatus.SEND_FAILED.value: "发送失败",
+    EmailTaskStatus.REPLY_DETECTED.value: "已回复",
+    EmailTaskStatus.CANCELED.value: "已取消",
+}
+
+
+async def build_dashboard_overview(
+    session: AsyncSession,
+    *,
+    identity_id: int,
+    llm_profile_id: int,
+    university: str | None = None,
+    school: str | None = None,
+    email_university: str | None = None,
+    email_school: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> DashboardOverviewRead:
+    identity = await session.get(IdentityProfile, identity_id)
+    if identity is None:
+        raise ValueError("未找到身份")
+
+    llm_profile = await session.get(LLMProfile, llm_profile_id)
+    if llm_profile is None:
+        raise ValueError("未找到模型")
+
+    professors = list(
+        await session.scalars(
+            select(Professor)
+            .where(Professor.archived_at.is_(None))
+            .order_by(Professor.updated_at.desc(), Professor.created_at.desc()),
+        ),
+    )
+
+    tasks = list(
+        await session.scalars(
+            select(EmailTask)
+            .options(selectinload(EmailTask.professor))
+            .where(
+                EmailTask.identity_id == identity_id,
+                EmailTask.llm_profile_id == llm_profile_id,
+                EmailTask.parent_task_id.is_(None),
+            )
+            .order_by(EmailTask.professor_id.asc(), EmailTask.created_at.desc(), EmailTask.id.desc()),
+        ),
+    )
+
+    tasks_by_professor: dict[int, list[EmailTask]] = defaultdict(list)
+    for task in tasks:
+        tasks_by_professor[task.professor_id].append(task)
+
+    latest_task_by_professor = {
+        professor_id: professor_tasks[0]
+        for professor_id, professor_tasks in tasks_by_professor.items()
+        if professor_tasks
+    }
+    latest_match_score_by_professor = _build_latest_match_score_by_professor(tasks_by_professor)
+    sent_count_by_professor = await _build_sent_count_by_professor(
+        session,
+        task_ids=[task.id for task in tasks],
+    )
+    professor_status_by_id = {
+        professor.id: _map_dashboard_status(
+            tasks_by_professor.get(professor.id, []),
+            sent_count=sent_count_by_professor.get(professor.id, 0),
+        )
+        for professor in professors
+    }
+    filtered_professors = _filter_professors_for_mentor_analysis(
+        professors,
+        university=university,
+        school=school,
+    )
+
+    mentor_section = _build_mentor_section(
+        professors=professors,
+        filtered_professors=filtered_professors,
+        latest_task_by_professor=latest_task_by_professor,
+        latest_match_score_by_professor=latest_match_score_by_professor,
+        professor_status_by_id=professor_status_by_id,
+        threshold=identity.match_threshold or HIGH_SCORE_DEFAULT,
+        active_university=_normalize_filter_value(university),
+        active_school=_normalize_filter_value(school),
+    )
+
+    email_section = await _build_email_section(
+        session,
+        tasks=tasks,
+        professor_status_by_id=professor_status_by_id,
+        latest_task_by_professor=latest_task_by_professor,
+        threshold=identity.match_threshold or HIGH_SCORE_DEFAULT,
+        email_university=email_university,
+        email_school=email_school,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+    return DashboardOverviewRead(mentor=mentor_section, email=email_section)
+
+
+def _build_mentor_section(
+    *,
+    professors: list[Professor],
+    filtered_professors: list[Professor],
+    latest_task_by_professor: dict[int, EmailTask],
+    latest_match_score_by_professor: dict[int, int],
+    professor_status_by_id: dict[int, str],
+    threshold: int,
+    active_university: str | None,
+    active_school: str | None,
+) -> DashboardMentorSectionRead:
+    filtered_professor_ids = {professor.id for professor in filtered_professors}
+    total_professors = len(filtered_professors)
+    matched_professors = sum(1 for professor in filtered_professors if professor.id in latest_match_score_by_professor)
+    high_match_professors = sum(
+        1
+        for professor in filtered_professors
+        if latest_match_score_by_professor.get(professor.id) is not None
+        and latest_match_score_by_professor[professor.id] >= threshold
+    )
+
+    high_score_uncontacted = [
+        _serialize_professor_action_item(
+            professor,
+            task=latest_task_by_professor[professor.id],
+            status=professor_status_by_id.get(professor.id, "not_contacted"),
+            reason=_build_mentor_follow_up_reason(
+                status=professor_status_by_id.get(professor.id, "not_contacted"),
+            ),
+            threshold=threshold,
+        )
+        for professor in filtered_professors
+        if professor.id in latest_task_by_professor
+        and latest_match_score_by_professor.get(professor.id) is not None
+        and latest_match_score_by_professor[professor.id] >= threshold
+        and professor_status_by_id.get(professor.id) in {"not_contacted", "preparing", "ready_to_send"}
+    ]
+    high_score_uncontacted.sort(
+        key=lambda item: (
+            -(item.match_score or 0),
+            -item.updated_at.timestamp(),
+            item.name,
+        ),
+    )
+
+    incomplete_professors = [
+        _serialize_professor_action_item(
+            professor,
+            task=latest_task_by_professor.get(professor.id),
+            status=professor_status_by_id.get(professor.id, "not_contacted"),
+            reason="资料待补全",
+            threshold=threshold,
+            include_missing_fields=True,
+        )
+        for professor in filtered_professors
+        if _build_missing_fields(professor)
+    ]
+    incomplete_professors.sort(
+        key=lambda item: (
+            -(len(item.missing_fields)),
+            -item.updated_at.timestamp(),
+            item.name,
+        ),
+    )
+
+    return DashboardMentorSectionRead(
+        summary=DashboardMentorSummaryRead(
+            total_professors=total_professors,
+            matched_professors=matched_professors,
+            matched_rate=(matched_professors / total_professors) if total_professors else 0.0,
+            high_match_professors=high_match_professors,
+            high_score_uncontacted_count=len(
+                [
+                    professor_id
+                    for professor_id in filtered_professor_ids
+                    if latest_match_score_by_professor.get(professor_id) is not None
+                    and latest_match_score_by_professor[professor_id] >= threshold
+                    and professor_status_by_id.get(professor_id) in {"not_contacted", "preparing", "ready_to_send"}
+                ]
+            ),
+            high_score_threshold=threshold,
+        ),
+        match_score_distribution=_build_match_score_distribution(
+            professors=filtered_professors,
+            latest_match_score_by_professor=latest_match_score_by_professor,
+        ),
+        profile_completeness=_build_profile_completeness(filtered_professors),
+        profile_completeness_distribution=_build_profile_completeness_distribution(filtered_professors),
+        school_distribution=_build_school_distribution(professors),
+        school_filters=_build_school_filters(professors),
+        active_filter=DashboardMentorFilterRead(
+            university=active_university,
+            school=active_school,
+        ),
+        high_score_uncontacted=high_score_uncontacted[:8],
+        incomplete_professors=incomplete_professors[:8],
+    )
+
+
+def _normalize_filter_value(value: str | None) -> str | None:
+    normalized = value.strip() if value else None
+    return normalized or None
+
+
+def _normalize_school_label(value: str | None) -> str:
+    return value.strip() if value and value.strip() else "学校未填写"
+
+
+def _normalize_college_label(value: str | None) -> str:
+    return value.strip() if value and value.strip() else "学院未填写"
+
+
+def _filter_professors_for_mentor_analysis(
+    professors: list[Professor],
+    *,
+    university: str | None,
+    school: str | None,
+) -> list[Professor]:
+    normalized_university = _normalize_filter_value(university)
+    normalized_school = _normalize_filter_value(school)
+
+    filtered = professors
+    if normalized_university is not None:
+        filtered = [
+            professor
+            for professor in filtered
+            if _normalize_school_label(professor.university) == normalized_university
+        ]
+    if normalized_school is not None:
+        filtered = [
+            professor
+            for professor in filtered
+            if _normalize_college_label(professor.school) == normalized_school
+        ]
+    return filtered
+
+
+def _professor_matches_school_filters(
+    professor: Professor | None,
+    *,
+    university: str | None,
+    school: str | None,
+) -> bool:
+    if professor is None:
+        return False
+    normalized_university = _normalize_filter_value(university)
+    normalized_school = _normalize_filter_value(school)
+    if normalized_university is not None and _normalize_school_label(professor.university) != normalized_university:
+        return False
+    if normalized_school is not None and _normalize_college_label(professor.school) != normalized_school:
+        return False
+    return True
+
+
+async def _build_email_section(
+    session: AsyncSession,
+    *,
+    tasks: list[EmailTask],
+    professor_status_by_id: dict[int, str],
+    latest_task_by_professor: dict[int, EmailTask],
+    threshold: int,
+    email_university: str | None,
+    email_school: str | None,
+    start_date: str | None,
+    end_date: str | None,
+) -> DashboardEmailSectionRead:
+    start_at = _parse_date_filter(start_date, field_name="start_date")
+    end_at = _end_of_day(_parse_date_filter(end_date, field_name="end_date"))
+    if start_at is not None and end_at is not None and start_at > end_at:
+        raise ValueError("start_date 不能晚于 end_date")
+
+    task_ids = [task.id for task in tasks]
+    task_by_id = {task.id: task for task in tasks}
+    sent_logs: list[EmailLog] = []
+    received_logs: list[EmailLog] = []
+    if task_ids:
+        logs = list(
+            await session.scalars(
+                select(EmailLog)
+                .where(
+                    EmailLog.email_task_id.in_(task_ids),
+                    EmailLog.direction.in_(
+                        [EmailDirection.SENT.value, EmailDirection.RECEIVED.value],
+                    ),
+                )
+                .order_by(EmailLog.created_at.asc(), EmailLog.id.asc()),
+            ),
+        )
+        for log in logs:
+            if log.direction == EmailDirection.SENT.value:
+                sent_logs.append(log)
+            elif log.direction == EmailDirection.RECEIVED.value:
+                received_logs.append(log)
+
+    failed_tasks = [task for task in tasks if task.status == EmailTaskStatus.SEND_FAILED.value]
+    review_required_count = sum(1 for task in tasks if task.status == EmailTaskStatus.REVIEW_REQUIRED.value)
+    scheduled_count = sum(1 for task in tasks if task.status == EmailTaskStatus.SCHEDULED.value)
+    sent_log_task_ids = {log.email_task_id for log in sent_logs if log.email_task_id is not None}
+    received_log_task_ids = {log.email_task_id for log in received_logs if log.email_task_id is not None}
+
+    all_sent_tasks = [
+        task
+        for task in tasks
+        if task.id in sent_log_task_ids
+        or task.sent_at is not None
+        or task.status in {EmailTaskStatus.SENT.value, EmailTaskStatus.REPLY_DETECTED.value}
+    ]
+    all_replied_tasks = [
+        task
+        for task in tasks
+        if task.id in received_log_task_ids or task.is_replied or task.status == EmailTaskStatus.REPLY_DETECTED.value
+    ]
+
+    sent_events: list[EmailTrendEvent] = []
+    seen_sent_log_task_ids: set[int] = set()
+    for log in sent_logs:
+        if log.email_task_id is None or log.professor_id is None:
+            continue
+        task = task_by_id.get(log.email_task_id)
+        if not _professor_matches_school_filters(
+            task.professor if task is not None else None,
+            university=email_university,
+            school=email_school,
+        ):
+            continue
+        if not _datetime_in_range(log.created_at, start_at=start_at, end_at=end_at):
+            continue
+        sent_events.append((log.email_task_id, log.professor_id, log.created_at))
+        seen_sent_log_task_ids.add(log.email_task_id)
+
+    for task in all_sent_tasks:
+        if task.id in seen_sent_log_task_ids:
+            continue
+        if not _professor_matches_school_filters(task.professor, university=email_university, school=email_school):
+            continue
+        source_time = task.sent_at or task.updated_at
+        if not _datetime_in_range(source_time, start_at=start_at, end_at=end_at):
+            continue
+        sent_events.append((task.id, task.professor_id, source_time))
+
+    contacted_professor_ids = {professor_id for _, professor_id, _ in sent_events}
+    replied_professor_ids: set[int] = set()
+    received_trend_logs: list[EmailLog] = []
+    for log in received_logs:
+        if log.professor_id is None or log.professor_id not in contacted_professor_ids:
+            continue
+        replied_professor_ids.add(log.professor_id)
+        received_trend_logs.append(log)
+
+    replied_fallback_tasks: list[EmailTask] = []
+    for task in all_replied_tasks:
+        if task.professor_id not in contacted_professor_ids:
+            continue
+        replied_professor_ids.add(task.professor_id)
+        if task.id not in received_log_task_ids:
+            replied_fallback_tasks.append(task)
+
+    sent_count = len(sent_events)
+    contacted_professor_count = len(contacted_professor_ids)
+    replied_count = len(replied_professor_ids)
+    send_failed_count = len(failed_tasks)
+    reply_rate = (replied_count / contacted_professor_count) if contacted_professor_count else 0.0
+    send_failed_rate = (send_failed_count / max(sent_count + send_failed_count, 1)) if tasks else 0.0
+
+    trend_30_days = _build_email_trend(
+        sent_events,
+        received_trend_logs,
+        replied_fallback_tasks=replied_fallback_tasks,
+        start_at=start_at,
+        end_at=end_at,
+    )
+    funnel = _build_email_funnel(tasks)
+    status_distribution = _build_email_status_distribution(tasks)
+    follow_ups = _build_email_follow_ups(
+        latest_task_by_professor=latest_task_by_professor,
+        professor_status_by_id=professor_status_by_id,
+        threshold=threshold,
+    )
+
+    return DashboardEmailSectionRead(
+        summary=DashboardEmailSummaryRead(
+            sent_count=sent_count,
+            contacted_professor_count=contacted_professor_count,
+            replied_count=replied_count,
+            reply_rate=reply_rate,
+            send_failed_count=send_failed_count,
+            send_failed_rate=send_failed_rate,
+            review_required_count=review_required_count,
+            scheduled_count=scheduled_count,
+        ),
+        trend_30_days=trend_30_days,
+        funnel=funnel,
+        status_distribution=status_distribution,
+        follow_ups=follow_ups,
+    )
+
+
+def _build_latest_match_score_by_professor(
+    tasks_by_professor: dict[int, list[EmailTask]],
+) -> dict[int, int]:
+    scores: dict[int, int] = {}
+    for professor_id, tasks in tasks_by_professor.items():
+        latest_score_task = next((task for task in tasks if task.match_score is not None), None)
+        if latest_score_task is not None and latest_score_task.match_score is not None:
+            scores[professor_id] = latest_score_task.match_score
+    return scores
+
+
+async def _build_sent_count_by_professor(
+    session: AsyncSession,
+    *,
+    task_ids: list[int],
+) -> dict[int, int]:
+    if not task_ids:
+        return {}
+
+    rows = await session.execute(
+        select(EmailLog.professor_id, EmailLog.id)
+        .where(
+            EmailLog.email_task_id.in_(task_ids),
+            EmailLog.direction == EmailDirection.SENT.value,
+        )
+        .order_by(EmailLog.created_at.asc(), EmailLog.id.asc()),
+    )
+    sent_count_by_professor: dict[int, int] = defaultdict(int)
+    for professor_id, _ in rows.all():
+        sent_count_by_professor[professor_id] += 1
+    return sent_count_by_professor
+
+
+def _build_match_score_distribution(
+    *,
+    professors: list[Professor],
+    latest_match_score_by_professor: dict[int, int],
+) -> list[DashboardMentorMatchBucketRead]:
+    buckets = Counter({"unmatched": 0, "0_59": 0, "60_69": 0, "70_79": 0, "80_89": 0, "90_100": 0})
+    for professor in professors:
+        score = latest_match_score_by_professor.get(professor.id)
+        if score is None:
+            buckets["unmatched"] += 1
+        elif score < 60:
+            buckets["0_59"] += 1
+        elif score < 70:
+            buckets["60_69"] += 1
+        elif score < 80:
+            buckets["70_79"] += 1
+        elif score < 90:
+            buckets["80_89"] += 1
+        else:
+            buckets["90_100"] += 1
+
+    return [
+        DashboardMentorMatchBucketRead(bucket="unmatched", label="未分析", count=buckets["unmatched"]),
+        DashboardMentorMatchBucketRead(bucket="0_59", label="0-59", count=buckets["0_59"]),
+        DashboardMentorMatchBucketRead(bucket="60_69", label="60-69", count=buckets["60_69"]),
+        DashboardMentorMatchBucketRead(bucket="70_79", label="70-79", count=buckets["70_79"]),
+        DashboardMentorMatchBucketRead(bucket="80_89", label="80-89", count=buckets["80_89"]),
+        DashboardMentorMatchBucketRead(bucket="90_100", label="90-100", count=buckets["90_100"]),
+    ]
+
+
+def _build_profile_completeness(professors: list[Professor]) -> list[DashboardProfileCompletenessRead]:
+    total = len(professors)
+    email_count = sum(1 for professor in professors if _has_text(professor.email))
+    research_direction_count = sum(1 for professor in professors if _has_text(professor.research_direction))
+    recent_papers_count = sum(
+        1
+        for professor in professors
+        if isinstance(professor.recent_papers, list) and any(_has_text(item) for item in professor.recent_papers)
+    )
+    profile_url_count = sum(1 for professor in professors if _has_text(professor.profile_url))
+    complete_count = sum(
+        1
+        for professor in professors
+        if _has_text(professor.email)
+        and _has_text(professor.research_direction)
+        and (
+            (isinstance(professor.recent_papers, list) and any(_has_text(item) for item in professor.recent_papers))
+            or _has_text(professor.profile_url)
+        )
+    )
+
+    return [
+        _profile_completeness_item("email", "有邮箱", email_count, total),
+        _profile_completeness_item("research_direction", "有研究方向", research_direction_count, total),
+        _profile_completeness_item("recent_papers", "有近期论文", recent_papers_count, total),
+        _profile_completeness_item("profile_url", "有主页链接", profile_url_count, total),
+        _profile_completeness_item("complete", "完整资料", complete_count, total),
+    ]
+
+
+PROFILE_COMPLETENESS_BUCKET_LABELS = {
+    "complete": "完整资料",
+    "missing_email": "缺邮箱",
+    "missing_research_direction": "缺研究方向",
+    "missing_recent_papers": "缺近期论文",
+    "missing_profile_url": "缺主页链接",
+    "multiple_missing": "多项缺失",
+}
+
+
+def _build_profile_completeness_distribution(
+    professors: list[Professor],
+) -> list[DashboardProfileCompletenessBucketRead]:
+    total = len(professors)
+    counts: Counter[str] = Counter()
+    for professor in professors:
+        missing_fields = _build_missing_fields(professor)
+        if not missing_fields:
+            counts["complete"] += 1
+        elif len(missing_fields) > 1:
+            counts["multiple_missing"] += 1
+        else:
+            field = missing_fields[0]
+            if field == "邮箱":
+                counts["missing_email"] += 1
+            elif field == "研究方向":
+                counts["missing_research_direction"] += 1
+            elif field == "近期论文":
+                counts["missing_recent_papers"] += 1
+            else:
+                counts["missing_profile_url"] += 1
+
+    return [
+        DashboardProfileCompletenessBucketRead(
+            key=key,
+            label=label,
+            count=counts[key],
+            total=total,
+            rate=(counts[key] / total) if total else 0.0,
+        )
+        for key, label in PROFILE_COMPLETENESS_BUCKET_LABELS.items()
+    ]
+
+
+def _profile_completeness_item(
+    key: str,
+    label: str,
+    count: int,
+    total: int,
+) -> DashboardProfileCompletenessRead:
+    rate = (count / total) if total else 0.0
+    return DashboardProfileCompletenessRead(
+        key=key,
+        label=label,
+        count=count,
+        total=total,
+        rate=rate,
+    )
+
+
+def _build_school_distribution(professors: list[Professor]) -> list[DashboardSchoolDistributionRead]:
+    school_counter: Counter[str] = Counter()
+    for professor in professors:
+        school_name = _normalize_school_label(professor.university)
+        school_counter[school_name] += 1
+
+    top_items = sorted(school_counter.items(), key=lambda item: (-item[1], item[0]))
+    return [
+        DashboardSchoolDistributionRead(school_name=school_name, count=count)
+        for school_name, count in top_items
+    ]
+
+
+def _build_school_filters(professors: list[Professor]) -> list[DashboardSchoolFilterRead]:
+    by_university: dict[str, Counter[str]] = defaultdict(Counter)
+    for professor in professors:
+        university = _normalize_school_label(professor.university)
+        school = _normalize_college_label(professor.school)
+        by_university[university][school] += 1
+
+    filters: list[DashboardSchoolFilterRead] = []
+    for university, schools in by_university.items():
+        school_items = [
+            DashboardSchoolFilterSchoolRead(school_name=school_name, count=count)
+            for school_name, count in sorted(schools.items(), key=lambda item: (-item[1], item[0]))
+        ]
+        filters.append(
+            DashboardSchoolFilterRead(
+                university=university,
+                count=sum(schools.values()),
+                schools=school_items,
+            )
+        )
+
+    filters.sort(key=lambda item: (-item.count, item.university))
+    return filters
+
+
+def _serialize_professor_action_item(
+    professor: Professor,
+    *,
+    task: EmailTask | None,
+    status: str,
+    reason: str,
+    threshold: int,
+    include_missing_fields: bool = False,
+) -> DashboardMentorActionItemRead:
+    missing_fields = _build_missing_fields(professor) if include_missing_fields else []
+    return DashboardMentorActionItemRead(
+        professor_id=professor.id,
+        name=professor.name,
+        university=professor.university,
+        school=professor.school,
+        department=professor.department,
+        match_score=task.match_score if task is not None else None,
+        status=status,
+        status_label=PROFESSOR_STATUS_LABELS.get(status, status),
+        updated_at=(task.updated_at if task is not None else professor.updated_at),
+        reason=reason,
+        missing_fields=missing_fields,
+    )
+
+
+def _build_missing_fields(professor: Professor) -> list[str]:
+    missing_fields: list[str] = []
+    if not _has_text(professor.email):
+        missing_fields.append("邮箱")
+    if not _has_text(professor.research_direction):
+        missing_fields.append("研究方向")
+    if not (isinstance(professor.recent_papers, list) and any(_has_text(item) for item in professor.recent_papers)):
+        missing_fields.append("近期论文")
+    if not _has_text(professor.profile_url):
+        missing_fields.append("主页链接")
+    return missing_fields
+
+
+def _build_mentor_follow_up_reason(*, status: str) -> str:
+    return {
+        "not_contacted": "高分但尚未触达",
+        "preparing": "草稿或匹配处理中",
+        "ready_to_send": "已准备发送",
+        "contacted": "已发送未回复",
+        "replied": "已回复",
+        "failed": "发送失败",
+    }.get(status, "待处理")
+
+
+def _build_email_trend(
+    sent_events: list[EmailTrendEvent],
+    received_logs: list[EmailLog],
+    *,
+    replied_fallback_tasks: list[EmailTask],
+    start_at: datetime | None,
+    end_at: datetime | None,
+) -> list[DashboardEmailTrendBucketRead]:
+    if start_at is not None and end_at is not None:
+        start_day = _floor_day(start_at)
+        current_day = _floor_day(end_at)
+    else:
+        current_day = _floor_day(datetime.now(UTC))
+        start_day = current_day - timedelta(days=29)
+
+    buckets: dict[str, DashboardEmailTrendBucketRead] = {}
+    current = start_day
+    while current <= current_day:
+        key = current.date().isoformat()
+        buckets[key] = DashboardEmailTrendBucketRead(date=key, label=current.strftime("%m/%d"))
+        current += timedelta(days=1)
+
+    for _, _, event_time in sent_events:
+        key = _floor_day(event_time).date().isoformat()
+        if key in buckets:
+            buckets[key].sent_count += 1
+
+    replied_professors_by_bucket: dict[str, set[int]] = defaultdict(set)
+    for log in received_logs:
+        if log.professor_id is None:
+            continue
+        key = _floor_day(log.created_at).date().isoformat()
+        if key in buckets:
+            replied_professors_by_bucket[key].add(log.professor_id)
+
+    for task in replied_fallback_tasks:
+        key = _floor_day(task.updated_at).date().isoformat()
+        if key in buckets:
+            replied_professors_by_bucket[key].add(task.professor_id)
+
+    for key, professor_ids in replied_professors_by_bucket.items():
+        buckets[key].replied_count = len(professor_ids)
+
+    return [buckets[key] for key in sorted(buckets.keys())]
+
+
+def _build_email_funnel(tasks: list[EmailTask]) -> list[DashboardEmailFunnelBucketRead]:
+    counts = {
+        "matched": 0,
+        "generating_draft": 0,
+        "review_required": 0,
+        "approved": 0,
+        "scheduled": 0,
+        "sent": 0,
+        "replied": 0,
+    }
+    for task in tasks:
+        if task.status in {
+            EmailTaskStatus.MATCHED.value,
+            EmailTaskStatus.GENERATING_DRAFT.value,
+            EmailTaskStatus.DRAFT_FAILED.value,
+            EmailTaskStatus.REVIEW_REQUIRED.value,
+            EmailTaskStatus.APPROVED.value,
+            EmailTaskStatus.SCHEDULED.value,
+            EmailTaskStatus.SENDING.value,
+            EmailTaskStatus.SENT.value,
+            EmailTaskStatus.SEND_FAILED.value,
+            EmailTaskStatus.REPLY_DETECTED.value,
+        }:
+            counts["matched"] += 1
+        if task.status in {
+            EmailTaskStatus.GENERATING_DRAFT.value,
+            EmailTaskStatus.DRAFT_FAILED.value,
+            EmailTaskStatus.REVIEW_REQUIRED.value,
+            EmailTaskStatus.APPROVED.value,
+            EmailTaskStatus.SCHEDULED.value,
+            EmailTaskStatus.SENDING.value,
+            EmailTaskStatus.SENT.value,
+            EmailTaskStatus.SEND_FAILED.value,
+            EmailTaskStatus.REPLY_DETECTED.value,
+        }:
+            counts["generating_draft"] += 1
+        if task.status in {
+            EmailTaskStatus.REVIEW_REQUIRED.value,
+            EmailTaskStatus.APPROVED.value,
+            EmailTaskStatus.SCHEDULED.value,
+            EmailTaskStatus.SENDING.value,
+            EmailTaskStatus.SENT.value,
+            EmailTaskStatus.SEND_FAILED.value,
+            EmailTaskStatus.REPLY_DETECTED.value,
+        }:
+            counts["review_required"] += 1
+        if task.status in {
+            EmailTaskStatus.APPROVED.value,
+            EmailTaskStatus.SCHEDULED.value,
+            EmailTaskStatus.SENDING.value,
+            EmailTaskStatus.SENT.value,
+            EmailTaskStatus.SEND_FAILED.value,
+            EmailTaskStatus.REPLY_DETECTED.value,
+        }:
+            counts["approved"] += 1
+        if task.status in {
+            EmailTaskStatus.SCHEDULED.value,
+            EmailTaskStatus.SENDING.value,
+            EmailTaskStatus.SENT.value,
+            EmailTaskStatus.REPLY_DETECTED.value,
+        }:
+            counts["scheduled"] += 1
+        if task.status in {EmailTaskStatus.SENT.value, EmailTaskStatus.REPLY_DETECTED.value}:
+            counts["sent"] += 1
+        if task.status == EmailTaskStatus.REPLY_DETECTED.value or task.is_replied:
+            counts["replied"] += 1
+
+    return [
+        DashboardEmailFunnelBucketRead(key="matched", label="已匹配", count=counts["matched"]),
+        DashboardEmailFunnelBucketRead(key="generating_draft", label="草稿生成中", count=counts["generating_draft"]),
+        DashboardEmailFunnelBucketRead(key="review_required", label="待审核", count=counts["review_required"]),
+        DashboardEmailFunnelBucketRead(key="approved", label="已批准", count=counts["approved"]),
+        DashboardEmailFunnelBucketRead(key="scheduled", label="已排程", count=counts["scheduled"]),
+        DashboardEmailFunnelBucketRead(key="sent", label="已发送", count=counts["sent"]),
+        DashboardEmailFunnelBucketRead(key="replied", label="已回复", count=counts["replied"]),
+    ]
+
+
+def _build_email_status_distribution(tasks: list[EmailTask]) -> list[DashboardEmailStatusBucketRead]:
+    counter = Counter(task.status for task in tasks)
+    ordered_statuses = [
+        EmailTaskStatus.MATCHED.value,
+        EmailTaskStatus.GENERATING_DRAFT.value,
+        EmailTaskStatus.DRAFT_FAILED.value,
+        EmailTaskStatus.REVIEW_REQUIRED.value,
+        EmailTaskStatus.APPROVED.value,
+        EmailTaskStatus.SCHEDULED.value,
+        EmailTaskStatus.SENDING.value,
+        EmailTaskStatus.SENT.value,
+        EmailTaskStatus.SEND_FAILED.value,
+        EmailTaskStatus.REPLY_DETECTED.value,
+        EmailTaskStatus.CANCELED.value,
+    ]
+    return [
+        DashboardEmailStatusBucketRead(
+            status=status,
+            label=EMAIL_TASK_STATUS_LABELS.get(status, status),
+            count=counter.get(status, 0),
+        )
+        for status in ordered_statuses
+    ]
+
+
+def _build_email_follow_ups(
+    *,
+    latest_task_by_professor: dict[int, EmailTask],
+    professor_status_by_id: dict[int, str],
+    threshold: int,
+) -> list[DashboardEmailFollowUpRead]:
+    items: list[DashboardEmailFollowUpRead] = []
+    for professor_id, task in latest_task_by_professor.items():
+        professor = task.professor
+        if professor is None:
+            continue
+        score = task.match_score
+        if score is None or score < threshold:
+            continue
+        status = professor_status_by_id.get(professor_id, "not_contacted")
+        if status == "replied":
+            continue
+
+        reason = _build_email_follow_up_reason(status=status)
+        items.append(
+            DashboardEmailFollowUpRead(
+                task_id=task.id,
+                professor_id=professor.id,
+                name=professor.name,
+                university=professor.university,
+                school=professor.school,
+                department=professor.department,
+                match_score=score,
+                status=status,
+                status_label=PROFESSOR_STATUS_LABELS.get(status, status),
+                reason=reason,
+                updated_at=task.updated_at,
+            ),
+        )
+
+    items.sort(
+        key=lambda item: (
+            _email_follow_up_priority(item.status),
+            -(item.match_score or 0),
+            -item.updated_at.timestamp(),
+            item.name,
+        ),
+    )
+    return items[:8]
+
+
+def _email_follow_up_priority(status: str) -> int:
+    return {
+        "failed": 0,
+        "contacted": 1,
+        "ready_to_send": 2,
+        "preparing": 3,
+        "not_contacted": 4,
+    }.get(status, 5)
+
+
+def _build_email_follow_up_reason(*, status: str) -> str:
+    return {
+        "failed": "发送失败",
+        "contacted": "已发送未回复",
+        "ready_to_send": "已准备发送",
+        "preparing": "草稿处理中",
+        "not_contacted": "尚未触达",
+    }.get(status, "待跟进")
+
+
+def _map_dashboard_status(tasks: list[EmailTask], sent_count: int = 0) -> str:
+    if any(task.is_replied or task.status == EmailTaskStatus.REPLY_DETECTED.value for task in tasks):
+        return "replied"
+    if sent_count > 0 or any(task.status == EmailTaskStatus.SENT.value or task.sent_at for task in tasks):
+        return "contacted"
+    if not tasks:
+        return "not_contacted"
+
+    latest_task = tasks[0]
+    if latest_task.status in {
+        EmailTaskStatus.DRAFT_FAILED.value,
+        EmailTaskStatus.SEND_FAILED.value,
+    }:
+        return "failed"
+    if latest_task.status in {
+        EmailTaskStatus.APPROVED.value,
+        EmailTaskStatus.SCHEDULED.value,
+        EmailTaskStatus.SENDING.value,
+    }:
+        return "ready_to_send"
+    if latest_task.status in {
+        EmailTaskStatus.DISCOVERED.value,
+        EmailTaskStatus.MATCHED.value,
+        EmailTaskStatus.GENERATING_DRAFT.value,
+        EmailTaskStatus.REVIEW_REQUIRED.value,
+    }:
+        return "preparing"
+    return "not_contacted"
+
+
+def _has_text(value: str | None) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _parse_date_filter(value: str | None, *, field_name: str) -> datetime | None:
+    normalized = value.strip() if value else None
+    if not normalized:
+        return None
+    try:
+        parsed = datetime.strptime(normalized, "%Y-%m-%d")
+    except ValueError as exc:
+        raise ValueError(f"{field_name} 日期格式应为 YYYY-MM-DD") from exc
+    return parsed.replace(tzinfo=UTC)
+
+
+def _end_of_day(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    return value.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+
+def _datetime_in_range(value: datetime, *, start_at: datetime | None, end_at: datetime | None) -> bool:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    value = value.astimezone(UTC)
+    if start_at is not None and value < start_at:
+        return False
+    if end_at is not None and value > end_at:
+        return False
+    return True
+
+
+def _floor_day(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
