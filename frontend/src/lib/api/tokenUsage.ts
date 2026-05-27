@@ -2,12 +2,14 @@ import { apiFetch } from '@/lib/api/client';
 import {
   buildTokenUsageChartQueryParams,
   buildTokenUsageRecordQueryParams,
+  buildTokenUsageVisualizationQueryParams,
 } from '@/features/token-usage/client/tokenUsage';
 import type {
   TokenUsageChartDTO,
   TokenUsageChartPresetDTO,
   TokenUsageRecordFeatureFilterDTO,
   TokenUsageRecordListDTO,
+  TokenUsageVisualizationDTO,
 } from '@/types';
 
 export interface TokenUsageRecordQuery {
@@ -27,6 +29,12 @@ export interface TokenUsageChartQuery {
   endAt: string | null;
 }
 
+export interface TokenUsageVisualizationQuery {
+  preset: TokenUsageChartPresetDTO;
+  startAt: string | null;
+  endAt: string | null;
+}
+
 export const listTokenUsageRecords = (query: TokenUsageRecordQuery) =>
   apiFetch<TokenUsageRecordListDTO>(
     '/api/token-usage/records',
@@ -39,4 +47,11 @@ export const getTokenUsageChart = (query: TokenUsageChartQuery) =>
     '/api/token-usage/chart',
     undefined,
     buildTokenUsageChartQueryParams(query),
+  );
+
+export const getTokenUsageVisualization = (query: TokenUsageVisualizationQuery) =>
+  apiFetch<TokenUsageVisualizationDTO>(
+    '/api/token-usage/visualization',
+    undefined,
+    buildTokenUsageVisualizationQueryParams(query),
   );

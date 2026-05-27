@@ -24,10 +24,13 @@ from app.schemas.token_usage import (
     TokenUsageChartGranularity,
     TokenUsageChartPreset,
     TokenUsageChartRead,
+    TokenUsageFeatureDistributionRead,
+    TokenUsageModelRankingRead,
     TokenUsagePaginationRead,
     TokenUsageRecordListRead,
     TokenUsageRecordRead,
     TokenUsageSummaryRead,
+    TokenUsageVisualizationRead,
 )
 
 
@@ -96,13 +99,21 @@ async def build_token_usage_chart(
         end_at=end_at,
         now=now,
     )
+    filter_start, filter_end = _resolve_chart_filter_range(
+        preset=preset,
+        start_at=start_at,
+        end_at=end_at,
+        range_start=range_start,
+        range_end=range_end,
+        granularity=granularity,
+    )
     candidates = await _list_all_candidate_records(session)
     records = _filter_records(
         candidates,
         feature_type=feature_type,
         model_name=model_name,
-        start_at=range_start,
-        end_at=range_end + _bucket_duration(granularity) - timedelta(microseconds=1),
+        start_at=filter_start,
+        end_at=filter_end,
     )
     bucket_totals = _aggregate_chart_buckets(records, granularity=granularity)
     buckets = [
@@ -111,9 +122,10 @@ async def build_token_usage_chart(
             bucket_label=_format_bucket_label(bucket_start, granularity),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            cached_tokens=cached_tokens,
             total_tokens=input_tokens + output_tokens,
         )
-        for bucket_start, input_tokens, output_tokens in _iter_chart_buckets(
+        for bucket_start, input_tokens, output_tokens, cached_tokens in _iter_chart_buckets(
             range_start,
             range_end,
             granularity=granularity,
@@ -126,6 +138,54 @@ async def build_token_usage_chart(
         range_start=range_start,
         range_end=range_end,
         buckets=buckets,
+    )
+
+
+async def build_token_usage_visualization(
+    session: AsyncSession,
+    *,
+    preset: TokenUsageChartPreset = "last_24_hours",
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
+    now: datetime | None = None,
+) -> TokenUsageVisualizationRead:
+    chart = await build_token_usage_chart(
+        session,
+        preset=preset,
+        feature_type="all",
+        model_name=None,
+        start_at=start_at,
+        end_at=end_at,
+        now=now,
+    )
+    candidates = await _list_all_candidate_records(session)
+    filter_start, filter_end = _resolve_chart_filter_range(
+        preset=preset,
+        start_at=start_at,
+        end_at=end_at,
+        range_start=chart.range_start,
+        range_end=chart.range_end,
+        granularity=chart.granularity,
+    )
+    records = sorted(
+        _filter_records(
+            candidates,
+            feature_type="all",
+            model_name=None,
+            start_at=filter_start,
+            end_at=filter_end,
+        ),
+        key=lambda item: item.created_at,
+        reverse=True,
+    )
+
+    return TokenUsageVisualizationRead(
+        preset=preset,
+        summary=_build_summary(records),
+        chart=chart,
+        feature_distribution=_build_feature_distribution(records),
+        model_ranking=_build_model_ranking(records, limit=5),
+        recent_records=records[:8],
     )
 
 
@@ -471,6 +531,9 @@ def _resolve_chart_range(
     if preset == "last_7_days":
         range_end = _floor_day(resolved_now)
         return range_end - timedelta(days=6), range_end, "day"
+    if preset == "last_30_days":
+        range_end = _floor_day(resolved_now)
+        return range_end - timedelta(days=29), range_end, "day"
 
     if start_at is None or end_at is None:
         raise ValueError("自定义趋势图需要开始时间和结束时间")
@@ -484,18 +547,38 @@ def _resolve_chart_range(
     return _floor_day(range_start), _floor_day(range_end), "day"
 
 
+
+def _resolve_chart_filter_range(
+    *,
+    preset: TokenUsageChartPreset,
+    start_at: datetime | None,
+    end_at: datetime | None,
+    range_start: datetime,
+    range_end: datetime,
+    granularity: TokenUsageChartGranularity,
+) -> tuple[datetime, datetime]:
+    if preset == "custom":
+        if start_at is None or end_at is None:
+            raise ValueError("自定义趋势图需要开始时间和结束时间")
+        return _as_utc_aware(start_at), _as_utc_aware(end_at)
+    return range_start, range_end + _bucket_duration(granularity) - timedelta(microseconds=1)
+
 def _aggregate_chart_buckets(
     records: list[TokenUsageRecordRead],
     *,
     granularity: TokenUsageChartGranularity,
-) -> dict[datetime, tuple[int, int]]:
-    buckets: dict[datetime, tuple[int, int]] = {}
+) -> dict[datetime, tuple[int, int, int]]:
+    buckets: dict[datetime, tuple[int, int, int]] = {}
     for record in records:
         bucket_start = _bucket_start(record.created_at, granularity)
-        current_input, current_output = buckets.get(bucket_start, (0, 0))
+        current_input, current_output, current_cached = buckets.get(
+            bucket_start,
+            (0, 0, 0),
+        )
         buckets[bucket_start] = (
             current_input + (record.input_tokens or 0),
             current_output + (record.output_tokens or 0),
+            current_cached + (record.cached_tokens or 0),
         )
     return buckets
 
@@ -505,13 +588,16 @@ def _iter_chart_buckets(
     range_end: datetime,
     *,
     granularity: TokenUsageChartGranularity,
-    bucket_totals: dict[datetime, tuple[int, int]],
-) -> list[tuple[datetime, int, int]]:
-    buckets: list[tuple[datetime, int, int]] = []
+    bucket_totals: dict[datetime, tuple[int, int, int]],
+) -> list[tuple[datetime, int, int, int]]:
+    buckets: list[tuple[datetime, int, int, int]] = []
     current = range_start
     while current <= range_end:
-        input_tokens, output_tokens = bucket_totals.get(current, (0, 0))
-        buckets.append((current, input_tokens, output_tokens))
+        input_tokens, output_tokens, cached_tokens = bucket_totals.get(
+            current,
+            (0, 0, 0),
+        )
+        buckets.append((current, input_tokens, output_tokens, cached_tokens))
         current = _next_bucket(current, granularity)
     return buckets
 
@@ -578,3 +664,59 @@ def _build_summary(records: list[TokenUsageRecordRead]) -> TokenUsageSummaryRead
         total_tokens=sum(item.total_tokens or 0 for item in records),
         record_count=len(records),
     )
+
+
+def _build_feature_distribution(
+    records: list[TokenUsageRecordRead],
+) -> list[TokenUsageFeatureDistributionRead]:
+    total_tokens = sum(item.total_tokens or 0 for item in records)
+    grouped: dict[str, list[TokenUsageRecordRead]] = {}
+    for record in records:
+        grouped.setdefault(record.feature_type, []).append(record)
+
+    rows: list[TokenUsageFeatureDistributionRead] = []
+    for feature_type, items in grouped.items():
+        summary = _build_summary(items)
+        rows.append(
+            TokenUsageFeatureDistributionRead(
+                feature_type=feature_type,
+                feature_label=items[0].feature_label,
+                input_tokens=summary.input_tokens,
+                output_tokens=summary.output_tokens,
+                cached_tokens=summary.cached_tokens,
+                total_tokens=summary.total_tokens,
+                record_count=summary.record_count,
+                share=(summary.total_tokens / total_tokens) if total_tokens else 0.0,
+            ),
+        )
+
+    return sorted(rows, key=lambda item: item.total_tokens, reverse=True)
+
+
+def _build_model_ranking(
+    records: list[TokenUsageRecordRead],
+    *,
+    limit: int = 5,
+) -> list[TokenUsageModelRankingRead]:
+    total_tokens = sum(item.total_tokens or 0 for item in records)
+    grouped: dict[str, list[TokenUsageRecordRead]] = {}
+    for record in records:
+        model_name = record.model_name or "未关联模型"
+        grouped.setdefault(model_name, []).append(record)
+
+    rows: list[TokenUsageModelRankingRead] = []
+    for model_name, items in grouped.items():
+        summary = _build_summary(items)
+        rows.append(
+            TokenUsageModelRankingRead(
+                model_name=model_name,
+                input_tokens=summary.input_tokens,
+                output_tokens=summary.output_tokens,
+                cached_tokens=summary.cached_tokens,
+                total_tokens=summary.total_tokens,
+                record_count=summary.record_count,
+                share=(summary.total_tokens / total_tokens) if total_tokens else 0.0,
+            ),
+        )
+
+    return sorted(rows, key=lambda item: item.total_tokens, reverse=True)[:limit]

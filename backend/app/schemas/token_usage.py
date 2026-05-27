@@ -18,6 +18,7 @@ TokenUsageChartPreset = Literal[
     "last_6_hours",
     "last_24_hours",
     "last_7_days",
+    "last_30_days",
     "custom",
 ]
 TokenUsageChartGranularity = Literal["hour", "day"]
@@ -65,6 +66,7 @@ class TokenUsageChartBucketRead(BaseModel):
     bucket_label: str
     input_tokens: int = 0
     output_tokens: int = 0
+    cached_tokens: int = 0
     total_tokens: int = 0
 
 
@@ -74,3 +76,35 @@ class TokenUsageChartRead(BaseModel):
     range_start: datetime
     range_end: datetime
     buckets: list[TokenUsageChartBucketRead] = Field(default_factory=list)
+
+
+class TokenUsageFeatureDistributionRead(BaseModel):
+    feature_type: TokenUsageFeatureType
+    feature_label: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_tokens: int = 0
+    total_tokens: int = 0
+    record_count: int = 0
+    share: float = 0.0
+
+
+class TokenUsageModelRankingRead(BaseModel):
+    model_name: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_tokens: int = 0
+    total_tokens: int = 0
+    record_count: int = 0
+    share: float = 0.0
+
+
+class TokenUsageVisualizationRead(BaseModel):
+    preset: TokenUsageChartPreset
+    summary: TokenUsageSummaryRead
+    chart: TokenUsageChartRead
+    feature_distribution: list[TokenUsageFeatureDistributionRead] = Field(
+        default_factory=list,
+    )
+    model_ranking: list[TokenUsageModelRankingRead] = Field(default_factory=list)
+    recent_records: list[TokenUsageRecordRead] = Field(default_factory=list)

@@ -770,6 +770,7 @@ export type TokenUsageChartPresetDTO =
   | 'last_6_hours'
   | 'last_24_hours'
   | 'last_7_days'
+  | 'last_30_days'
   | 'custom';
 export type TokenUsageChartGranularityDTO = 'hour' | 'day';
 
@@ -815,6 +816,7 @@ export interface TokenUsageChartBucketDTO {
   bucket_label: string;
   input_tokens: number;
   output_tokens: number;
+  cached_tokens: number;
   total_tokens: number;
 }
 
@@ -824,6 +826,202 @@ export interface TokenUsageChartDTO {
   range_start: string;
   range_end: string;
   buckets: TokenUsageChartBucketDTO[];
+}
+
+export interface TokenUsageFeatureDistributionDTO {
+  feature_type: TokenUsageRecordFeatureTypeDTO;
+  feature_label: string;
+  input_tokens: number;
+  output_tokens: number;
+  cached_tokens: number;
+  total_tokens: number;
+  record_count: number;
+  share: number;
+}
+
+export interface TokenUsageModelRankingDTO {
+  model_name: string;
+  input_tokens: number;
+  output_tokens: number;
+  cached_tokens: number;
+  total_tokens: number;
+  record_count: number;
+  share: number;
+}
+
+export interface TokenUsageVisualizationDTO {
+  preset: TokenUsageChartPresetDTO;
+  summary: TokenUsageSummaryDTO;
+  chart: TokenUsageChartDTO;
+  feature_distribution: TokenUsageFeatureDistributionDTO[];
+  model_ranking: TokenUsageModelRankingDTO[];
+  recent_records: TokenUsageRecordDTO[];
+}
+
+export type DashboardMentorMatchBucketDTO =
+  | 'unmatched'
+  | '0_59'
+  | '60_69'
+  | '70_79'
+  | '80_89'
+  | '90_100';
+
+export type DashboardEmailStatusDTO =
+  | 'discovered'
+  | 'matched'
+  | 'generating_draft'
+  | 'draft_failed'
+  | 'review_required'
+  | 'approved'
+  | 'scheduled'
+  | 'sending'
+  | 'sent'
+  | 'send_failed'
+  | 'reply_detected'
+  | 'canceled';
+
+export interface DashboardMentorSummaryDTO {
+  total_professors: number;
+  matched_professors: number;
+  matched_rate: number;
+  high_match_professors: number;
+  high_score_uncontacted_count: number;
+  high_score_threshold: number;
+}
+
+export interface DashboardMentorMatchBucketCountDTO {
+  bucket: DashboardMentorMatchBucketDTO;
+  label: string;
+  count: number;
+}
+
+export interface DashboardProfileCompletenessDTO {
+  key: 'email' | 'research_direction' | 'recent_papers' | 'profile_url' | 'complete';
+  label: string;
+  count: number;
+  total: number;
+  rate: number;
+}
+
+export type DashboardProfileCompletenessBucketKeyDTO =
+  | 'complete'
+  | 'missing_email'
+  | 'missing_research_direction'
+  | 'missing_recent_papers'
+  | 'missing_profile_url'
+  | 'multiple_missing';
+
+export interface DashboardProfileCompletenessBucketDTO {
+  key: DashboardProfileCompletenessBucketKeyDTO;
+  label: string;
+  count: number;
+  total: number;
+  rate: number;
+}
+
+export interface DashboardSchoolDistributionDTO {
+  school_name: string;
+  count: number;
+}
+
+export interface DashboardSchoolFilterSchoolDTO {
+  school_name: string;
+  count: number;
+}
+
+export interface DashboardSchoolFilterDTO {
+  university: string;
+  count: number;
+  schools: DashboardSchoolFilterSchoolDTO[];
+}
+
+export interface DashboardMentorFilterDTO {
+  university: string | null;
+  school: string | null;
+}
+
+export interface DashboardMentorActionItemDTO {
+  professor_id: number;
+  name: string;
+  university: string | null;
+  school: string | null;
+  department: string | null;
+  match_score: number | null;
+  status: string;
+  status_label: string;
+  reason: string;
+  updated_at: string;
+  missing_fields: string[];
+}
+
+export interface DashboardMentorSectionDTO {
+  summary: DashboardMentorSummaryDTO;
+  match_score_distribution: DashboardMentorMatchBucketCountDTO[];
+  profile_completeness: DashboardProfileCompletenessDTO[];
+  profile_completeness_distribution: DashboardProfileCompletenessBucketDTO[];
+  school_distribution: DashboardSchoolDistributionDTO[];
+  school_filters: DashboardSchoolFilterDTO[];
+  active_filter: DashboardMentorFilterDTO;
+  high_score_uncontacted: DashboardMentorActionItemDTO[];
+  incomplete_professors: DashboardMentorActionItemDTO[];
+}
+
+export interface DashboardEmailSummaryDTO {
+  sent_count: number;
+  contacted_professor_count: number;
+  replied_count: number;
+  reply_rate: number;
+  send_failed_count: number;
+  send_failed_rate: number;
+  review_required_count: number;
+  scheduled_count: number;
+}
+
+export interface DashboardEmailTrendBucketDTO {
+  date: string;
+  label?: string | null;
+  sent_count: number;
+  replied_count: number;
+  failed_count: number;
+}
+
+export interface DashboardEmailFunnelBucketDTO {
+  key: string;
+  label: string;
+  count: number;
+}
+
+export interface DashboardEmailStatusBucketDTO {
+  status: DashboardEmailStatusDTO;
+  label: string;
+  count: number;
+}
+
+export interface DashboardEmailFollowUpDTO {
+  professor_id: number;
+  task_id: number;
+  name: string;
+  university: string | null;
+  school: string | null;
+  department: string | null;
+  match_score: number | null;
+  status: string;
+  status_label: string;
+  reason: string;
+  updated_at: string;
+}
+
+export interface DashboardEmailSectionDTO {
+  summary: DashboardEmailSummaryDTO;
+  trend_30_days: DashboardEmailTrendBucketDTO[];
+  funnel: DashboardEmailFunnelBucketDTO[];
+  status_distribution: DashboardEmailStatusBucketDTO[];
+  follow_ups: DashboardEmailFollowUpDTO[];
+}
+
+export interface DashboardOverviewDTO {
+  mentor: DashboardMentorSectionDTO;
+  email: DashboardEmailSectionDTO;
 }
 
 export const PROFESSOR_STATUS_LABELS = {

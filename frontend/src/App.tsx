@@ -17,6 +17,9 @@ const NotFoundPage = lazy(() =>
 const ProfessorsPage = lazy(() =>
   import('@/pages/ProfessorsPage').then((module) => ({ default: module.ProfessorsPage })),
 );
+const DashboardPage = lazy(() =>
+  import('@/pages/DashboardPage').then((module) => ({ default: module.DashboardPage })),
+);
 const ProfilePage = lazy(() =>
   import('@/pages/ProfilePage').then((module) => ({ default: module.ProfilePage })),
 );
@@ -50,6 +53,7 @@ function App() {
                 <Suspense fallback={routeLoadingFallback}>
                   <Routes>
                     <Route path="/" element={<HomePage />} />
+                    <Route path="/dashboard" element={<DashboardPage />} />
                     <Route path="/professors" element={<ProfessorsPage />} />
                     <Route path="/tasks" element={<TasksPage />} />
                     <Route path="/create-task" element={<CreateTaskPage />} />

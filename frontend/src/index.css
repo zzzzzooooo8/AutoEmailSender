@@ -192,9 +192,14 @@ button:not(:disabled):hover,
   box-shadow: 0 10px 20px -22px rgb(41 37 36 / 0.28);
 }
 
-select {
-  appearance: auto;
-  -webkit-appearance: menulist;
+select:not([multiple]) {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 3rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%23292524' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 1.25rem center;
+  background-size: 1rem 1rem;
 }
 
 select:not(:disabled):focus-visible,
@@ -216,8 +221,8 @@ input[type="radio"]:not(:disabled):focus-visible {
 select.form-input,
 .form-input:where(select) {
   cursor: pointer;
-  appearance: auto;
-  -webkit-appearance: menulist;
+  appearance: none;
+  -webkit-appearance: none;
 }
 
 .ui-btn-primary {
@@ -265,7 +270,7 @@ select.form-input,
 }
 
 .ui-select-field {
-  @apply min-w-0 flex-1 appearance-none bg-transparent pr-7 text-sm text-stone-800 outline-none;
+  @apply min-w-0 flex-1 appearance-none bg-transparent pr-10 text-sm text-stone-800 outline-none;
 }
 
 .ui-select-field:disabled {
@@ -279,7 +284,7 @@ select.form-input,
 }
 
 .ui-select-chevron {
-  @apply pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400 transition-colors;
+  @apply pointer-events-none absolute right-5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400 transition-colors;
 }
 
 .ui-select-shell:focus-within .ui-select-chevron {

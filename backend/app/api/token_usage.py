@@ -9,11 +9,13 @@ from app.core.database import get_async_session
 from app.schemas.token_usage import (
     TokenUsageChartPreset,
     TokenUsageChartRead,
+    TokenUsageVisualizationRead,
     TokenUsageFeatureFilter,
     TokenUsageRecordListRead,
 )
 from app.services.token_usage_records import (
     build_token_usage_chart,
+    build_token_usage_visualization,
     list_token_usage_records,
 )
 
@@ -60,6 +62,24 @@ async def get_chart(
             preset=preset,
             feature_type=feature_type,
             model_name=model_name,
+            start_at=start_at,
+            end_at=end_at,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/visualization", response_model=TokenUsageVisualizationRead)
+async def get_visualization(
+    preset: TokenUsageChartPreset = Query(default="last_24_hours"),
+    start_at: datetime | None = Query(default=None),
+    end_at: datetime | None = Query(default=None),
+    session: AsyncSession = Depends(get_async_session),
+) -> TokenUsageVisualizationRead:
+    try:
+        return await build_token_usage_visualization(
+            session,
+            preset=preset,
             start_at=start_at,
             end_at=end_at,
         )
