@@ -99,13 +99,21 @@ async def build_token_usage_chart(
         end_at=end_at,
         now=now,
     )
+    filter_start, filter_end = _resolve_chart_filter_range(
+        preset=preset,
+        start_at=start_at,
+        end_at=end_at,
+        range_start=range_start,
+        range_end=range_end,
+        granularity=granularity,
+    )
     candidates = await _list_all_candidate_records(session)
     records = _filter_records(
         candidates,
         feature_type=feature_type,
         model_name=model_name,
-        start_at=range_start,
-        end_at=range_end + _bucket_duration(granularity) - timedelta(microseconds=1),
+        start_at=filter_start,
+        end_at=filter_end,
     )
     bucket_totals = _aggregate_chart_buckets(records, granularity=granularity)
     buckets = [
@@ -151,15 +159,21 @@ async def build_token_usage_visualization(
         now=now,
     )
     candidates = await _list_all_candidate_records(session)
+    filter_start, filter_end = _resolve_chart_filter_range(
+        preset=preset,
+        start_at=start_at,
+        end_at=end_at,
+        range_start=chart.range_start,
+        range_end=chart.range_end,
+        granularity=chart.granularity,
+    )
     records = sorted(
         _filter_records(
             candidates,
             feature_type="all",
             model_name=None,
-            start_at=chart.range_start,
-            end_at=chart.range_end
-            + _bucket_duration(chart.granularity)
-            - timedelta(microseconds=1),
+            start_at=filter_start,
+            end_at=filter_end,
         ),
         key=lambda item: item.created_at,
         reverse=True,
@@ -532,6 +546,22 @@ def _resolve_chart_range(
         return _floor_hour(range_start), _floor_hour(range_end), "hour"
     return _floor_day(range_start), _floor_day(range_end), "day"
 
+
+
+def _resolve_chart_filter_range(
+    *,
+    preset: TokenUsageChartPreset,
+    start_at: datetime | None,
+    end_at: datetime | None,
+    range_start: datetime,
+    range_end: datetime,
+    granularity: TokenUsageChartGranularity,
+) -> tuple[datetime, datetime]:
+    if preset == "custom":
+        if start_at is None or end_at is None:
+            raise ValueError("自定义趋势图需要开始时间和结束时间")
+        return _as_utc_aware(start_at), _as_utc_aware(end_at)
+    return range_start, range_end + _bucket_duration(granularity) - timedelta(microseconds=1)
 
 def _aggregate_chart_buckets(
     records: list[TokenUsageRecordRead],

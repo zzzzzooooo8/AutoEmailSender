@@ -812,6 +812,32 @@ class TokenUsageRecordsServiceTests(unittest.TestCase):
         self.assertEqual(result.buckets[-1].bucket_label, "04-30")
         self.assertGreater(result.buckets[-1].input_tokens, 0)
 
+
+    def test_custom_chart_filters_by_exact_datetime_range(self) -> None:
+        self._run_async(self._seed_history_records())
+        start_at = datetime(2026, 4, 30, 10, 15, 0, tzinfo=UTC)
+        end_at = datetime(2026, 4, 30, 10, 45, 0, tzinfo=UTC)
+
+        async def run_query():
+            async with self.session_factory() as session:
+                from app.services.token_usage_records import build_token_usage_chart
+
+                return await build_token_usage_chart(
+                    session,
+                    feature_type="match_analysis",
+                    preset="custom",
+                    start_at=start_at,
+                    end_at=end_at,
+                    now=end_at,
+                )
+
+        result = self._run_async(run_query())
+
+        self.assertEqual(result.granularity, "hour")
+        self.assertEqual(len(result.buckets), 1)
+        self.assertEqual(result.buckets[0].bucket_label, "10:00")
+        self.assertEqual(result.buckets[0].total_tokens, 0)
+
     def test_api_returns_chart_buckets(self) -> None:
         self._run_async(self._seed_history_records())
 

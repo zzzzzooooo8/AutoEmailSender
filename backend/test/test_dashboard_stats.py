@@ -416,8 +416,33 @@ class DashboardStatsTests(unittest.TestCase):
 
         self.assertEqual(result.email.summary.sent_count, 1)
         self.assertEqual(result.email.summary.contacted_professor_count, 1)
-        self.assertEqual(result.email.summary.replied_count, 1)
-        self.assertEqual(result.email.summary.reply_rate, 1.0)
+        self.assertEqual(result.email.summary.replied_count, 0)
+        self.assertEqual(result.email.summary.reply_rate, 0.0)
+
+
+    def test_dashboard_service_excludes_replies_outside_date_range(self) -> None:
+        identity_id, llm_profile_id = self._run_async(self._seed_dashboard_data())
+        today = datetime.now(UTC).date()
+        start_date = (today - timedelta(days=3)).isoformat()
+        end_date = (today - timedelta(days=3)).isoformat()
+
+        async def run_query():
+            async with self.session_factory() as session:
+                return await build_dashboard_overview(
+                    session,
+                    identity_id=identity_id,
+                    llm_profile_id=llm_profile_id,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+
+        result = self._run_async(run_query())
+
+        self.assertEqual(result.email.summary.sent_count, 1)
+        self.assertEqual(result.email.summary.contacted_professor_count, 1)
+        self.assertEqual(result.email.summary.replied_count, 0)
+        self.assertEqual(result.email.summary.reply_rate, 0.0)
+        self.assertTrue(all(item.replied_count == 0 for item in result.email.trend_30_days))
 
     def test_dashboard_endpoint_returns_overview(self) -> None:
         identity_id, llm_profile_id = self._run_async(self._seed_dashboard_data())
@@ -512,7 +537,7 @@ class DashboardStatsTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, msg=response.text)
         payload = response.json()
         self.assertEqual(payload["email"]["summary"]["contacted_professor_count"], 1)
-        self.assertEqual(payload["email"]["summary"]["replied_count"], 1)
+        self.assertEqual(payload["email"]["summary"]["replied_count"], 0)
 
     def test_dashboard_endpoint_accepts_email_school_filters(self) -> None:
         identity_id, llm_profile_id = self._run_async(self._seed_dashboard_data())

@@ -397,6 +397,8 @@ async def _build_email_section(
     for log in received_logs:
         if log.professor_id is None or log.professor_id not in contacted_professor_ids:
             continue
+        if not _datetime_in_range(log.created_at, start_at=start_at, end_at=end_at):
+            continue
         replied_professor_ids.add(log.professor_id)
         received_trend_logs.append(log)
 
@@ -404,9 +406,12 @@ async def _build_email_section(
     for task in all_replied_tasks:
         if task.professor_id not in contacted_professor_ids:
             continue
+        if task.id in received_log_task_ids:
+            continue
+        if not _datetime_in_range(task.updated_at, start_at=start_at, end_at=end_at):
+            continue
         replied_professor_ids.add(task.professor_id)
-        if task.id not in received_log_task_ids:
-            replied_fallback_tasks.append(task)
+        replied_fallback_tasks.append(task)
 
     sent_count = len(sent_events)
     contacted_professor_count = len(contacted_professor_ids)
