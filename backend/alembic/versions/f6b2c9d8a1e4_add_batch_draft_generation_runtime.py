@@ -25,7 +25,7 @@ def upgrade() -> None:
             sa.Column(
                 "batch_draft_generation_concurrency",
                 sa.Integer(),
-                server_default=sa.text("3"),
+                server_default=sa.text("5"),
                 nullable=False,
             ),
         )

@@ -14,13 +14,13 @@ vi.mock("@/lib/api/runtimeSettings", () => ({
   },
   getRuntimeSettings: vi.fn(async () => ({
     match_analysis_job_worker_count: 1,
-    match_analysis_job_item_concurrency: 3,
+    match_analysis_job_item_concurrency: 5,
     match_analysis_job_interval_seconds: 10,
     crawler_worker_count: 2,
-    crawler_profile_enrichment_concurrency: 3,
+    crawler_profile_enrichment_concurrency: 5,
     crawler_host_concurrency: 1,
     draft_max_tokens: 6000,
-    batch_draft_generation_concurrency: 3,
+    batch_draft_generation_concurrency: 5,
     draft_rewrite_intensity: "moderate",
     draft_rewrite_tone: "polite",
     draft_rewrite_formality: "balanced",
@@ -52,17 +52,20 @@ describe("OtherSettingsCard", () => {
     render(<OtherSettingsCard />);
 
     fireEvent.click(screen.getByRole("button", { name: /其他设置/ }));
-    expect(await screen.findByLabelText("批量匹配分析并发数")).toHaveValue(3);
+    expect(await screen.findByLabelText("每个匹配任务同时分析导师数")).toHaveValue(5);
     expect(screen.getByLabelText("AI 草稿输出 token 上限")).toHaveValue(6000);
-    expect(screen.getByLabelText("批量邮件 LLM 草稿并发数")).toHaveValue(3);
+    expect(screen.getByLabelText("同时生成草稿数")).toHaveValue(5);
+    expect(screen.getByLabelText("同时运行的抓取任务数")).toHaveValue(2);
+    expect(screen.getByLabelText("每个抓取任务同时补全详情页数")).toHaveValue(5);
+    expect(screen.getByLabelText("同一网站同时抓取页数")).toHaveValue(1);
 
-    fireEvent.change(screen.getByLabelText("批量匹配分析并发数"), {
+    fireEvent.change(screen.getByLabelText("每个匹配任务同时分析导师数"), {
       target: { value: "4" },
     });
     fireEvent.change(screen.getByLabelText("AI 草稿输出 token 上限"), {
       target: { value: "4800" },
     });
-    fireEvent.change(screen.getByLabelText("批量邮件 LLM 草稿并发数"), {
+    fireEvent.change(screen.getByLabelText("同时生成草稿数"), {
       target: { value: "6" },
     });
     fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
@@ -79,18 +82,18 @@ describe("OtherSettingsCard", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "保存设置" })).toBeEnabled();
     });
-    expect(screen.getByLabelText("批量匹配分析并发数")).toHaveValue(4);
-    expect(screen.getByLabelText("批量邮件 LLM 草稿并发数")).toHaveValue(6);
+    expect(screen.getByLabelText("每个匹配任务同时分析导师数")).toHaveValue(4);
+    expect(screen.getByLabelText("同时生成草稿数")).toHaveValue(6);
   });
 
   it("falls back to the default batch draft concurrency when the setting is missing", async () => {
     const api = await import("@/lib/api/runtimeSettings");
     vi.mocked(api.getRuntimeSettings).mockResolvedValueOnce({
       match_analysis_job_worker_count: 1,
-      match_analysis_job_item_concurrency: 3,
+      match_analysis_job_item_concurrency: 5,
       match_analysis_job_interval_seconds: 10,
       crawler_worker_count: 2,
-      crawler_profile_enrichment_concurrency: 3,
+      crawler_profile_enrichment_concurrency: 5,
       crawler_host_concurrency: 1,
       draft_max_tokens: 6000,
       draft_rewrite_intensity: "moderate",
@@ -106,8 +109,8 @@ describe("OtherSettingsCard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /其他设置/ }));
 
-    expect(await screen.findByLabelText("批量邮件 LLM 草稿并发数")).toHaveValue(3);
-    expect(screen.getByRole("button", { name: /其他设置/ })).toHaveTextContent("草稿并发 3");
+    expect(await screen.findByLabelText("同时生成草稿数")).toHaveValue(5);
+    expect(screen.getByRole("button", { name: /其他设置/ })).toHaveTextContent("草稿 5");
     expect(screen.getByRole("button", { name: /其他设置/ })).not.toHaveTextContent("undefined");
   });
 

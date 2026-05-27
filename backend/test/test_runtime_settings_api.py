@@ -49,10 +49,10 @@ class RuntimeSettingsApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, msg=response.text)
         payload = response.json()
-        self.assertEqual(payload["match_analysis_job_item_concurrency"], 3)
+        self.assertEqual(payload["match_analysis_job_item_concurrency"], 5)
         self.assertEqual(payload["crawler_host_concurrency"], 1)
         self.assertEqual(payload["draft_max_tokens"], 6000)
-        self.assertEqual(payload["batch_draft_generation_concurrency"], 3)
+        self.assertEqual(payload["batch_draft_generation_concurrency"], 5)
         self.assertEqual(payload["draft_rewrite_intensity"], "moderate")
         self.assertEqual(payload["draft_rewrite_tone"], "polite")
         self.assertEqual(payload["draft_rewrite_formality"], "balanced")

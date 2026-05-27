@@ -31,7 +31,7 @@ class AppSetting(Base):
     match_analysis_job_item_concurrency: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
-        server_default=text("3"),
+        server_default=text("5"),
     )
     match_analysis_job_interval_seconds: Mapped[int] = mapped_column(
         Integer,
@@ -46,7 +46,7 @@ class AppSetting(Base):
     crawler_profile_enrichment_concurrency: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
-        server_default=text("3"),
+        server_default=text("5"),
     )
     crawler_host_concurrency: Mapped[int] = mapped_column(
         Integer,
@@ -61,7 +61,7 @@ class AppSetting(Base):
     batch_draft_generation_concurrency: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
-        server_default=text("3"),
+        server_default=text("5"),
     )
     draft_rewrite_intensity: Mapped[str] = mapped_column(
         String(32),

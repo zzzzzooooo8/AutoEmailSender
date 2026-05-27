@@ -41,19 +41,19 @@ const numberFields: Array<{
   },
   {
     key: "match_analysis_job_item_concurrency",
-    label: "批量匹配分析并发数",
-    hint: "单个批量匹配任务内同时分析的导师数量，保存后下一轮后端任务生效。",
+    label: "每个匹配任务同时分析导师数",
+    hint: "控制一个批量匹配任务里，最多同时分析几位导师；数值越大越快，也会占用更多 LLM 请求。保存后下一轮任务生效。",
     min: 1,
     max: 20,
-    defaultValue: 3,
+    defaultValue: 5,
   },
   {
     key: "batch_draft_generation_concurrency",
-    label: "批量邮件 LLM 草稿并发数",
-    hint: "后台批量生成 AI 草稿时同时执行的 LLM 请求数量，保存后下一轮任务生效。",
+    label: "同时生成草稿数",
+    hint: "批量生成邮件草稿时，最多同时生成几封。数值越大越快，也会占用更多 LLM 请求。保存后下一轮任务生效。",
     min: 1,
     max: 20,
-    defaultValue: 3,
+    defaultValue: 5,
   },
   {
     key: "match_analysis_job_interval_seconds",
@@ -66,8 +66,8 @@ const numberFields: Array<{
   },
   {
     key: "match_analysis_job_worker_count",
-    label: "批量匹配 Worker 数",
-    hint: "同时处理的批量匹配任务数量。",
+    label: "同时处理的匹配任务数",
+    hint: "控制后台最多同时跑几个批量匹配任务。通常保持 1；只有经常排队多个批量任务时再调高。保存后需重启生效。",
     min: 1,
     max: 8,
     defaultValue: 1,
@@ -75,8 +75,8 @@ const numberFields: Array<{
   },
   {
     key: "crawler_worker_count",
-    label: "智能抓取任务并发数",
-    hint: "同时运行的抓取任务数量。",
+    label: "同时运行的抓取任务数",
+    hint: "后台最多同时跑几个智能抓取任务。通常保持默认；抓取任务经常排队时再调高。保存后需重启生效。",
     min: 1,
     max: 8,
     defaultValue: 2,
@@ -84,16 +84,16 @@ const numberFields: Array<{
   },
   {
     key: "crawler_profile_enrichment_concurrency",
-    label: "详情页补全并发数",
-    hint: "单个抓取任务内同时补全的详情页数量，保存后下一轮抓取生效。",
+    label: "每个抓取任务同时补全详情页数",
+    hint: "控制一个抓取任务里，最多同时打开几位导师的详情页补全信息。数值越大越快，也更容易触发网站限制。保存后下一轮抓取生效。",
     min: 1,
     max: 20,
-    defaultValue: 3,
+    defaultValue: 5,
   },
   {
     key: "crawler_host_concurrency",
-    label: "同站点抓取并发数",
-    hint: "同一域名同时抓取的详情页数量，建议保持 1。",
+    label: "同一网站同时抓取页数",
+    hint: "限制同一个网站最多同时抓取几个页面。建议保持 1，避免访问过快被目标网站限制。",
     min: 1,
     max: 8,
     defaultValue: 1,
@@ -239,13 +239,13 @@ export function OtherSettingsCard() {
   }, [loadStartupStatus, open, startupLoading, startupStatus]);
 
   const summary = useMemo(() => {
-    const matchConcurrency = form.match_analysis_job_item_concurrency || "3";
-    const crawlConcurrency = form.crawler_profile_enrichment_concurrency || "3";
+    const matchConcurrency = form.match_analysis_job_item_concurrency || "5";
+    const crawlConcurrency = form.crawler_profile_enrichment_concurrency || "5";
     const draftMaxTokens = form.draft_max_tokens || "6000";
-    const draftConcurrency = form.batch_draft_generation_concurrency || "3";
+    const draftConcurrency = form.batch_draft_generation_concurrency || "5";
     const draftMode =
       getPreferenceOptionLabel("draft_rewrite_intensity", form.draft_rewrite_intensity) || "默认";
-    return `草稿 ${draftMaxTokens} / 草稿并发 ${draftConcurrency} / 偏好 ${draftMode} / 匹配 ${matchConcurrency} / 抓取 ${crawlConcurrency}`;
+    return `草稿 ${draftMaxTokens} / 同时生成草稿 ${draftConcurrency} / 偏好 ${draftMode} / 匹配导师 ${matchConcurrency} / 补全详情页 ${crawlConcurrency}`;
   }, [form]);
   const draftPreview = useMemo(() => buildDraftPreferencePreview(form), [form]);
 
@@ -334,7 +334,7 @@ export function OtherSettingsCard() {
             </span>
           </div>
           <p className="mt-2 text-sm leading-6 text-stone-600">
-            调整 AI 草稿 token 上限、改写偏好、批量匹配和智能抓取的并发限制。
+            调整 AI 草稿上限、改写偏好，以及批量匹配、草稿生成和智能抓取的同时处理数量。
           </p>
         </div>
         <ChevronDown

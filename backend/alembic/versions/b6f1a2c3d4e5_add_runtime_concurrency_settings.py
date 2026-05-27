@@ -33,7 +33,7 @@ def upgrade() -> None:
             sa.Column(
                 "match_analysis_job_item_concurrency",
                 sa.Integer(),
-                server_default=sa.text("3"),
+                server_default=sa.text("5"),
                 nullable=False,
             ),
         )
@@ -57,7 +57,7 @@ def upgrade() -> None:
             sa.Column(
                 "crawler_profile_enrichment_concurrency",
                 sa.Integer(),
-                server_default=sa.text("3"),
+                server_default=sa.text("5"),
                 nullable=False,
             ),
         )
