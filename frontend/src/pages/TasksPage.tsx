@@ -1501,7 +1501,19 @@ const selectedCrawlJobCanReview =
     }
   };
 
+  const ensureSelectedLlmProfile = () => {
+    if (selectedLlmProfileId !== null) {
+      return selectedLlmProfileId;
+    }
+    notifyError("请先选择模型配置", "请选择一个 LLM Profile 后再继续操作。");
+    return null;
+  };
+
   const handleResumeCrawlJob = async (jobId: number) => {
+    const llmProfileId = ensureSelectedLlmProfile();
+    if (llmProfileId === null) {
+      return;
+    }
     const diagnosticData = { jobId };
     safeRecordUserAction({
       eventName: "tasks.crawl_job_resume_submitted",
@@ -1509,7 +1521,7 @@ const selectedCrawlJobCanReview =
     });
     setResumingCrawlJobId(jobId);
     try {
-      await resumeCrawlJob(jobId);
+      await resumeCrawlJob(jobId, llmProfileId);
       safeRecordUserAction({
         eventName: "tasks.crawl_job_resume_succeeded",
         data: diagnosticData,
@@ -1572,6 +1584,11 @@ const selectedCrawlJobCanReview =
   };
 
   const handleRetryCrawlJob = async (jobId: number) => {
+    const llmProfileId = ensureSelectedLlmProfile();
+    if (llmProfileId === null) {
+      return;
+    }
+
     const confirmed = await confirm({
       title: "确认重新抓取任务？",
       description:
@@ -1590,7 +1607,10 @@ const selectedCrawlJobCanReview =
     });
     setRetryingCrawlJobId(jobId);
     try {
-      await retryCrawlJob(jobId, { clear_existing_data: true });
+      await retryCrawlJob(jobId, {
+        clear_existing_data: true,
+        llmProfileId,
+      });
       safeRecordUserAction({
         eventName: "tasks.crawl_job_retry_succeeded",
         data: diagnosticData,
@@ -1764,11 +1784,17 @@ const selectedCrawlJobCanReview =
       return;
     }
 
+    const llmProfileId = ensureSelectedLlmProfile();
+    if (llmProfileId === null) {
+      return;
+    }
+
     setCrawlJobEnrichLoading(true);
     try {
       const result = await enrichCrawlCandidates(
         selectedCrawlJobId,
         selectedReviewableCrawlCandidateIds,
+        llmProfileId,
       );
       notifySuccess("候选信息补全完成", result.message);
       await loadCrawlJobs({ showLoading: false });

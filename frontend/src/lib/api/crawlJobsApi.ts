@@ -52,10 +52,17 @@ export const approveCrawlCandidates = (jobId: number, candidateIds: number[]) =>
     body: JSON.stringify({ candidate_ids: candidateIds }),
   });
 
-export const enrichCrawlCandidates = (jobId: number, candidateIds: number[]) =>
+export const enrichCrawlCandidates = (
+  jobId: number,
+  candidateIds: number[],
+  llmProfileId?: number | null,
+) =>
   apiFetch<CrawlJobEnrichResultDTO>(`/api/crawl-jobs/${jobId}/enrich`, {
     method: 'POST',
-    body: JSON.stringify({ candidate_ids: candidateIds }),
+    body: JSON.stringify({
+      candidate_ids: candidateIds,
+      llm_profile_id: llmProfileId ?? undefined,
+    }),
   });
 
 export const cancelCrawlJob = (jobId: number) =>
@@ -68,15 +75,19 @@ export const pauseCrawlJob = (jobId: number) =>
     method: 'POST',
   });
 
-export const resumeCrawlJob = (jobId: number) =>
+export const resumeCrawlJob = (jobId: number, llmProfileId?: number | null) =>
   apiFetch<CrawlJobDTO>(`/api/crawl-jobs/${jobId}/resume`, {
     method: 'POST',
+    body: JSON.stringify({ llm_profile_id: llmProfileId ?? undefined }),
   });
 
 export const retryCrawlJob = (jobId: number, payload: CrawlJobRetryPayloadDTO) =>
   apiFetch<CrawlJobDTO>(`/api/crawl-jobs/${jobId}/retry`, {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      clear_existing_data: payload.clear_existing_data,
+      llm_profile_id: payload.llmProfileId ?? undefined,
+    }),
   });
 
 export const resumeCrawlJobReview = (jobId: number) =>

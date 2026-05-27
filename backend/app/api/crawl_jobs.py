@@ -34,6 +34,7 @@ from app.schemas.crawl_job import (
     CrawlJobSummaryRead,
     CrawlPageRead,
     CrawlJobRetryPayload,
+    CrawlJobResumePayload,
 )
 from app.services.crawl_job_events import build_crawl_job_events, normalize_agent_trace_event
 from app.services.crawl_job_metrics import build_crawl_job_metrics
@@ -343,6 +344,53 @@ async def approve_crawl_candidates(
     )
 
 
+async def _resolve_and_refresh_crawl_job_llm_profile(
+    session: AsyncSession,
+    job: CrawlJob,
+    requested_llm_profile_id: int | None,
+    *,
+    trigger: str,
+) -> LLMProfile:
+    old_profile: LLMProfile | None = None
+    if job.llm_profile_id is not None:
+        old_profile = await session.get(LLMProfile, job.llm_profile_id)
+
+    if requested_llm_profile_id is not None:
+        llm_profile = await session.get(LLMProfile, requested_llm_profile_id)
+        if llm_profile is None:
+            raise HTTPException(status_code=404, detail="模型配置不存在")
+    elif old_profile is not None:
+        llm_profile = old_profile
+    else:
+        llm_profile = await session.scalar(
+            select(LLMProfile)
+            .where(LLMProfile.is_default.is_(True))
+            .order_by(LLMProfile.created_at.asc(), LLMProfile.id.asc())
+            .limit(1),
+        )
+        if llm_profile is None:
+            raise HTTPException(status_code=409, detail="请先配置可用的 LLM Profile")
+
+    if job.llm_profile_id != llm_profile.id:
+        await record_operation_log(
+            session,
+            category="crawler",
+            event_name="crawl_job.llm_profile_refreshed",
+            entity_type="crawl_job",
+            entity_id=str(job.id),
+            metadata={
+                "old_llm_profile_id": job.llm_profile_id,
+                "old_model_name": old_profile.model_name if old_profile is not None else None,
+                "new_llm_profile_id": llm_profile.id,
+                "new_model_name": llm_profile.model_name,
+                "trigger": trigger,
+            },
+        )
+        job.llm_profile_id = llm_profile.id
+
+    return llm_profile
+
+
 @router.post("/{job_id}/enrich", response_model=CrawlJobEnrichResult)
 async def enrich_crawl_candidates(
     job_id: int,
@@ -361,18 +409,12 @@ async def enrich_crawl_candidates(
     if not payload.candidate_ids:
         raise HTTPException(status_code=400, detail="请至少选择一位候选导师")
 
-    llm_profile: LLMProfile | None = None
-    if job.llm_profile_id is not None:
-        llm_profile = await session.get(LLMProfile, job.llm_profile_id)
-    if llm_profile is None:
-        llm_profile = await session.scalar(
-            select(LLMProfile)
-            .where(LLMProfile.is_default.is_(True))
-            .order_by(LLMProfile.created_at.asc(), LLMProfile.id.asc())
-            .limit(1),
-        )
-    if llm_profile is None:
-        raise HTTPException(status_code=409, detail="请先配置可用的 LLM Profile")
+    llm_profile = await _resolve_and_refresh_crawl_job_llm_profile(
+        session,
+        job,
+        payload.llm_profile_id,
+        trigger="enrich",
+    )
 
     now = datetime.now(UTC)
     job.status = CrawlJobStatus.RUNNING.value
@@ -542,11 +584,20 @@ async def pause_crawl_job(
 @router.post("/{job_id}/resume", response_model=CrawlJobRead)
 async def resume_crawl_job(
     job_id: int,
+    payload: CrawlJobResumePayload | None = None,
     session: AsyncSession = Depends(get_async_session),
 ) -> CrawlJob:
     job = await _get_crawl_job_or_404(session, job_id)
     if job.status != CrawlJobStatus.PAUSED.value:
         raise HTTPException(status_code=409, detail="仅允许继续已暂停的抓取任务")
+
+    if payload is not None and payload.llm_profile_id is not None:
+        await _resolve_and_refresh_crawl_job_llm_profile(
+            session,
+            job,
+            payload.llm_profile_id,
+            trigger="resume",
+        )
 
     now = datetime.now(UTC)
     job.status = CrawlJobStatus.QUEUED.value
@@ -590,6 +641,14 @@ async def retry_crawl_job(
             delete(CrawlPage).where(CrawlPage.job_id == job.id),
         )
         job.agent_trace = []
+
+    if payload.llm_profile_id is not None:
+        await _resolve_and_refresh_crawl_job_llm_profile(
+            session,
+            job,
+            payload.llm_profile_id,
+            trigger="retry",
+        )
 
     now = datetime.now(UTC)
     job.status = CrawlJobStatus.QUEUED.value
