@@ -1509,7 +1509,7 @@ const selectedCrawlJobCanReview =
     });
     setResumingCrawlJobId(jobId);
     try {
-      await resumeCrawlJob(jobId);
+      await resumeCrawlJob(jobId, selectedLlmProfileId);
       safeRecordUserAction({
         eventName: "tasks.crawl_job_resume_succeeded",
         data: diagnosticData,
@@ -1590,7 +1590,10 @@ const selectedCrawlJobCanReview =
     });
     setRetryingCrawlJobId(jobId);
     try {
-      await retryCrawlJob(jobId, { clear_existing_data: true });
+      await retryCrawlJob(jobId, {
+        clear_existing_data: true,
+        llmProfileId: selectedLlmProfileId,
+      });
       safeRecordUserAction({
         eventName: "tasks.crawl_job_retry_succeeded",
         data: diagnosticData,
@@ -1769,6 +1772,7 @@ const selectedCrawlJobCanReview =
       const result = await enrichCrawlCandidates(
         selectedCrawlJobId,
         selectedReviewableCrawlCandidateIds,
+        selectedLlmProfileId,
       );
       notifySuccess("候选信息补全完成", result.message);
       await loadCrawlJobs({ showLoading: false });

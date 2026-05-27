@@ -119,7 +119,11 @@ class CrawlJobRead(BaseModel):
 
 class CrawlJobRetryPayload(BaseModel):
     clear_existing_data: bool = True
+    llm_profile_id: int | None = None
 
+
+class CrawlJobResumePayload(BaseModel):
+    llm_profile_id: int | None = None
 
 class CrawlJobSummaryRead(CrawlJobRead):
     page_count: int = 0
@@ -243,6 +247,7 @@ class CrawlJobApproveResult(BaseModel):
 
 class CrawlJobEnrichPayload(BaseModel):
     candidate_ids: list[int]
+    llm_profile_id: int | None = None
 
 
 class CrawlJobEnrichResult(BaseModel):

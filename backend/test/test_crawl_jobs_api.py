@@ -459,6 +459,82 @@ class CrawlJobsApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 409)
 
+    def test_resume_accepts_llm_profile_id_payload(self) -> None:
+        old_profile_id = self._create_llm_profile("旧模型", "old-model")
+        new_profile_id = self._create_llm_profile("新模型", "new-model")
+        create_response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "llm_profile_id": old_profile_id,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        job_id = create_response.json()["id"]
+        self._set_job_status(job_id, "paused")
+
+        response = self.client.post(
+            f"/api/crawl-jobs/{job_id}/resume",
+            json={"llm_profile_id": new_profile_id},
+        )
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+    def test_resume_refreshes_job_llm_profile_before_queueing(self) -> None:
+        old_profile_id = self._create_llm_profile("旧模型", "old-model")
+        new_profile_id = self._create_llm_profile("新模型", "new-model")
+        create_response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "llm_profile_id": old_profile_id,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        job_id = create_response.json()["id"]
+        self._set_job_status(job_id, "paused")
+
+        response = self.client.post(
+            f"/api/crawl-jobs/{job_id}/resume",
+            json={"llm_profile_id": new_profile_id},
+        )
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        self.assertEqual(response.json()["llm_profile_id"], new_profile_id)
+        self.assertEqual(self._get_job_llm_profile_id(job_id), new_profile_id)
+
+    def test_resume_model_refresh_records_operation_log(self) -> None:
+        old_profile_id = self._create_llm_profile("旧模型", "old-model")
+        new_profile_id = self._create_llm_profile("新模型", "new-model")
+        create_response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "llm_profile_id": old_profile_id,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        job_id = create_response.json()["id"]
+        self._set_job_status(job_id, "paused")
+
+        response = self.client.post(
+            f"/api/crawl-jobs/{job_id}/resume",
+            json={"llm_profile_id": new_profile_id},
+        )
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        logs = self._list_operation_logs("crawl_job.llm_profile_refreshed", str(job_id))
+        self.assertEqual(len(logs), 1)
+        self.assertEqual(logs[0]["metadata"]["old_llm_profile_id"], old_profile_id)
+        self.assertEqual(logs[0]["metadata"]["old_model_name"], "old-model")
+        self.assertEqual(logs[0]["metadata"]["new_llm_profile_id"], new_profile_id)
+        self.assertEqual(logs[0]["metadata"]["new_model_name"], "new-model")
+        self.assertEqual(logs[0]["metadata"]["trigger"], "resume")
     def test_paused_crawl_job_can_be_canceled(self) -> None:
         create_response = self.client.post(
             "/api/crawl-jobs",
@@ -482,6 +558,100 @@ class CrawlJobsApiTests(unittest.TestCase):
         self.assertEqual(runs[0]["status"], "canceled")
         self.assertIsNotNone(runs[0]["finished_at"])
 
+    def test_retry_refreshes_job_llm_profile_before_queueing(self) -> None:
+        old_profile_id = self._create_llm_profile("旧模型", "old-model")
+        new_profile_id = self._create_llm_profile("新模型", "new-model")
+        create_response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "llm_profile_id": old_profile_id,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        job_id = create_response.json()["id"]
+        self._set_job_status(job_id, "failed")
+
+        response = self.client.post(
+            f"/api/crawl-jobs/{job_id}/retry",
+            json={"clear_existing_data": False, "llm_profile_id": new_profile_id},
+        )
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        self.assertEqual(response.json()["llm_profile_id"], new_profile_id)
+        self.assertEqual(self._get_job_llm_profile_id(job_id), new_profile_id)
+        logs = self._list_operation_logs("crawl_job.llm_profile_refreshed", str(job_id))
+        self.assertEqual(logs[-1]["metadata"]["trigger"], "retry")
+
+    def test_enrich_refreshes_job_llm_profile_before_running(self) -> None:
+        old_profile_id = self._create_llm_profile("旧模型", "old-model")
+        new_profile_id = self._create_llm_profile("新模型", "new-model")
+        create_response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "llm_profile_id": old_profile_id,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        job_id = create_response.json()["id"]
+        self._set_job_status(job_id, "needs_review")
+        self._seed_candidate(job_id, name="王老师", profile_url="https://example.edu/wang")
+        candidate_id = self._latest_candidate_id(job_id)
+
+        from app.services.crawl_job_runtime import SelectedCandidateEnrichmentSummary
+
+        async def fake_enrich_selected_crawl_candidates(*args: object, **kwargs: object) -> SelectedCandidateEnrichmentSummary:
+            llm_profile = kwargs["llm_profile"]
+            self.assertEqual(llm_profile.id, new_profile_id)
+            return SelectedCandidateEnrichmentSummary(
+                selected_count=1,
+                enriched_count=1,
+                unchanged_count=0,
+                failed_count=0,
+            )
+
+        with patch(
+            "app.api.crawl_jobs.enrich_selected_crawl_candidates",
+            new=fake_enrich_selected_crawl_candidates,
+        ):
+            response = self.client.post(
+                f"/api/crawl-jobs/{job_id}/enrich",
+                json={"candidate_ids": [candidate_id], "llm_profile_id": new_profile_id},
+            )
+
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        self.assertEqual(self._get_job_llm_profile_id(job_id), new_profile_id)
+        logs = self._list_operation_logs("crawl_job.llm_profile_refreshed", str(job_id))
+        self.assertEqual(logs[-1]["metadata"]["trigger"], "enrich")
+
+    def test_enrich_rejects_missing_requested_llm_profile(self) -> None:
+        profile_id = self._create_llm_profile("旧模型", "old-model")
+        create_response = self.client.post(
+            "/api/crawl-jobs",
+            json={
+                "university": "示例大学",
+                "school": "计算机学院",
+                "start_url": "https://example.edu/faculty",
+                "llm_profile_id": profile_id,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, msg=create_response.text)
+        job_id = create_response.json()["id"]
+        self._set_job_status(job_id, "needs_review")
+
+        response = self.client.post(
+            f"/api/crawl-jobs/{job_id}/enrich",
+            json={"candidate_ids": [999], "llm_profile_id": 999999},
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"], "模型配置不存在")
+        self.assertEqual(self._get_job_llm_profile_id(job_id), profile_id)
     def test_retry_crawl_job_creates_new_run(self) -> None:
         create_response = self.client.post(
             "/api/crawl-jobs",
@@ -1127,6 +1297,93 @@ class CrawlJobsApiTests(unittest.TestCase):
 
         return asyncio.run(_count())
 
+    def _seed_candidate(self, job_id: int, *, name: str, profile_url: str) -> None:
+        import sqlite3
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            connection.execute(
+                """
+                INSERT INTO crawl_candidates (
+                    job_id, name, profile_url, confidence, review_status, created_at, updated_at
+                ) VALUES (?, ?, ?, 0.9, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """,
+                (job_id, name, profile_url),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    def _latest_candidate_id(self, job_id: int) -> int:
+        import sqlite3
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            row = connection.execute(
+                "SELECT id FROM crawl_candidates WHERE job_id = ? ORDER BY id DESC LIMIT 1",
+                (job_id,),
+            ).fetchone()
+            self.assertIsNotNone(row)
+            return int(row[0])
+        finally:
+            connection.close()
+    def _get_job_llm_profile_id(self, job_id: int) -> int | None:
+        import sqlite3
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            row = connection.execute(
+                "SELECT llm_profile_id FROM crawl_jobs WHERE id = ?",
+                (job_id,),
+            ).fetchone()
+            return None if row is None else row[0]
+        finally:
+            connection.close()
+
+    def _list_operation_logs(self, event_name: str, entity_id: str) -> list[dict[str, object]]:
+        import json
+        import sqlite3
+
+        connection = sqlite3.connect(self.db_path)
+        connection.row_factory = sqlite3.Row
+        try:
+            rows = connection.execute(
+                """
+                SELECT event_name, entity_id, metadata
+                FROM operation_logs
+                WHERE event_name = ? AND entity_id = ?
+                ORDER BY id ASC
+                """,
+                (event_name, entity_id),
+            ).fetchall()
+            return [
+                {
+                    "event_name": row["event_name"],
+                    "entity_id": row["entity_id"],
+                    "metadata": json.loads(row["metadata"]),
+                }
+                for row in rows
+            ]
+        finally:
+            connection.close()
+    def _create_llm_profile(self, name: str, model_name: str) -> int:
+        response = self.client.post(
+            "/api/llm-profiles",
+            json={
+                "name": name,
+                "provider": "openai",
+                "api_base_url": "https://api.example.com/v1",
+                "api_key": "test-key",
+                "model_name": model_name,
+                "matcher_prompt_template": None,
+                "writer_prompt_template": None,
+                "temperature": 0.2,
+                "max_tokens": None,
+                "is_default": False,
+            },
+        )
+        self.assertEqual(response.status_code, 201, msg=response.text)
+        return int(response.json()["id"])
     def _set_job_status(self, job_id: int, status: str) -> None:
         async def _set_status() -> None:
             from app.core.database import get_session_factory

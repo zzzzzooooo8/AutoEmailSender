@@ -423,6 +423,7 @@ export interface CrawlJobEnrichResultDTO {
 
 export interface CrawlJobRetryPayloadDTO {
   clear_existing_data: boolean;
+  llmProfileId?: number | null;
 }
 
 export interface CreateBatchTaskRequestDTO {

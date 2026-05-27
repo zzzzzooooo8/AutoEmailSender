@@ -371,6 +371,7 @@ describe("TasksPage crawl job action copy", () => {
     await waitFor(() => {
       expect(apiMocks.retryCrawlJob).toHaveBeenCalledWith(9, {
         clear_existing_data: true,
+        llmProfileId: 2,
       });
     });
     expect(notificationMocks.notifySuccess).toHaveBeenCalledWith(
